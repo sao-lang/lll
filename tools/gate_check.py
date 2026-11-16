@@ -22,7 +22,7 @@ PY = sys.executable
 MODULES = {
     "m1": {
         "title": "M1 核心运行时", "pkg": "agentkit.runtime", "path": "runtime",
-        "doc": "docs/M1-核心运行时.md", "demo": "demos/demo_m1.py", "coverage": 90,
+        "doc": "docs/02-模块详设/M1-核心运行时.md", "demo": "demos/demo_m1.py", "coverage": 90,
         "symbols": ["Effect", "EffectKind", "AgentState", "Budgets", "Result", "Runner",
                     "Session", "Event", "fold", "fingerprint", "checkpoint"],
         "behavior": ["test_determinism.py", "test_replay.py", "test_budgets.py", "test_batch.py"],
@@ -30,14 +30,14 @@ MODULES = {
     },
     "m2": {
         "title": "M2 链路系统", "pkg": "agentkit.chains", "path": "chains",
-        "doc": "docs/M2-链路系统.md", "demo": "demos/demo_m2.py", "coverage": 90,
+        "doc": "docs/02-模块详设/M2-链路系统.md", "demo": "demos/demo_m2.py", "coverage": 90,
         "symbols": ["Chains", "MountPoint", "Verdict", "ChainCtx", "ChainEvent", "DispatchResult"],
         "behavior": ["test_verdict.py", "test_trace.py", "test_hooks.py"],
         "integration": ["test_chains.py", "test_freeze.py"],
     },
     "m3": {
         "title": "M3 端口协议层", "pkg": "agentkit.ports", "path": "ports",
-        "doc": "docs/M3-端口协议层.md", "demo": "demos/demo_m3.py", "coverage": 85,
+        "doc": "docs/02-模块详设/M3-端口协议层.md", "demo": "demos/demo_m3.py", "coverage": 85,
         "symbols": ["PortRegistry", "PortCtx", "LLMRequest", "LLMResponse", "ToolCall",
                     "ToolResult", "ToolSpec", "make_call", "PORT_PROTOCOLS"],
         "behavior": ["test_errors.py", "test_registry.py", "test_ports.py"],
@@ -45,7 +45,7 @@ MODULES = {
     },
     "m4": {
         "title": "M4 工具系统", "pkg": "agentkit.harness.tools", "path": "harness/tools",
-        "doc": "docs/M4-工具系统.md", "demo": "demos/demo_m4.py", "coverage": 85,
+        "doc": "docs/02-模块详设/M4-工具系统.md", "demo": "demos/demo_m4.py", "coverage": 85,
         "symbols": ["tool", "ToolRegistry", "ToolIndex", "MCPManager", "DangerLevel",
                     "SandboxPolicy", "ToolDefinitionError"],
         "behavior": ["test_decorator.py", "test_index.py", "test_routing.py"],

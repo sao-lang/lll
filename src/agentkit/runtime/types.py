@@ -1,6 +1,6 @@
 """M1 公共类型层（全框架唯一自包含的类型来源）。
 
-契约纪律（见 docs/M1-核心运行时.md §4）：
+契约纪律（见 docs/02-模块详设/M1-核心运行时.md §4）：
 - 本模块不 import 任何具体 IO / pydantic / 其他模块实现。
 - M2 / M3 / M4 只允许 import 本文件；跨模块共享的信封（Result / Usage / PortError）
   定义在这里，由 M3 的 DTO 层 re-export，这样 M1 可以独立闭环测试。
