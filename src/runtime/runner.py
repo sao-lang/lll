@@ -3,29 +3,38 @@
 链路顺序（M1 §2）：预算预检 → 驱动 generator → batch 展开 → dispatch(M2) →
 call(M3) → fold 纯函数回填 → 事件溯源 → checkpoint → 继续 / 挂起 / 结束。
 
-依赖注入：dispatch / call / store / ctx_factory 全部可替换为 fake，因此 M1 能独立闭环。
+依赖注入：dispatch / call / store / ctx_factory 均可替换；store 未注入时使用内置内存实现，
+因此 M1 无需外部服务即可独立闭环。
 协作约定：标准集成下 M2 在洋葱中心调用 `ctx.invoke`（即 M3 的 call）；
-若 dispatch 只做判决、未产出 data，Runner 兜底直接调用 call（fake dispatch 场景）。
+若 dispatch 只做判决、未产出 data，Runner 兜底直接调用 call（最小 dispatch 场景）。
 """
 from __future__ import annotations
 
 import asyncio
 import inspect
-from dataclasses import dataclass, field, replace
-from typing import Any, Callable
+from collections.abc import Callable
+from dataclasses import dataclass, replace
 
-from .errors import AgentKitError, BudgetExceeded, PortMissing, ProgramCrashed, ProgramInvalid
+from .errors import (
+    AgentKitError,
+    PortMissing,
+    ProgramCrashed,
+    ProgramInvalid,
+)
 from .fold import fold, replay_events
-from .interpreter import EffectBatch, InterpreterImpl
+from .interpreter import EffectBatch, InterpreterImpl, SendResult
 from .types import (
     DONE,
     AgentState,
     CallFn,
     DispatchFn,
+    DynamicValue,
     Effect,
     EffectKind,
     Event,
     EventStore,
+    JsonSnapshot,
+    Program,
     Result,
     RunResult,
     RuntimeCtx,
@@ -36,52 +45,67 @@ from .types import (
     restore_checkpoint,
 )
 
-__all__ = ["Runner", "InMemoryEventStore"]
+__all__ = ["InMemoryEventStore", "Runner"]
 
 
 class InMemoryEventStore(EventStore):
-    """M1 自带 fake：内存 checkpoint 存储（M7 提供真实持久化）。"""
+    """M1 内置默认 checkpoint 存储：进程内存字典（M7 提供持久化实现）。"""
 
     def __init__(self) -> None:
-        self.snapshots: dict[str, dict[str, Any]] = {}
+        self.snapshots: dict[str, JsonSnapshot] = {}  # session_id → 快照
 
-    def save(self, session_id: str, snapshot: dict[str, Any]) -> None:
+    def save(self, session_id: str, snapshot: JsonSnapshot) -> None:
+        """把快照按会话 id 存入内存字典。"""
         self.snapshots[session_id] = snapshot
 
-    def load(self, session_id: str) -> dict[str, Any] | None:
+    def load(self, session_id: str) -> JsonSnapshot | None:
+        """按会话 id 读取快照；不存在返回 None。"""
         return self.snapshots.get(session_id)
 
 
 @dataclass
 class _Runtime:
-    interpreter: InterpreterImpl
-    last_value: Any = None
-    step: int = 0
+    """单个会话在 Runner 内的可变执行态（与 Session 分离，便于重放重建）。"""
+
+    interpreter: InterpreterImpl  # 驱动 program 的解释器
+    last_value: DynamicValue = None  # 下一步要 send 回 program 的上次结果
+    step: int = 0  # 已执行的 step 计数
 
 
-def _send_value(event: Event) -> Any:
-    """把事件里的 Result 信封还原成 Program 当初 send 收到的值。"""
+def _send_value(event: Event) -> DynamicValue:
+    """把事件里的 Result 信封还原成 Program 当初 send 收到的值。
+
+    成功取 data，失败保留整个 Result（让 program 能读到 error）；批量事件返回列表。
+    """
     values = [r.data if r.ok else r for r in event.results]
     if event.batched:
         return values
     return values[0] if values else None
 
 
-async def _maybe_await(value: Any) -> Any:
+async def _maybe_await(value: DynamicValue) -> DynamicValue:
+    """统一等待：dispatch / call 既可是同步值也可是 awaitable，这里抹平差异。"""
     return await value if inspect.isawaitable(value) else value
 
 
 class Runner:
+    """唯一的 async IO 编排点；所有可替换依赖走构造注入，M1 可独立闭环。"""
+
     def __init__(
         self,
         dispatch: DispatchFn,
         call: CallFn,
         *,
         store: EventStore | None = None,
-        ctx_factory: Callable[[Effect, Session], Any] | None = None,
+        ctx_factory: Callable[[Effect, Session], DynamicValue] | None = None,
         checkpoint_every: int = 1,
         max_steps: int = 1000,
     ) -> None:
+        """装配 Runner：dispatch（M2 判决）与 call（M3 调用）为必注入函数。
+
+        ctx_factory 默认产出 RuntimeCtx；M2 可换成 ChainCtx（字段超集）。
+        checkpoint_every 控制快照频率；max_steps 是 run 的硬步数上限。
+        """
         self._dispatch = dispatch
         self._call = call
         self._store = store or InMemoryEventStore()
@@ -92,14 +116,15 @@ class Runner:
         )
         self._checkpoint_every = max(1, checkpoint_every)
         self._max_steps = max_steps
-        self._runtimes: dict[str, _Runtime] = {}
-        self._reasons: dict[str, str] = {}
-        self._errors: dict[str, str | None] = {}
+        self._runtimes: dict[str, _Runtime] = {}  # session_id → 执行态
+        self._reasons: dict[str, str] = {}  # session_id → 最近一次状态迁移原因
+        self._errors: dict[str, str | None] = {}  # session_id → 最近一次错误码
 
     # ------------------------------------------------------------------ #
     # 内部：运行时状态 / 重放 / 单 Effect 执行
     # ------------------------------------------------------------------ #
     def _runtime(self, session: Session) -> _Runtime:
+        """取（或懒建）会话执行态；首次创建时用工厂重建 generator 并回放事件到断点。"""
         rt = self._runtimes.get(session.session_id)
         if rt is None:
             rt = _Runtime(InterpreterImpl(session.program_factory()))
@@ -107,7 +132,7 @@ class Runner:
             self._replay(session, rt)
         return rt
 
-    def _replay(self, session: Session, rt: _Runtime, answer: Any = None) -> None:
+    def _replay(self, session: Session, rt: _Runtime, answer: DynamicValue = None) -> None:
         """从事件日志把新建 generator 推进到断点（Program 纯函数 ⇒ 轨迹必然一致）。
 
         事件 i 记录「产出 effects_i + 结果 v_i」；要让 generator 停在最后一个 yield 处，
@@ -132,17 +157,24 @@ class Runner:
             rt.last_value = None
 
     @staticmethod
-    def _bind(ctx: Any, runner: "Runner") -> Any:
-        """让链路的洋葱中心能调用 M3 的 call（M2 不 import M3）。"""
+    def _bind(ctx: DynamicValue, runner: Runner) -> DynamicValue:
+        """给上下文注入 invoke 回调，让链路的洋葱中心能调用 M3 的 call（M2 不 import M3）。"""
         ctx.invoke = lambda effect, c: runner._call(effect, c)
         return ctx
 
-    async def _execute(self, effect: Effect, ctx: Any, session: Session) -> tuple[Result, tuple[Event, ...]]:
+    async def _execute(
+        self, effect: Effect, ctx: DynamicValue, session: Session
+    ) -> tuple[Result, tuple[Event, ...]]:
+        """执行单个 Effect，返回 Result 与子会话事件。
+
+        判决优先级：dispatch 返回 None → Runner 自调 call；返回 Result → 直接用；
+        返回带 abort/verdict/data 的判决对象 → 分别折叠；任何异常 → 错误信封。
+        """
         if effect.kind is EffectKind.CHILD:
             return await self._child(effect, session)
         try:
             outcome = await _maybe_await(self._dispatch(effect, ctx))
-            if outcome is None:  # 最小 / fake dispatch：Runner 自己调 call
+            if outcome is None:  # 最小 dispatch：未产出 data 时 Runner 自己调 call
                 return await _maybe_await(self._call(effect, ctx)), ()
             if isinstance(outcome, Result):
                 return outcome, ()
@@ -158,18 +190,18 @@ class Runner:
             return await _maybe_await(self._call(effect, ctx)), ()
         except AgentKitError as exc:
             return Result.failure(exc.code, str(exc)), ()
-        except Exception as exc:  # 异常绝不抛穿运行时，交 M2 回程 filter / StepReport
+        except Exception as exc:  # 异常绝不抛穿运行时，交 M2 回程 filter / StepReport  # noqa: BLE001
             return Result.failure("PORT_CRASHED", f"{type(exc).__name__}: {exc}"), ()
 
     async def _child(self, effect: Effect, session: Session) -> tuple[Result, tuple[Event, ...]]:
         """Effect(child) 递归创建子 Session，复用同一解释器与注入函数。"""
         payload = effect.payload
-        factory = payload.get("program_factory")
+        factory = payload.get("program_factory") # pyright: ignore[reportAssignmentType]
         if factory is None:
             program = payload.get("program")
             if program is None:
                 return Result.failure("CHILD_PROGRAM_MISSING", "child needs program_factory"), ()
-            def factory(p: Any = program) -> Any:
+            def factory(p: Program = program) -> Program:
                 return p
         child_state: AgentState = payload.get("state") or session.state
         child_state = child_state.with_(budgets=child_state.budgets.consume(hops=1))
@@ -198,7 +230,7 @@ class Runner:
         state = session.state
         effects: tuple[Effect, ...] = ()
         results: tuple[Result, ...] = ()
-        batch: Any = None
+        batch: SendResult | None = None
         status = "running"
         reason = ""
         error: str | None = None
@@ -216,20 +248,23 @@ class Runner:
             except (ProgramInvalid, ProgramCrashed) as exc:
                 status, error, reason = "error", exc.code, str(exc)
                 batch = EffectBatch(())
-            except Exception as exc:  # pragma: no cover - 防御：任何 program 崩溃都进报告
+            except Exception as exc:  # pragma: no cover - 防御：任何 program 崩溃都进报告  # noqa: BLE001
                 status, error, reason = "error", "PROGRAM_CRASHED", str(exc)
                 batch = EffectBatch(())
 
+            # 1. program 自然返回 → 合成一个 END Effect，记为 done
             if status == "running" and batch is DONE:
                 status, reason = "done", "program_returned"
                 effects = (Effect(EffectKind.END, {"reason": reason}),)
                 results = (Result.success(None),)
             elif status == "running":
                 assert isinstance(batch, EffectBatch)
+                # 2. 为每个 Effect 注入确定性 trace_id（session:step:index）
                 effects = tuple(
                     replace(e, trace_id=f"{session.session_id}:{step_no:04d}:{i:02d}")
                     for i, e in enumerate(batch.effects)
                 )
+                # 3. 并行数超限强制 END；END / WAIT_HUMAN 特殊终端不走 port
                 if state.budgets.check_parallel(len(effects)):
                     reason = "BUDGET_EXCEEDED:parallel_children"
                     effects = (Effect(EffectKind.END, {"reason": reason}),)
@@ -242,14 +277,17 @@ class Runner:
                     results = (Result.success(None),)
                     status, reason = "suspended", "wait_human"
                 else:
+                    # 4. 普通 Effect：并行构造上下文并并发执行（IO 的唯一汇聚点）
                     ctxs = [self._bind(self._ctx_factory(e, session), self) for e in effects]
                     executed = await asyncio.gather(
                         *(self._execute(e, c, session) for e, c in zip(effects, ctxs))
                     )
                     results = tuple(item[0] for item in executed)
+                    # 子会话事件先入日志，保证 seq 顺序在父事件之前
                     child_events = tuple(ev for item in executed for ev in item[1])
                     for ev in child_events:
                         session.events.append(ev)
+                    # 任一结果 abort → 整个 run 置 error
                     if any(not r.ok and r.error and r.error.code == "CHAIN_ABORTED" for r in results):
                         status, reason = "error", "chain aborted"
                         error = next(
@@ -260,6 +298,7 @@ class Runner:
                         results[0].data if results and results[0].ok else (results[0] if results else None)
                     )
 
+        # 5. 纯函数 fold 回填 State；随后累计 usage 写进事件元数据
         new_state = fold(state, effects, results, reason)
         session.state = new_state
         cost = sum(float(getattr(r.usage, "cost_usd", 0.0) or 0.0) for r in results if r.usage)
@@ -284,6 +323,7 @@ class Runner:
         session.events.append(event)
         self._reasons[session.session_id] = reason
         self._errors[session.session_id] = error
+        # 6. 终态或达到频率就落一次 checkpoint
         if status != "running" or rt.step % self._checkpoint_every == 0:
             self._store.save(session.session_id, checkpoint(session))
         return StepReport(
@@ -303,14 +343,15 @@ class Runner:
             return self._result(session)
         return await self._loop(session)
 
-    async def resume(self, session: Session, answer: Any) -> RunResult:
+    async def resume(self, session: Session, answer: DynamicValue) -> RunResult:
         """从挂起断点继续：答案 send 回 Program，事件日志不动（跨周期恢复入口）。"""
         rt = _Runtime(InterpreterImpl(session.program_factory()))
         self._runtimes[session.session_id] = rt
         self._replay(session, rt, answer=answer)
         return await self._loop(session, initial_value=answer)
 
-    async def _loop(self, session: Session, initial_value: Any = None) -> RunResult:
+    async def _loop(self, session: Session, initial_value: DynamicValue = None) -> RunResult:
+        """反复 step 直到进入终态或触碰 max_steps 硬上限，再汇总为 RunResult。"""
         rt = self._runtime(session)
         if initial_value is not None:
             rt.last_value = initial_value
@@ -321,6 +362,7 @@ class Runner:
         return self._result(session)
 
     def _result(self, session: Session) -> RunResult:
+        """从会话终态与缓存的 reason/error 汇总 RunResult；output 取 scratchpad。"""
         last = session.events[-1] if session.events else None
         status = last.status if last else "running"
         return RunResult(
@@ -328,7 +370,7 @@ class Runner:
             state=session.state,
             status=status,
             events=tuple(session.events),
-            output=session.state.get("output"),
+            output=session.state.output,  # 直接读显式字段（不再经字符串代理）
             reason=self._reasons.get(session.session_id, ""),
             error=self._errors.get(session.session_id),
         )
@@ -337,7 +379,7 @@ class Runner:
         """事件溯源重放：从初始 State 逐步 fold 得到终态（M1-T03）。"""
         return replay_events(session.events, initial_state)
 
-    def load(self, session_id: str, program_factory: Callable[[], Any]) -> Session:
+    def load(self, session_id: str, program_factory: Callable[[], Program]) -> Session:
         """从 checkpoint 恢复 Session（新进程 / 跨周期断点恢复）。"""
         snap = self._store.load(session_id)
         if snap is None:

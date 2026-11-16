@@ -6,12 +6,14 @@
 from __future__ import annotations
 
 import inspect
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import cast
 
 from pydantic import ValidationError
 
-from ports import DangerLevel, PortCtx, ToolCall, ToolResult, ToolSpec
+from ports import DangerLevel, PortCtx, ToolCall, ToolResult, ToolResultMeta, ToolSpec
+from runtime import DynamicValue
 
 from .decorator import SandboxPolicy, ToolDefinition, ToolDefinitionError
 
@@ -20,12 +22,15 @@ __all__ = ["ToolRegistry", "ToolEntry"]
 
 @dataclass(frozen=True)
 class ToolEntry:
-    spec: ToolSpec
-    fn: Callable[..., Any]
-    definition: ToolDefinition | None = None
+    """注册表内的单条工具：spec + 实现 + 可选的定义元信息。"""
+
+    spec: ToolSpec  # 目录条目（含 danger / schema）
+    fn: Callable[..., DynamicValue]  # 实现函数
+    definition: ToolDefinition | None = None  # @tool 定义；手写 spec 注册时为 None
 
 
-async def _maybe(value: Any) -> Any:
+async def _maybe(value: DynamicValue) -> DynamicValue:
+    """统一等待：工具函数既可是同步值也可是 awaitable。"""
     return await value if inspect.isawaitable(value) else value
 
 
@@ -37,15 +42,16 @@ class ToolRegistry:
     def __init__(
         self,
         *,
-        sandbox: Any | None = None,
-        approver: Any | None = None,
+        sandbox: DynamicValue | None = None,
+        approver: DynamicValue | None = None,
         index_enabled: bool = True,
         clock: Callable[[], float] = lambda: 0.0,
     ) -> None:
-        self._tools: dict[str, ToolEntry] = {}
+        """装配注册表；sandbox / approver 为可选 port，缺省时高危工具注册会被拒绝。"""
+        self._tools: dict[str, ToolEntry] = {}  # name → 工具条目
         self._sandbox = sandbox            # SandboxPort（M8 实现）
         self._approver = approver          # HumanPort / ApprovalPort（M8 实现）
-        self._index_enabled = index_enabled
+        self._index_enabled = index_enabled  # 是否启用 L1 精简目录
         self._clock = clock                # 默认逻辑时钟 0.0，保证事件日志确定性
 
     # ------------------------------------------------------------------ #
@@ -53,8 +59,9 @@ class ToolRegistry:
     # ------------------------------------------------------------------ #
     def register(
         self, spec_or_definition: ToolSpec | ToolDefinition,
-        fn: Callable[..., Any] | None = None, *, bind: bool = False,
-    ) -> "ToolRegistry":
+        fn: Callable[..., DynamicValue] | None = None, *, bind: bool = False,
+    ) -> ToolRegistry:
+        """注册工具；校验 danger 必填、实现存在、高危已配沙盒/审批（M4 红线）。"""
         if isinstance(spec_or_definition, ToolDefinition):
             definition = spec_or_definition
             spec, impl = definition.spec, definition.fn or fn
@@ -73,7 +80,7 @@ class ToolRegistry:
         self._tools[spec.name] = ToolEntry(spec=spec, fn=impl, definition=definition)
         return self
 
-    def bind(self, name: str, fn: Callable[..., Any]) -> "ToolRegistry":
+    def bind(self, name: str, fn: Callable[..., DynamicValue]) -> ToolRegistry:
         """给「@tool 装饰 pydantic 模型」得到的定义绑定实现。"""
         definition = getattr(fn, "__agentkit_tool__", None)
         if definition is not None and definition.name != name:
@@ -84,7 +91,8 @@ class ToolRegistry:
         self._tools[name] = ToolEntry(entry.spec, fn, entry.definition)
         return self
 
-    def add(self, definition: ToolDefinition) -> "ToolRegistry":
+    def add(self, definition: ToolDefinition) -> ToolRegistry:
+        """添加已带实现的 ToolDefinition；fn 为 None 时须先 bind。"""
         if definition.fn is None:
             raise ToolDefinitionError(f"definition {definition.name!r} needs bind(name, fn)")
         return self.register(definition)
@@ -99,7 +107,8 @@ class ToolRegistry:
             out.append(spec)
         return out
 
-    def schema_of(self, name: str) -> dict[str, Any]:
+    def schema_of(self, name: str) -> dict[str, DynamicValue]:
+        """返回工具完整参数 schema（L2 披露使用）；未知工具抛定义错误。"""
         entry = self._tools.get(name)
         if entry is None:
             raise ToolDefinitionError(f"unknown tool {name!r}")
@@ -127,7 +136,8 @@ class ToolRegistry:
             errors.append("MCP tools fully injected into L1 context (M4 红线)")
         return errors
 
-    def freeze(self) -> "ToolRegistry":
+    def freeze(self) -> ToolRegistry:
+        """装配期门禁：static_check 非空即拒绝，否则返回 self 支持链式。"""
         errors = self.static_check()
         if errors:
             raise ToolDefinitionError("static_check failed: " + "; ".join(errors))
@@ -137,6 +147,7 @@ class ToolRegistry:
     # ③ 调用期：danger 四级路由
     # ------------------------------------------------------------------ #
     async def _approve(self, spec: ToolSpec, ctx: PortCtx) -> bool:
+        """向审批 port 请求授权；approve/ask 两种接口形态都支持。"""
         approver = self._approver
         if approver is None:
             return False
@@ -149,20 +160,22 @@ class ToolRegistry:
             return str(answer).lower() in ("approve", "yes", "y", "true")
         return False
 
-    async def _invoke(self, fn: Callable[..., Any], args: Any, entry: ToolEntry, ctx: PortCtx) -> Any:
+    async def _invoke(self, fn: Callable[..., DynamicValue], args: DynamicValue, entry: ToolEntry, ctx: PortCtx) -> DynamicValue:
+        """直接调用工具实现（无沙盒）；抹平同步/异步差异。"""
         return await _maybe(fn(args, ctx))
 
     async def call(self, call: ToolCall, ctx: PortCtx) -> ToolResult:
+        """调用工具：参数校验 → CRITICAL 审批 → 沙盒路由 → 折叠异常为 ToolResult。"""
         entry = self._tools.get(call.name)
         if entry is None:
             return ToolResult(call_id=call.call_id, ok=False, error=f"unknown tool: {call.name}")
         spec, fn, definition = entry.spec, entry.fn, entry.definition
-        meta: dict[str, Any] = {
+        meta = cast(ToolResultMeta, {
             "danger": spec.danger.value if spec.danger else "unknown",
             "source": spec.source,
             "sandbox": False,
             "duration_ms": self._clock(),
-        }
+        })
         try:
             model = definition.args_model if definition else None
             if model is not None:
@@ -173,19 +186,22 @@ class ToolRegistry:
                         call_id=call.call_id, ok=False,
                         error=f"unexpected arguments (extra='forbid'): {sorted(extra)}", meta=meta,
                     )
-                parsed: Any = model.model_validate(call.args)
+                parsed: DynamicValue = model.model_validate(call.args)
             else:
                 parsed = dict(call.args)
 
+            # 沙盒判定：策略 ALWAYS，或 danger 非 SAFE
             sandbox_needed = (
                 definition is not None and definition.sandbox is SandboxPolicy.ALWAYS
             ) or (spec.danger is not None and spec.danger is not DangerLevel.SAFE)
+            # CRITICAL 工具须先获审批，否则拒绝
             if spec.danger is DangerLevel.CRITICAL:
                 meta["approved"] = await self._approve(spec, ctx)
                 if not meta["approved"]:
                     return ToolResult(
                         call_id=call.call_id, ok=False, error="approval denied", meta=meta
                     )
+            # 沙盒路由：有沙盒 port 就送入隔离环境执行
             if sandbox_needed and self._sandbox is not None:
                 meta["sandbox"] = True
                 value = await _maybe(

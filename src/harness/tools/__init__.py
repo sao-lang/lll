@@ -2,12 +2,12 @@
 from ports import DangerLevel
 
 from .decorator import SandboxPolicy, ToolDefinition, ToolDefinitionError, tool
-from .index import SkillProvider, ToolIndex, ToolIndexEntry
+from .index import DisclosurePacket, SkillProvider, ToolIndex, ToolIndexEntry
 from .mcp import MCPManager, MCPTransport
 from .registry import ToolEntry, ToolRegistry
 
 __all__ = [
     "tool", "ToolDefinition", "ToolDefinitionError", "SandboxPolicy", "DangerLevel",
-    "ToolRegistry", "ToolEntry", "ToolIndex", "ToolIndexEntry", "SkillProvider",
+    "ToolRegistry", "ToolEntry", "ToolIndex", "ToolIndexEntry", "SkillProvider", "DisclosurePacket",
     "MCPManager", "MCPTransport",
 ]

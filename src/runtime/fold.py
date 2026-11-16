@@ -8,9 +8,20 @@
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Sequence
+from collections.abc import Iterable, Sequence
+from typing import cast
 
-from .types import AgentState, Effect, EffectKind, Message, PortError, Result, canonical
+from .types import (
+    AgentState,
+    BudgetDelta,
+    DynamicValue,
+    Effect,
+    EffectKind,
+    Message,
+    PortError,
+    Result,
+    canonical,
+)
 
 __all__ = [
     "field",
@@ -21,8 +32,12 @@ __all__ = [
 ]
 
 
-def field(obj: Any, name: str, default: Any = None) -> Any:
-    """同时兼容 pydantic 对象、dataclass 与重放后的 Replayed(dict)。"""
+def field(obj: DynamicValue, name: str, default: DynamicValue = None) -> DynamicValue:
+    """读取对象字段，同时兼容 pydantic 对象、dataclass 与重放后的 Replayed(dict)。
+
+    这是运行时与「数据形态未知」之间的缓冲层：port 返回的 data 可能是任意
+    对象或字典，本函数用统一接口取值，屏蔽二者差异。obj 为 None 时直接回退 default。
+    """
     if obj is None:
         return default
     if isinstance(obj, dict):
@@ -30,16 +45,18 @@ def field(obj: Any, name: str, default: Any = None) -> Any:
     return getattr(obj, name, default)
 
 
-def state_set(state: AgentState, key: str, value: Any) -> AgentState:
+def state_set(state: AgentState, key: str, value: DynamicValue) -> AgentState:
     """Program 用的不可变 scratchpad 写入（phase / steps / cursor / hops 等）。"""
     return state.set(key, value)
 
 
 def state_append_message(state: AgentState, message: Message) -> AgentState:
+    """向对话历史追加一条消息，返回新 State（原 State 不变）。"""
     return state.with_(messages=(*state.messages, message))
 
 
-def _plain_value(obj: Any) -> Any:
+def _plain_value(obj: DynamicValue) -> DynamicValue:
+    """把单个值规范化为可序列化形态（pydantic model_dump + 递归 dict/list）。"""
     if hasattr(obj, "model_dump"):
         return obj.model_dump(mode="python")
     if isinstance(obj, dict):
@@ -49,11 +66,11 @@ def _plain_value(obj: Any) -> Any:
     return obj
 
 
-def _budget_delta(effect: Effect) -> dict[str, Any]:
+def _budget_delta(effect: Effect) -> BudgetDelta:
     """Effect 可声明本步消耗的预算；未声明时只扣 1 turn。"""
-    declared = dict(effect.payload.get("budget") or {})
+    declared: dict[str, DynamicValue] = dict(effect.payload.get("budget") or {})
     declared["turns"] = declared.get("turns", 1)
-    return declared
+    return cast(BudgetDelta, declared)
 
 
 def _message_for(effect: Effect, result: Result) -> Message | None:
@@ -66,6 +83,7 @@ def _message_for(effect: Effect, result: Result) -> Message | None:
         calls = tuple(_plain_value(c) for c in (field(data, "tool_calls", []) or []))
         return Message(role="assistant", content=content, tool_calls=calls)
     if effect.kind is EffectKind.TOOL:
+        # 工具消息：把 ok/value/error 规范化成 JSON 字符串，name 用 call_id 关联调用
         call = effect.payload.get("call") or {}
         call_id = field(call, "call_id", effect.payload.get("call_id", ""))
         payload = {
@@ -83,11 +101,17 @@ def fold(
     results: Sequence[Result],
     reason: str = "",
 ) -> AgentState:
-    """把一批 Effect + Result 折叠为新 State：messages / scratchpad / budgets 全部产生新对象。"""
+    """把一批 Effect + Result 折叠为新 State：messages / scratchpad / budgets 全部产生新对象。
+
+    处理顺序（逐 Effect/Result 对）：① 生成对话消息 ② 特殊 kind 的副产物写入
+    框架托管字段 ③ 累计 usage 成本/token ④ 统一扣减预算。reason 写入
+    last_reason 字段，供链路读取。scratchpad（用户自定义键）原样透传。
+    """
     messages: list[Message] = list(state.messages)
-    scratchpad = dict(state.scratchpad)
     budgets = state.budgets
 
+    # 框架托管字段的工作副本；同名 effect 多次出现时以最后一个为准（与原覆盖语义一致）
+    managed: dict[str, DynamicValue] = {}
     cost = 0.0
     tokens = 0
     for effect, result in zip(effects, results):
@@ -95,9 +119,9 @@ def fold(
         if message is not None:
             messages.append(message)
         if effect.kind in (EffectKind.SKILL, EffectKind.CHILD, EffectKind.WAIT_HUMAN):
-            scratchpad[f"last_{effect.kind.value}"] = _plain_value(result.data)
+            managed[f"last_{effect.kind.value}"] = _plain_value(result.data)
         if effect.kind is EffectKind.END and "output" in effect.payload:
-            scratchpad["output"] = _plain_value(effect.payload["output"])
+            managed["output"] = _plain_value(effect.payload["output"])
         if result.usage is not None:
             cost += float(field(result.usage, "cost_usd", 0.0))
             tokens += int(field(result.usage, "prompt_tokens", 0)) + int(
@@ -113,14 +137,15 @@ def fold(
         )
         cost = 0.0  # 已计入本 step，避免重复累加
 
-    scratchpad["last_step_kinds"] = [e.kind.value for e in effects]
-    scratchpad["last_tokens"] = tokens
+    managed["last_step_kinds"] = tuple(e.kind.value for e in effects)
+    managed["last_tokens"] = tokens
     if reason:
-        scratchpad["last_reason"] = reason
-    return state.with_(messages=tuple(messages), scratchpad=scratchpad, budgets=budgets)
+        managed["last_reason"] = reason
+    # with_ 会把托管键改写到显式字段，scratchpad 不再承载这些固定键
+    return state.with_(messages=tuple(messages), budgets=budgets, **managed)
 
 
-def replay_events(events: Iterable[Any], initial_state: AgentState) -> AgentState:
+def replay_events(events: Iterable[DynamicValue], initial_state: AgentState) -> AgentState:
     """事件溯源重放：逐步 fold，得到终态（M1-T03 与终态断言全等）。"""
     state = initial_state
     for event in events:

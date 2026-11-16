@@ -6,11 +6,10 @@
 from __future__ import annotations
 
 import inspect
-from typing import Any, Callable
 
 from pydantic import ValidationError
 
-from runtime import Effect, EffectKind, PortError, PortMissing, Result
+from runtime import DynamicValue, Effect, EffectKind, PortError, PortMissing, Result
 from runtime.types import CallFn
 
 from .dto import LLMRequest, ToolCall
@@ -18,6 +17,7 @@ from .registry import PortCtx, PortRegistry, port_ctx_from
 
 __all__ = ["KIND_TO_PORT", "classify_exception", "call", "make_call"]
 
+# Effect 种类到默认 port 名的映射；payload 里的显式 port 可覆盖
 KIND_TO_PORT: dict[EffectKind, str] = {
     EffectKind.LLM: "llm",
     EffectKind.TOOL: "tool",
@@ -29,10 +29,12 @@ KIND_TO_PORT: dict[EffectKind, str] = {
 def classify_exception(exc: BaseException) -> PortError:
     """错误信封分类：retryable=True 是 M2 retry 判决的依据。"""
     code = type(exc).__name__
+    # 已知框架/校验异常：不可重试
     if isinstance(exc, PortMissing):
         return PortError("PORT_MISSING", str(exc), False)
     if isinstance(exc, ValidationError):
         return PortError("PORT_INVALID", str(exc), False)
+    # 网络/超时类异常或 5xx 响应：可重试
     status = getattr(getattr(exc, "response", None), "status_code", None)
     retryable = (
         isinstance(exc, (TimeoutError, ConnectionError, OSError))
@@ -42,7 +44,8 @@ def classify_exception(exc: BaseException) -> PortError:
     return PortError(code, str(exc), retryable)
 
 
-def _as_dict(obj: Any) -> dict[str, Any]:
+def _as_dict(obj: DynamicValue) -> dict[str, DynamicValue]:
+    """把对象折叠为字典：dict 原样、pydantic model_dump、普通对象取 __dict__。"""
     if isinstance(obj, dict):
         return obj
     if hasattr(obj, "model_dump"):
@@ -52,11 +55,13 @@ def _as_dict(obj: Any) -> dict[str, Any]:
     return {}
 
 
-async def _maybe(value: Any) -> Any:
+async def _maybe(value: DynamicValue) -> DynamicValue:
+    """统一等待：适配器方法既可是同步值也可是 awaitable。"""
     return await value if inspect.isawaitable(value) else value
 
 
-def _log(registry: PortRegistry, effect: Effect, ctx: Any, result: Result) -> None:
+def _log(registry: PortRegistry, effect: Effect, ctx: DynamicValue, result: Result) -> None:
+    """向 telemetry port 记一条 port_call 事件；遥测故障不得影响主流程。"""
     tele = registry.try_resolve("telemetry")
     if tele is None or not hasattr(tele, "log"):
         return
@@ -73,8 +78,11 @@ def _log(registry: PortRegistry, effect: Effect, ctx: Any, result: Result) -> No
         pass
 
 
-async def call(effect: Effect, ctx: Any, registry: PortRegistry | None = None) -> Result:
-    """M3 的 CallFn 本体；可由 make_call(registry) 绑定后注入 Runner。"""
+async def call(effect: Effect, ctx: DynamicValue, registry: PortRegistry | None = None) -> Result:
+    """M3 的 CallFn 本体；可由 make_call(registry) 绑定后注入 Runner。
+
+    按 effect.kind 分派到对应 port 的适配器方法，所有异常折叠为错误信封。
+    """
     if registry is None:
         registry = getattr(ctx, "registry", None)
     if registry is None:
@@ -89,7 +97,7 @@ async def call(effect: Effect, ctx: Any, registry: PortRegistry | None = None) -
             return Result.failure("CHILD_HANDLED_BY_RUNNER", "child is executed by Runner")
 
         degrade = (getattr(ctx, "meta", {}) or {}).get("degrade_port")
-        port_name = payload.get("port") or degrade or KIND_TO_PORT.get(effect.kind)
+        port_name = str(payload.get("port") or degrade or KIND_TO_PORT.get(effect.kind) or "")
         if not port_name:
             return Result.failure("PORT_UNMAPPED", f"no port for {effect.kind.value}")
         adapter = registry.resolve(port_name)
@@ -130,6 +138,7 @@ async def call(effect: Effect, ctx: Any, registry: PortRegistry | None = None) -
 
 def make_call(registry: PortRegistry) -> CallFn:
     """绑定注册表，产出 Runner 需要的 CallFn（签名 (effect, ctx) -> Awaitable[Result]）。"""
-    async def _call(effect: Effect, ctx: Any) -> Result:
+    async def _call(effect: Effect, ctx: DynamicValue) -> Result:
+        """闭包：把绑定的 registry 透传给 call。"""
         return await call(effect, ctx, registry)
     return _call
