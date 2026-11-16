@@ -7,7 +7,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Callable, Literal, cast
 
-from agentkit.runtime import Result
+from runtime import Result
 
 from .types import ChainCtx, ChainEvent, Verdict
 

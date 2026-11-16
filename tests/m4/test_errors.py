@@ -4,11 +4,11 @@ from __future__ import annotations
 import pytest
 from pydantic import BaseModel, Field
 
-from agentkit.chains import Chains, MountPoint
-from agentkit.chains.builtins import AllowFilter
-from agentkit.harness.tools import DangerLevel, ToolDefinitionError, ToolRegistry, tool
-from agentkit.ports import PortCtx, PortRegistry, ToolCall, ToolSpec, make_call
-from agentkit.runtime import AgentState, Effect, EffectKind, Runner, Session
+from chains import Chains, MountPoint
+from chains.builtins import AllowFilter
+from harness.tools import DangerLevel, ToolDefinitionError, ToolRegistry, tool
+from ports import PortCtx, PortRegistry, ToolCall, ToolSpec, make_call
+from runtime import AgentState, Effect, EffectKind, Runner, Session
 from tests.fakes import run
 
 

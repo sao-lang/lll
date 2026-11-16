@@ -11,7 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from agentkit.runtime import (  # noqa: E402
+from runtime import (  # noqa: E402
     AgentState, Effect, EffectKind, Runner, Session, fingerprint,
     fold_tool_calls, fold_tool_results,
 )

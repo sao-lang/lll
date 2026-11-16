@@ -17,7 +17,7 @@ from typing import Any, Callable, Literal, get_type_hints
 
 from pydantic import BaseModel
 
-from agentkit.ports import DangerLevel, ToolSpec
+from ports import DangerLevel, ToolSpec
 
 __all__ = ["SandboxPolicy", "ToolDefinition", "ToolDefinitionError", "tool"]
 

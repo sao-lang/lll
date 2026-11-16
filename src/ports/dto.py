@@ -10,7 +10,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from agentkit.runtime import Message, PortError, Result, Usage
+from runtime import Message, PortError, Result, Usage
 
 __all__ = [
     "DangerLevel", "ToolSpec", "ToolCall", "ToolResult", "LLMRequest",

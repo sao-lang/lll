@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentkit.runtime import AgentState, Budgets, Effect, EffectKind, Runner, Session
+from runtime import AgentState, Budgets, Effect, EffectKind, Runner, Session
 from tests.fakes import FakeCall, FakeDispatch, llm_response, run
 
 

@@ -13,7 +13,7 @@ def run(coro: Any) -> Any:
     """同步测试里跑 async 用例（不引入 pytest-asyncio 依赖）。"""
     return asyncio.run(coro)
 
-from agentkit.runtime import EffectKind, Result, Usage
+from runtime import EffectKind, Result, Usage
 
 
 def obj(**kwargs: Any) -> SimpleNamespace:

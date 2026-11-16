@@ -3,14 +3,14 @@ from __future__ import annotations
 
 from enum import Enum
 
-from agentkit.runtime import (
+from runtime import (
     DONE, AgentState, Budgets, Effect, EffectKind, Event, Message, PortError,
     Result, Runner, RuntimeCtx, RunResult, Session, StepReport, Usage, canonical,
     checkpoint, fingerprint,
 )
-from agentkit.runtime.fold import field, fold, replay_events, state_append_message, state_set
-from agentkit.runtime.interpreter import InterpreterImpl
-from agentkit.runtime.types import _plain
+from runtime.fold import field, fold, replay_events, state_append_message, state_set
+from runtime.interpreter import InterpreterImpl
+from runtime.types import _plain
 from tests.fakes import FakeCall, FakeDispatch, obj, run
 
 
@@ -76,7 +76,7 @@ def test_fold_tool_helpers_and_budget_delta():
                  (Result.success(obj(ok=True, value={"k": "v"}, error=None)),))
     assert '"value"' in state.messages[-1].content or "value" in state.messages[-1].content
     assert state.messages[-1].name == "c1"
-    from agentkit.runtime.fold import fold_tool_calls, fold_tool_results
+    from runtime.fold import fold_tool_calls, fold_tool_results
     s = fold_tool_calls(state, [{"name": "t"}])
     s = fold_tool_results(s, [obj(value=1)])
     assert s.get("pending_tool_calls") == [{"name": "t"}]

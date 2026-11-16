@@ -8,17 +8,17 @@ from pathlib import Path
 import httpx
 import pytest
 
-from agentkit.chains import ChainCtx
-from agentkit.ports import (
+from chains import ChainCtx
+from ports import (
     DangerLevel, LLMRequest, PortCtx, PortRegistry, ToolCall, ToolSpec, call,
 )
-from agentkit.ports.adapters import (
+from ports.adapters import (
     ConsoleHuman, InMemoryToolRegistry, JsonlTelemetry, NullTelemetry, OpenAICompatLLM,
 )
-from agentkit.ports.adapters.fakes import (
+from ports.adapters.fakes import (
     FailingAdapter, InMemoryTelemetry, ScriptedLLM, StaticHuman, StaticSkillPort,
 )
-from agentkit.runtime import AgentState, Effect, EffectKind, Message, Usage
+from runtime import AgentState, Effect, EffectKind, Message, Usage
 from tests.fakes import run
 
 
@@ -142,7 +142,7 @@ def test_t04_console_human_and_fakes(monkeypatch):
 
 
 def test_t05_replace_llm_adapter_without_changing_upper_layer():
-    from agentkit.ports import LLMResponse
+    from ports import LLMResponse
     reg = PortRegistry().register("llm", ScriptedLLM([LLMResponse(content="first")]))
     first = run(call(Effect(EffectKind.LLM, {"messages": []}), ctx(), reg))
     reg.register("llm", ScriptedLLM([LLMResponse(content="second")]))

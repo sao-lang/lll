@@ -15,7 +15,7 @@ import inspect
 from dataclasses import dataclass, replace
 from typing import Any, Callable, Iterable, Literal, Mapping, cast
 
-from agentkit.runtime import Effect, EffectKind, Result, Session
+from runtime import Effect, EffectKind, Result, Session
 
 from .types import (
     ChainConfigError,

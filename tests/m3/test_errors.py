@@ -3,10 +3,10 @@ from __future__ import annotations
 
 from pydantic import ValidationError
 
-from agentkit.chains import ChainCtx
-from agentkit.ports import PortRegistry, call, classify_exception, make_call
-from agentkit.ports.adapters.fakes import FailingAdapter, InMemoryTelemetry, ScriptedLLM
-from agentkit.runtime import (
+from chains import ChainCtx
+from ports import PortRegistry, call, classify_exception, make_call
+from ports.adapters.fakes import FailingAdapter, InMemoryTelemetry, ScriptedLLM
+from runtime import (
     AgentState, Effect, EffectKind, PortMissing, Result, Usage,
 )
 from tests.fakes import run
@@ -25,7 +25,7 @@ def test_t03_classify_exception_matrix():
     assert classify_exception(ConnectionError("c")).retryable is True
     assert classify_exception(ValueError("v")).retryable is False
     try:
-        from agentkit.ports import ToolCall
+        from ports import ToolCall
         ToolCall.model_validate({"call_id": "c"})
     except ValidationError as exc:
         assert classify_exception(exc).code == "PORT_INVALID"

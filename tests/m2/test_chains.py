@@ -1,9 +1,9 @@
 """M2-T01 七挂载点 × 四泳道组合矩阵。"""
 from __future__ import annotations
 
-from agentkit.chains import Chains, ChainCtx, MountPoint
-from agentkit.chains.builtins import AddMetaPipe, AllowFilter, PassMiddleware, TracingHook
-from agentkit.runtime import AgentState, Effect, EffectKind, Result
+from chains import Chains, ChainCtx, MountPoint
+from chains.builtins import AddMetaPipe, AllowFilter, PassMiddleware, TracingHook
+from runtime import AgentState, Effect, EffectKind, Result
 from tests.fakes import obj, run
 
 
@@ -43,14 +43,14 @@ def test_t01_every_mount_point_has_all_four_lanes():
 
 
 def test_t01_mount_group_mapping():
-    from agentkit.chains import MOUNT_GROUP, DEFAULT_GROUP
+    from chains import MOUNT_GROUP, DEFAULT_GROUP
     assert MOUNT_GROUP[EffectKind.LLM] == (MountPoint.BEFORE_LLM, MountPoint.AFTER_LLM)
     assert MOUNT_GROUP[EffectKind.TOOL] == (MountPoint.BEFORE_TOOL, MountPoint.AFTER_TOOL)
     assert DEFAULT_GROUP == (MountPoint.ON_INPUT, MountPoint.ON_OUTPUT)
 
 
 def test_t01_pipes_transform_request_and_response():
-    from agentkit.chains.builtins import PrefixPipe
+    from chains.builtins import PrefixPipe
     chains = (Chains()
               .pipe(AddMetaPipe("add", "x", 1), at=MountPoint.BEFORE_LLM)
               .pipe(PrefixPipe("prefix"), at=MountPoint.AFTER_LLM))
@@ -61,7 +61,7 @@ def test_t01_pipes_transform_request_and_response():
 
 
 def test_t01_ctx_factory_from_runner():
-    from agentkit.runtime import Session
+    from runtime import Session
     chains = all_mount_chains().freeze()
     factory = chains.ctx_factory()
     ctx = factory(Effect(EffectKind.TOOL, {}), Session("s", lambda: iter(())))

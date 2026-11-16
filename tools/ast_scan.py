@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SRC = ROOT / "src" / "agentkit"
+SRC = ROOT / "src"
 
 TARGETS = {
     "m1": [SRC / "runtime", ROOT / "demos" / "demo_m1.py", ROOT / "tests" / "m1"],

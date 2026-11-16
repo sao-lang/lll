@@ -3,10 +3,10 @@ from __future__ import annotations
 
 import pytest
 
-from agentkit.harness.tools import ToolRegistry
-from agentkit.harness.tools.fakes import FakeMCPTransport, FakeSandbox, StaticApprover
-from agentkit.harness.tools.mcp import MCPManager
-from agentkit.ports import DangerLevel, PortCtx, ToolCall, ToolSpec
+from harness.tools import ToolRegistry
+from harness.tools.fakes import FakeMCPTransport, FakeSandbox, StaticApprover
+from harness.tools.mcp import MCPManager
+from ports import DangerLevel, PortCtx, ToolCall, ToolSpec
 from tests.fakes import run
 
 

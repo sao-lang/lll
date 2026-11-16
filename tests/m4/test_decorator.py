@@ -6,12 +6,12 @@ from enum import Enum
 import pytest
 from pydantic import BaseModel, Field
 
-from agentkit.harness.tools import (
+from harness.tools import (
     DangerLevel, SandboxPolicy, ToolDefinition, ToolDefinitionError,
     ToolRegistry, tool,
 )
-from agentkit.harness.tools.decorator import _schema_of
-from agentkit.ports import PortCtx, ToolSpec
+from harness.tools.decorator import _schema_of
+from ports import PortCtx, ToolSpec
 
 
 class Mode(str, Enum):
@@ -71,7 +71,7 @@ def test_t01_decorate_model_then_bind():
     registry.register(definition, lambda args, ctx: args.q)
     assert registry.catalog(level=2)[0].name == "model-tool"
     registry.bind("model-tool", lambda args, ctx: "rebound")
-    from agentkit.ports import ToolCall
+    from ports import ToolCall
     from tests.fakes import run
     bound = run(registry.call(ToolCall(call_id="c", name="model-tool", args={"q": "x"}), PortCtx("s")))
     assert bound.ok and bound.value == "rebound"
@@ -108,7 +108,7 @@ def test_t02_static_check_reports_invalid_schema():
 
 
 def test_t02_extra_forbid_and_bind_errors():
-    from agentkit.ports import ToolCall
+    from ports import ToolCall
     from tests.fakes import run
 
     registry = ToolRegistry().add(demo.__agentkit_tool__)

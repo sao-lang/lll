@@ -21,7 +21,7 @@ PY = sys.executable
 
 MODULES = {
     "m1": {
-        "title": "M1 核心运行时", "pkg": "agentkit.runtime", "path": "runtime",
+        "title": "M1 核心运行时", "pkg": "runtime", "path": "runtime",
         "doc": "docs/02-模块详设/M1-核心运行时.md", "demo": "demos/demo_m1.py", "coverage": 90,
         "symbols": ["Effect", "EffectKind", "AgentState", "Budgets", "Result", "Runner",
                     "Session", "Event", "fold", "fingerprint", "checkpoint"],
@@ -29,14 +29,14 @@ MODULES = {
         "integration": ["test_runner.py", "test_suspend.py", "test_errors.py", "test_types.py"],
     },
     "m2": {
-        "title": "M2 链路系统", "pkg": "agentkit.chains", "path": "chains",
+        "title": "M2 链路系统", "pkg": "chains", "path": "chains",
         "doc": "docs/02-模块详设/M2-链路系统.md", "demo": "demos/demo_m2.py", "coverage": 90,
         "symbols": ["Chains", "MountPoint", "Verdict", "ChainCtx", "ChainEvent", "DispatchResult"],
         "behavior": ["test_verdict.py", "test_trace.py", "test_hooks.py"],
         "integration": ["test_chains.py", "test_freeze.py"],
     },
     "m3": {
-        "title": "M3 端口协议层", "pkg": "agentkit.ports", "path": "ports",
+        "title": "M3 端口协议层", "pkg": "ports", "path": "ports",
         "doc": "docs/02-模块详设/M3-端口协议层.md", "demo": "demos/demo_m3.py", "coverage": 85,
         "symbols": ["PortRegistry", "PortCtx", "LLMRequest", "LLMResponse", "ToolCall",
                     "ToolResult", "ToolSpec", "make_call", "PORT_PROTOCOLS"],
@@ -44,7 +44,7 @@ MODULES = {
         "integration": ["test_adapters.py", "test_child.py"],
     },
     "m4": {
-        "title": "M4 工具系统", "pkg": "agentkit.harness.tools", "path": "harness/tools",
+        "title": "M4 工具系统", "pkg": "harness.tools", "path": "harness/tools",
         "doc": "docs/02-模块详设/M4-工具系统.md", "demo": "demos/demo_m4.py", "coverage": 85,
         "symbols": ["tool", "ToolRegistry", "ToolIndex", "MCPManager", "DangerLevel",
                     "SandboxPolicy", "ToolDefinitionError"],
@@ -103,14 +103,14 @@ def g1(cfg: dict, module: str) -> None:
     record(f"G1 单测 + 覆盖率 ≥ {cfg['coverage']}%", proc.returncode == 0,
            detail if proc.returncode == 0 else tail(proc))
 
-    mypy = command(["-m", "mypy", "--strict", "src/agentkit"])
+    mypy = command(["-m", "mypy", "--strict", "src"])
     record("G1 mypy strict", mypy.returncode == 0,
            "no issues found" if mypy.returncode == 0 else tail(mypy))
 
-    compileall = command(["-m", "compileall", "-q", "src/agentkit"])
+    compileall = command(["-m", "compileall", "-q", "src"])
     record("G1 语法编译", compileall.returncode == 0)
 
-    pkg_dir = SRC / "agentkit" / cfg["path"]
+    pkg_dir = SRC / cfg["path"]
     no_doc = []
     for path in pkg_dir.rglob("*.py"):
         if "__pycache__" in path.parts:

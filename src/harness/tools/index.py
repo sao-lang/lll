@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable, Protocol
 
-from agentkit.runtime import canonical
+from runtime import canonical
 
 from .registry import ToolRegistry
 

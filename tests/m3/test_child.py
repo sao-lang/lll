@@ -1,14 +1,14 @@
 """M3-T06 child 递归会话：子 Session trace 挂父日志 + 三模块集成。"""
 from __future__ import annotations
 
-from agentkit.chains import Chains, MountPoint
-from agentkit.chains.builtins import AllowFilter
-from agentkit.ports import (
+from chains import Chains, MountPoint
+from chains.builtins import AllowFilter
+from ports import (
     LLMResponse, PortRegistry, ToolCall, call, make_call,
 )
-from agentkit.ports.adapters.fakes import ScriptedLLM
-from agentkit.ports.adapters.tools import InMemoryToolRegistry
-from agentkit.runtime import (
+from ports.adapters.fakes import ScriptedLLM
+from ports.adapters.tools import InMemoryToolRegistry
+from runtime import (
     AgentState, Effect, EffectKind, Runner, Session, Usage,
 )
 from tests.fakes import FakeDispatch, run
@@ -58,7 +58,7 @@ def test_t06_child_accepts_inline_program_generator():
 
 
 def test_t06_end_to_end_react_with_real_ports():
-    from agentkit.ports import DangerLevel, ToolSpec
+    from ports import DangerLevel, ToolSpec
 
     def react(state):
         resp = yield Effect(EffectKind.LLM, {"messages": [m.to_dict() for m in state.messages]})

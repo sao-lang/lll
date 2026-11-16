@@ -12,20 +12,20 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT))
 
-from agentkit.chains import Chains, MountPoint, Verdict  # noqa: E402
-from agentkit.chains.builtins import (  # noqa: E402
+from chains import Chains, MountPoint, Verdict  # noqa: E402
+from chains.builtins import (  # noqa: E402
     AbortFilter, AddMetaPipe, AllowFilter, BoomHook, DegradeFilter, FallbackFilter,
     PassMiddleware, PrefixPipe, RedactPipe, RedactResultFilter, RejectFilter,
     RetryFilter, TracingHook,
 )
-from agentkit.runtime import (  # noqa: E402
+from runtime import (  # noqa: E402
     AgentState, Effect, EffectKind, Result, Runner, Session,
 )
 from tests.fakes import FakeCall, llm_response, obj  # noqa: E402
 
 
 def make_ctx(effect: Effect):
-    from agentkit.chains import ChainCtx
+    from chains import ChainCtx
     return ChainCtx(effect=effect, state_view=AgentState(), session_id="demo-m2")
 
 
@@ -117,8 +117,8 @@ async def main() -> None:
     print("[M2] redact → 结果替换")
 
     # ③ freeze 装配期检查
-    from agentkit.chains import ChainConfigError
-    from agentkit.chains.builtins import NeedsPortMiddleware
+    from chains import ChainConfigError
+    from chains.builtins import NeedsPortMiddleware
     c = Chains().use(NeedsPortMiddleware())
     try:
         c.freeze(required_ports=[])

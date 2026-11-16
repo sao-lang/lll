@@ -1,8 +1,8 @@
 """M1-T05 batch 并行：展开、并行执行、结果按序回填。"""
 from __future__ import annotations
 
-from agentkit.runtime import AgentState, Effect, EffectKind, Result, Runner, Session, Usage
-from agentkit.runtime.interpreter import InterpreterImpl
+from runtime import AgentState, Effect, EffectKind, Result, Runner, Session, Usage
+from runtime.interpreter import InterpreterImpl
 from tests.fakes import obj, run
 
 

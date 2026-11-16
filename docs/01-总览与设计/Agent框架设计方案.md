@@ -351,7 +351,7 @@ agent = (
 ## 11. 建议目录结构
 
 ```
-agentkit/
+src/                  # 包扁平化：各模块为顶层包，import 形如 `from runtime import ...`
 ├── runtime/          # L0：state / effect / program / interpreter / budgets
 ├── chains/           # middleware hooks filter pipes + 七挂载点装配
 ├── ports/            # 全部 Protocol 定义（llm tool rag memory store eval telemetry sandbox audit mcp human）

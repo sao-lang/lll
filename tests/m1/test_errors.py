@@ -3,13 +3,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from agentkit.runtime import (
+from runtime import (
     AgentState, Effect, EffectKind, PortMissing, Result, Runner, Session,
 )
-from agentkit.runtime.errors import (
+from runtime.errors import (
     BudgetExceeded, ChainAborted, ProgramCrashed, ProgramInvalid,
 )
-from agentkit.runtime.interpreter import InterpreterImpl
+from runtime.interpreter import InterpreterImpl
 from tests.fakes import FakeCall, FakeDispatch, obj, run
 
 

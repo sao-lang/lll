@@ -1,11 +1,11 @@
 """M1-T03 回放恢复：事件重放后 State 与终态全等 + checkpoint 跨周期恢复。"""
 from __future__ import annotations
 
-from agentkit.runtime import (
+from runtime import (
     AgentState, Budgets, Effect, EffectKind, Message, Replayed, Runner, Session,
     Usage, canonical, checkpoint, restore_checkpoint, restore_state, revive,
 )
-from agentkit.runtime.types import _plain
+from runtime.types import _plain
 from tests.fakes import FakeCall, FakeDispatch, llm_response, run
 
 

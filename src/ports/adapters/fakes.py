@@ -8,7 +8,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import Any, AsyncIterator, Iterator
 
-from agentkit.runtime import Usage
+from runtime import Usage
 
 from ..dto import LLMResponse
 from ..registry import PortCtx

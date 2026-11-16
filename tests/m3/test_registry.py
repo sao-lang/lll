@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import pytest
 
-from agentkit.ports import PortContractError, PortRegistry
-from agentkit.ports.adapters.fakes import ScriptedLLM
-from agentkit.runtime import PortMissing
+from ports import PortContractError, PortRegistry
+from ports.adapters.fakes import ScriptedLLM
+from runtime import PortMissing
 
 
 def test_t02_custom_namespace_rule():
@@ -32,8 +32,8 @@ def test_t02_resolve_and_try_resolve():
 
 
 def test_t02_replacement_is_one_line():
-    from agentkit.ports import LLMResponse, call
-    from agentkit.runtime import Effect, EffectKind
+    from ports import LLMResponse, call
+    from runtime import Effect, EffectKind
     from tests.fakes import run
 
     reg = PortRegistry().register("llm", ScriptedLLM([LLMResponse(content="A")]))

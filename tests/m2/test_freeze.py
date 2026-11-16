@@ -5,12 +5,12 @@ import asyncio
 
 import pytest
 
-from agentkit.chains import Chains, ChainConfigError, ChainCtx, MountPoint
-from agentkit.chains.builtins import (
+from chains import Chains, ChainConfigError, ChainCtx, MountPoint
+from chains.builtins import (
     AllowFilter, NeedsPortMiddleware, PassMiddleware, ShortCircuitMiddleware,
     TimeoutMiddleware,
 )
-from agentkit.runtime import AgentState, Effect, EffectKind, Result
+from runtime import AgentState, Effect, EffectKind, Result
 from tests.fakes import run
 
 

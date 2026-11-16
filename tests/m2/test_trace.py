@@ -1,11 +1,11 @@
 """M2-T05/T06 顺序确定性快照 + 组件留名（透明性红线）。"""
 from __future__ import annotations
 
-from agentkit.chains import Chains, ChainCtx, MountPoint, require_name
-from agentkit.chains.builtins import (
+from chains import Chains, ChainCtx, MountPoint, require_name
+from chains.builtins import (
     AddMetaPipe, AllowFilter, PassMiddleware, TracingHook,
 )
-from agentkit.runtime import AgentState, Effect, EffectKind, Result
+from runtime import AgentState, Effect, EffectKind, Result
 from tests.fakes import run
 
 
@@ -43,7 +43,7 @@ def test_t06_every_component_leaves_its_name():
 
 def test_t06_require_name_rejects_anonymous():
     import pytest
-    from agentkit.chains import ChainConfigError
+    from chains import ChainConfigError
 
     class Anonymous:
         def transform(self, data, ctx):

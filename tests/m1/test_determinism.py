@@ -1,7 +1,7 @@
 """M1-T02 确定性：同输入两次 run 事件日志哈希逐字节一致。"""
 from __future__ import annotations
 
-from agentkit.runtime import (
+from runtime import (
     AgentState, Effect, EffectKind, Runner, Session, canonical, fingerprint,
 )
 from tests.fakes import FakeCall, FakeDispatch, llm_response, run

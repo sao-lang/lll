@@ -3,12 +3,12 @@ from __future__ import annotations
 
 import pytest
 
-from agentkit.chains import Chains, ChainCtx, MountPoint, Verdict
-from agentkit.chains.builtins import (
+from chains import Chains, ChainCtx, MountPoint, Verdict
+from chains.builtins import (
     AbortFilter, DegradeFilter, FallbackFilter, RedactResultFilter,
     RejectFilter, RetryFilter,
 )
-from agentkit.runtime import AgentState, Effect, EffectKind, Result
+from runtime import AgentState, Effect, EffectKind, Result
 from tests.fakes import obj, run
 
 
@@ -84,7 +84,7 @@ def test_t03_retry_stops_at_limit_and_backoff_is_applied():
 
 
 def test_t03_first_reject_wins():
-    from agentkit.chains.builtins import AllowFilter
+    from chains.builtins import AllowFilter
     chains = (Chains()
               .filter(RejectFilter("first", "secret"), at=MountPoint.BEFORE_LLM)
               .filter(AllowFilter("second"), at=MountPoint.BEFORE_LLM))

@@ -1,5 +1,5 @@
 """M4 工具系统：@tool / ToolRegistry / ToolIndex / MCPManager。"""
-from agentkit.ports import DangerLevel
+from ports import DangerLevel
 
 from .decorator import SandboxPolicy, ToolDefinition, ToolDefinitionError, tool
 from .index import SkillProvider, ToolIndex, ToolIndexEntry

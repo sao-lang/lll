@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
-from agentkit.runtime import PortMissing
+from runtime import PortMissing
 
 __all__ = ["BUILTIN_PORTS", "PortCtx", "PortRegistry", "PortContractError", "port_ctx_from"]
 

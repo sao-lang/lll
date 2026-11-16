@@ -3,10 +3,10 @@ from __future__ import annotations
 
 import pytest
 
-from agentkit.harness.tools import ToolRegistry, ToolIndex
-from agentkit.harness.tools.fakes import DictSkillProvider
-from agentkit.ports import DangerLevel, ToolSpec
-from agentkit.runtime import canonical
+from harness.tools import ToolRegistry, ToolIndex
+from harness.tools.fakes import DictSkillProvider
+from ports import DangerLevel, ToolSpec
+from runtime import canonical
 
 
 def bulk(count: int = 25, *, index_enabled: bool = True) -> ToolRegistry:

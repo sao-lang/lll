@@ -4,11 +4,11 @@ from __future__ import annotations
 import pytest
 from pydantic import BaseModel, Field
 
-from agentkit.harness.tools import (
+from harness.tools import (
     DangerLevel, SandboxPolicy, ToolDefinitionError, ToolRegistry, tool,
 )
-from agentkit.harness.tools.fakes import FakeSandbox, StaticApprover
-from agentkit.ports import PortCtx, ToolCall, ToolSpec
+from harness.tools.fakes import FakeSandbox, StaticApprover
+from ports import PortCtx, ToolCall, ToolSpec
 from tests.fakes import run
 
 
@@ -71,7 +71,7 @@ def test_t05_registration_rejects_unsafe_configuration():
     with pytest.raises(ToolDefinitionError, match="approval port"):
         ToolRegistry(sandbox=FakeSandbox()).add(critical.__agentkit_tool__)
     # static_check 同样能查出缺失（绕过注册期检查直接注入条目）
-    from agentkit.harness.tools.registry import ToolEntry
+    from harness.tools.registry import ToolEntry
     weak = ToolRegistry(sandbox=None, approver=None)
     weak._tools["high"] = ToolEntry(high.__agentkit_tool__.spec, high)
     assert any("SandboxPort" in e for e in weak.static_check())
@@ -115,7 +115,7 @@ def test_t05_async_tool_function_and_human_port_ask_path():
 
 
 def test_t05_no_approver_returns_false():
-    from agentkit.harness.tools.registry import ToolEntry
+    from harness.tools.registry import ToolEntry
     registry = ToolRegistry(sandbox=FakeSandbox())
     registry._tools["x"] = ToolEntry(
         ToolSpec(name="x", danger=DangerLevel.SAFE,

@@ -16,26 +16,26 @@ sys.path.insert(0, str(ROOT))
 
 import httpx  # noqa: E402
 
-from agentkit.chains import Chains, MountPoint  # noqa: E402
-from agentkit.chains.builtins import AllowFilter  # noqa: E402
-from agentkit.ports import (  # noqa: E402
+from chains import Chains, MountPoint  # noqa: E402
+from chains.builtins import AllowFilter  # noqa: E402
+from ports import (  # noqa: E402
     DangerLevel, LLMRequest, LLMResponse, PortContractError, PortCtx,
     PortRegistry, ToolCall, ToolSpec, call, make_call,
 )
-from agentkit.ports.adapters import (  # noqa: E402
+from ports.adapters import (  # noqa: E402
     InMemoryToolRegistry, JsonlTelemetry, OpenAICompatLLM,
 )
-from agentkit.ports.adapters.fakes import (  # noqa: E402
+from ports.adapters.fakes import (  # noqa: E402
     FailingAdapter, ScriptedLLM, StaticHuman, StaticSkillPort,
 )
-from agentkit.ports.protocols import PORT_PROTOCOLS, LLMPort, ToolPort  # noqa: E402
-from agentkit.runtime import (  # noqa: E402
+from ports.protocols import PORT_PROTOCOLS, LLMPort, ToolPort  # noqa: E402
+from runtime import (  # noqa: E402
     AgentState, Effect, EffectKind, PortMissing, Runner, Session, Usage,
 )
 
 
 def ctx():
-    from agentkit.chains import ChainCtx
+    from chains import ChainCtx
     return ChainCtx(effect=Effect(EffectKind.LLM), state_view=AgentState(), session_id="demo-m3")
 
 

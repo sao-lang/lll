@@ -10,8 +10,8 @@ from typing import Any, Callable
 
 from pydantic import ValidationError
 
-from agentkit.runtime import Effect, EffectKind, PortError, PortMissing, Result
-from agentkit.runtime.types import CallFn
+from runtime import Effect, EffectKind, PortError, PortMissing, Result
+from runtime.types import CallFn
 
 from .dto import LLMRequest, ToolCall
 from .registry import PortCtx, PortRegistry, port_ctx_from

@@ -7,7 +7,7 @@ from __future__ import annotations
 import inspect
 from typing import Any, Protocol
 
-from agentkit.ports import DangerLevel, PortCtx, ToolCall, ToolResult, ToolSpec
+from ports import DangerLevel, PortCtx, ToolCall, ToolResult, ToolSpec
 
 from .registry import ToolRegistry
 

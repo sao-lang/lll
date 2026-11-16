@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Awaitable, Callable, Literal, Protocol, runtime_checkable
 
-from agentkit.runtime import AgentState, Budgets, Effect, PortError, Result
+from runtime import AgentState, Budgets, Effect, PortError, Result
 
 __all__ = [
     "MountPoint", "VerdictAction", "Verdict", "ChainCtx", "ChainEvent",

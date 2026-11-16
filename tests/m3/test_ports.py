@@ -4,14 +4,14 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from agentkit.ports import (
+from ports import (
     PORT_PROTOCOLS, BUILTIN_PORTS, DangerLevel, LLMRequest, LLMResponse,
     LLMPort, PortCtx, PortRegistry, ToolCall, ToolPort, ToolResult, ToolSpec,
     port_ctx_from,
 )
-from agentkit.ports.adapters import InMemoryToolRegistry, JsonlTelemetry
-from agentkit.ports.adapters.fakes import ScriptedLLM
-from agentkit.runtime import Message, Usage
+from ports.adapters import InMemoryToolRegistry, JsonlTelemetry
+from ports.adapters.fakes import ScriptedLLM
+from runtime import Message, Usage
 
 
 def test_t01_dto_validation_and_conversion():
@@ -38,8 +38,8 @@ def test_t01_protocol_family_is_complete():
 
 
 def test_t01_port_ctx_from_chain_ctx():
-    from agentkit.chains import ChainCtx
-    from agentkit.runtime import AgentState, Effect, EffectKind
+    from chains import ChainCtx
+    from runtime import AgentState, Effect, EffectKind
     c = ChainCtx(Effect(EffectKind.LLM), AgentState(), "s1")
     c.trace.extend(["pipe:a", "filter:b", "middleware:c"])
     c.meta["run_id"] = "run-1"
@@ -50,7 +50,7 @@ def test_t01_port_ctx_from_chain_ctx():
 
 
 def test_t01_registry_protocol_enforcement():
-    from agentkit.ports import PortContractError
+    from ports import PortContractError
     reg = PortRegistry()
     reg.register("llm", ScriptedLLM(), protocol=LLMPort)
     with pytest.raises(PortContractError, match="does not implement"):

@@ -1,9 +1,9 @@
 """M2-T04 hook 故障隔离：观察者抛异常不影响主流程且记入 trace。"""
 from __future__ import annotations
 
-from agentkit.chains import Chains, ChainCtx, MountPoint
-from agentkit.chains.builtins import AllowFilter, BoomHook, TracingHook
-from agentkit.runtime import AgentState, Effect, EffectKind, Result
+from chains import Chains, ChainCtx, MountPoint
+from chains.builtins import AllowFilter, BoomHook, TracingHook
+from runtime import AgentState, Effect, EffectKind, Result
 from tests.fakes import run
 
 

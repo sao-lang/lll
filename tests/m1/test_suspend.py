@@ -1,7 +1,7 @@
 """M1-T06 挂起 / 断点恢复：wait_human → checkpoint → 续跑（含跨周期重建）。"""
 from __future__ import annotations
 
-from agentkit.runtime import (
+from runtime import (
     AgentState, Effect, EffectKind, PortMissing, Runner, Session, checkpoint,
     restore_checkpoint,
 )

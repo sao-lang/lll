@@ -11,7 +11,7 @@ from typing import Any, Callable
 
 from pydantic import ValidationError
 
-from agentkit.ports import DangerLevel, PortCtx, ToolCall, ToolResult, ToolSpec
+from ports import DangerLevel, PortCtx, ToolCall, ToolResult, ToolSpec
 
 from .decorator import SandboxPolicy, ToolDefinition, ToolDefinitionError
 

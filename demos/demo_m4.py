@@ -14,19 +14,19 @@ sys.path.insert(0, str(ROOT))
 
 from pydantic import BaseModel, Field  # noqa: E402
 
-from agentkit.chains import Chains, MountPoint  # noqa: E402
-from agentkit.chains.builtins import AllowFilter  # noqa: E402
-from agentkit.harness.tools import (  # noqa: E402
+from chains import Chains, MountPoint  # noqa: E402
+from chains.builtins import AllowFilter  # noqa: E402
+from harness.tools import (  # noqa: E402
     DangerLevel, ToolDefinitionError, ToolIndex, ToolRegistry, tool,
 )
-from agentkit.harness.tools.fakes import (  # noqa: E402
+from harness.tools.fakes import (  # noqa: E402
     DictSkillProvider, FakeMCPTransport, FakeSandbox, StaticApprover,
 )
-from agentkit.harness.tools.mcp import MCPManager  # noqa: E402
-from agentkit.ports import (  # noqa: E402
+from harness.tools.mcp import MCPManager  # noqa: E402
+from ports import (  # noqa: E402
     PortCtx, PortRegistry, ToolCall, ToolSpec, make_call,
 )
-from agentkit.runtime import AgentState, Effect, EffectKind, Runner, Session, canonical  # noqa: E402
+from runtime import AgentState, Effect, EffectKind, Runner, Session, canonical  # noqa: E402
 
 
 class Meta(BaseModel):

@@ -1,7 +1,7 @@
 """M1-T01 解释循环：resume → dispatch → call → fold → Event 顺序正确。"""
 from __future__ import annotations
 
-from agentkit.runtime import (
+from runtime import (
     AgentState, Effect, EffectKind, Message, Runner, Session,
     fold_tool_calls, fold_tool_results,
 )

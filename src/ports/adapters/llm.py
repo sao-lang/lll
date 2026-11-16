@@ -10,7 +10,7 @@ from typing import Any, AsyncIterator
 
 import httpx
 
-from agentkit.runtime import Usage
+from runtime import Usage
 
 from ..dto import LLMRequest, LLMResponse, ToolCall
 from ..registry import PortCtx
