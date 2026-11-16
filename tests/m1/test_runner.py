@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from runtime import (
     AgentState, Effect, EffectKind, Message, Runner, Session,
-    fold_tool_calls, fold_tool_results,
 )
 from tests.fakes import FakeCall, FakeDispatch, llm_response, run
 
@@ -14,9 +13,7 @@ def react(state: AgentState):
         if not getattr(resp, "tool_calls", None):
             yield Effect(EffectKind.END, {"output": resp.content})
             return
-        state = fold_tool_calls(state, resp.tool_calls)
-        results = yield Effect(EffectKind.TOOL, {"calls": resp.tool_calls}, batch=True)
-        state = fold_tool_results(state, results)
+        yield Effect(EffectKind.TOOL, {"calls": resp.tool_calls}, batch=True)
 
 
 def make():

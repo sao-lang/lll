@@ -5,7 +5,7 @@ from pydantic import ValidationError
 
 from chains import ChainCtx
 from ports import PortRegistry, call, classify_exception, make_call
-from ports.adapters.fakes import FailingAdapter, InMemoryTelemetry, ScriptedLLM
+from tests.fakes.m3 import FailingAdapter, InMemoryTelemetry, ScriptedLLM
 from runtime import (
     AgentState, Effect, EffectKind, PortMissing, Result, Usage,
 )

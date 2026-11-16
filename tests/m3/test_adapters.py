@@ -15,7 +15,7 @@ from ports import (
 from ports.adapters import (
     ConsoleHuman, InMemoryToolRegistry, JsonlTelemetry, NullTelemetry, OpenAICompatLLM,
 )
-from ports.adapters.fakes import (
+from tests.fakes.m3 import (
     FailingAdapter, InMemoryTelemetry, ScriptedLLM, StaticHuman, StaticSkillPort,
 )
 from runtime import AgentState, Effect, EffectKind, Message, Usage

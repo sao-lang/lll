@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 
 from ports import PortContractError, PortRegistry
-from ports.adapters.fakes import ScriptedLLM
+from tests.fakes.m3 import ScriptedLLM
 from runtime import PortMissing
 
 

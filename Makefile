@@ -10,16 +10,16 @@ install:
 demo: demo-m1 demo-m2 demo-m3 demo-m4
 
 demo-m1:
-	$(PYTHON) demos/demo_m1.py
+	$(PYTHON) tests/demos/demo_m1.py
 
 demo-m2:
-	$(PYTHON) demos/demo_m2.py
+	$(PYTHON) tests/demos/demo_m2.py
 
 demo-m3:
-	$(PYTHON) demos/demo_m3.py
+	$(PYTHON) tests/demos/demo_m3.py
 
 demo-m4:
-	$(PYTHON) demos/demo_m4.py
+	$(PYTHON) tests/demos/demo_m4.py
 
 test:
 	$(PYTEST) tests -q
@@ -27,13 +27,13 @@ test:
 gate: gate-m1 gate-m2 gate-m3 gate-m4
 
 gate-m1:
-	$(PYTHON) tools/gate_check.py --module m1
+	$(PYTHON) tests/tools/gate_check.py --module m1
 
 gate-m2:
-	$(PYTHON) tools/gate_check.py --module m2
+	$(PYTHON) tests/tools/gate_check.py --module m2
 
 gate-m3:
-	$(PYTHON) tools/gate_check.py --module m3
+	$(PYTHON) tests/tools/gate_check.py --module m3
 
 gate-m4:
-	$(PYTHON) tools/gate_check.py --module m4
+	$(PYTHON) tests/tools/gate_check.py --module m4

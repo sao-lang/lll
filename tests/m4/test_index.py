@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 
 from harness.tools import ToolRegistry, ToolIndex
-from harness.tools.fakes import DictSkillProvider
+from tests.fakes.m4 import DictSkillProvider
 from ports import DangerLevel, ToolSpec
 from runtime import canonical
 

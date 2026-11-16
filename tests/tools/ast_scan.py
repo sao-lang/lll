@@ -1,4 +1,4 @@
-"""红线静态扫描（AST），按模块执行：python tools/ast_scan.py --module m1
+"""红线静态扫描（AST），按模块执行：python tests/tools/ast_scan.py --module m1
 
 M1 纯函数 / M2 组件留名与短路 / M3 适配器无状态与错误信封 / M4 MCP 全量注入。
 扫描对象是真实源码，不做运行时推断；任一红线命中即退出码 1。
@@ -10,14 +10,14 @@ import ast
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"
 
 TARGETS = {
-    "m1": [SRC / "runtime", ROOT / "demos" / "demo_m1.py", ROOT / "tests" / "m1"],
-    "m2": [SRC / "chains", ROOT / "demos" / "demo_m2.py", ROOT / "tests" / "m2"],
-    "m3": [SRC / "ports", ROOT / "demos" / "demo_m3.py", ROOT / "tests" / "m3"],
-    "m4": [SRC / "harness" / "tools", ROOT / "demos" / "demo_m4.py", ROOT / "tests" / "m4"],
+    "m1": [SRC / "runtime", ROOT / "tests" / "demos" / "demo_m1.py", ROOT / "tests" / "m1"],
+    "m2": [SRC / "chains", ROOT / "tests" / "demos" / "demo_m2.py", ROOT / "tests" / "m2"],
+    "m3": [SRC / "ports", ROOT / "tests" / "demos" / "demo_m3.py", ROOT / "tests" / "m3"],
+    "m4": [SRC / "harness" / "tools", ROOT / "tests" / "demos" / "demo_m4.py", ROOT / "tests" / "m4"],
 }
 
 FORBIDDEN_IN_PROGRAM = (
@@ -108,8 +108,6 @@ def scan_m3(files: list[Path]) -> list[str]:
     violations: list[str] = []
     adapters = SRC / "ports" / "adapters"
     for path in sorted(adapters.glob("*.py")):
-        if path.name == "fakes.py":  # fake 允许脚本状态
-            continue
         tree = parse(path)
         for node in tree.body:  # 模块级全局可变状态（__all__ 等元数据除外）
             if isinstance(node, ast.Assign) and isinstance(node.value, (ast.Dict, ast.List, ast.Set)):

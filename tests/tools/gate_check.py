@@ -1,4 +1,4 @@
-"""门禁执行器：python tools/gate_check.py --module m1|m2|m3|m4
+"""门禁执行器：python tests/tools/gate_check.py --module m1|m2|m3|m4
 
 按《门禁体系》G0~G4 逐条检查，全部为合入前置条件：
   G0 契约冻结 / G1 质量(mypy strict + 覆盖率 + docstring + 红线扫描)
@@ -14,7 +14,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"
 sys.path.insert(0, str(SRC))
 PY = sys.executable
@@ -22,7 +22,7 @@ PY = sys.executable
 MODULES = {
     "m1": {
         "title": "M1 核心运行时", "pkg": "runtime", "path": "runtime",
-        "doc": "docs/02-模块详设/M1-核心运行时.md", "demo": "demos/demo_m1.py", "coverage": 90,
+        "doc": "docs/02-模块详设/M1-核心运行时.md", "demo": "tests/demos/demo_m1.py", "coverage": 90,
         "symbols": ["Effect", "EffectKind", "AgentState", "Budgets", "Result", "Runner",
                     "Session", "Event", "fold", "fingerprint", "checkpoint"],
         "behavior": ["test_determinism.py", "test_replay.py", "test_budgets.py", "test_batch.py"],
@@ -30,14 +30,14 @@ MODULES = {
     },
     "m2": {
         "title": "M2 链路系统", "pkg": "chains", "path": "chains",
-        "doc": "docs/02-模块详设/M2-链路系统.md", "demo": "demos/demo_m2.py", "coverage": 90,
+        "doc": "docs/02-模块详设/M2-链路系统.md", "demo": "tests/demos/demo_m2.py", "coverage": 90,
         "symbols": ["Chains", "MountPoint", "Verdict", "ChainCtx", "ChainEvent", "DispatchResult"],
         "behavior": ["test_verdict.py", "test_trace.py", "test_hooks.py"],
         "integration": ["test_chains.py", "test_freeze.py"],
     },
     "m3": {
         "title": "M3 端口协议层", "pkg": "ports", "path": "ports",
-        "doc": "docs/02-模块详设/M3-端口协议层.md", "demo": "demos/demo_m3.py", "coverage": 85,
+        "doc": "docs/02-模块详设/M3-端口协议层.md", "demo": "tests/demos/demo_m3.py", "coverage": 85,
         "symbols": ["PortRegistry", "PortCtx", "LLMRequest", "LLMResponse", "ToolCall",
                     "ToolResult", "ToolSpec", "make_call", "PORT_PROTOCOLS"],
         "behavior": ["test_errors.py", "test_registry.py", "test_ports.py"],
@@ -45,7 +45,7 @@ MODULES = {
     },
     "m4": {
         "title": "M4 工具系统", "pkg": "harness.tools", "path": "harness/tools",
-        "doc": "docs/02-模块详设/M4-工具系统.md", "demo": "demos/demo_m4.py", "coverage": 85,
+        "doc": "docs/02-模块详设/M4-工具系统.md", "demo": "tests/demos/demo_m4.py", "coverage": 85,
         "symbols": ["tool", "ToolRegistry", "ToolIndex", "MCPManager", "DangerLevel",
                     "SandboxPolicy", "ToolDefinitionError"],
         "behavior": ["test_decorator.py", "test_index.py", "test_routing.py"],
@@ -88,7 +88,7 @@ def g0(cfg: dict, module: str) -> None:
                               for k in ("门禁清单", "功能验证矩阵"))
     record("G0 文档契约（门禁清单 + 验证矩阵）", ok, str(doc.relative_to(ROOT)))
 
-    proc = command(["tools/ast_scan.py", "--module", module])
+    proc = command(["tests/tools/ast_scan.py", "--module", module])
     record("G0 装配期静态检查 / 红线扫描", proc.returncode == 0,
            proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else proc.stderr.strip())
 

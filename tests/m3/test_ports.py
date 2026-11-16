@@ -10,7 +10,7 @@ from ports import (
     port_ctx_from,
 )
 from ports.adapters import InMemoryToolRegistry, JsonlTelemetry
-from ports.adapters.fakes import ScriptedLLM
+from tests.fakes.m3 import ScriptedLLM
 from runtime import Message, Usage
 
 

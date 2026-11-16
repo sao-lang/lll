@@ -150,17 +150,19 @@ class MCPPort(Protocol):
 - MCP 工具与本地 @tool 工具在运行时**无差别**：同一 ToolRegistry、同一链路、同一沙盒策略。
 - 掉线熔断：health 检查 + 链路 middleware 提供自动重连/降级。
 
-### 3.3 渐进式披露模块（对应需求 5）
+### 3.3 渐进式披露 + 技能系统（对应需求 5；完整设计见 M11）
 
-统一的 **ToolIndex** 机制，同时服务本地工具、MCP 工具与 Skill：
+统一的三级披露阶梯，同时服务本地工具、MCP 工具与 Skill：
 
 ```
-第一级（常驻上下文）：name + 一句话描述          ← 全量，占 token 极少
-第二级（按需加载）：  完整参数 schema + few-shot  ← 命中意图才注入
-第三级（正文加载）：  Skill 正文 / 工具长文档     ← Effect("skill", part="body")
+第一级（常驻上下文）：name + 一句话描述 + 触发词   ← 全量，占 token 极少
+第二级（按需加载）：  完整参数 schema / 技能清单   ← 命中意图才注入
+第三级（正文加载）：  Skill 正文 / 工具长文档      ← Effect("skill", part="body")
 ```
 
-RouterSkill 架构直接构建在该模块之上。
+- 工具侧披露由 M4 `ToolIndex` 实现；**技能侧（manifest / 发现 / 版本 / 正文 / 组合）由 [M11](../02-模块详设/M11-技能系统与渐进式披露.md) 统一履约**——M1 已声明 `Effect(SKILL)`、M3 已登记 `skill` port、M10 RouterSkill 已引用正文加载，M11 补齐这条此前无归属的断链。
+- 技能 = 带版本与正文的能力说明包，与工具（一个可调用函数）是两种原语；正文按不可信输入处理（复用 M8 净化），token 计入 Budgets 并进 trace。
+- RouterSkill 架构直接构建在 M11 的正文加载之上。
 
 ---
 
@@ -356,7 +358,8 @@ src/                  # 包扁平化：各模块为顶层包，import 形如 `fr
 ├── chains/           # middleware hooks filter pipes + 七挂载点装配
 ├── ports/            # 全部 Protocol 定义（llm tool rag memory store eval telemetry sandbox audit mcp human）
 ├── harness/          # L1 默认实现：各 Port 的 builtin adapters
-│   ├── tools/        # @tool 装饰器 / registry / 渐进式披露 ToolIndex / MCP manager
+│   ├── tools/        # @tool 装饰器 / registry / 工具级披露 ToolIndex / MCP manager
+│   ├── skills/       # 技能清单 / 发现 / 版本 / 正文加载 / 三级披露（M11）
 │   ├── rag/          # 五段流水线 + 内置优化策略
 │   ├── cognition/    # 意图识别 / 规划 / 重规划 / 执行器 / 反思 / 子agent管理
 │   ├── context/      # 上下文组装与压缩策略
@@ -372,11 +375,12 @@ src/                  # 包扁平化：各模块为顶层包，import 形如 `fr
 
 1. **P0**：effect loop + LLMPort/ToolPort/TelemetryPort + @tool 装饰器 + ReAct/ToolUse/Router（验证 70% 设计）
 2. **P1**：事件溯源持久化、会话断点恢复、链路四泳道完备、两级护栏 + 沙盒路由
-3. **P2**：MCP 接入与渐进式披露、RAG 五段流水线、记忆/意图/规划/反思/重规划模块
-4. **P3**：多 Agent（Supervisor/Handoff/Blackboard）、Graph/DAG + static_check、组合算子全家桶、Eval 回归
+3. **P2**：MCP 接入与工具级披露、RAG 五段流水线、记忆/意图/规划/反思/重规划模块
+4. **P2.5**：M11 技能系统——manifest / 发现 / 版本 / 正文加载、三级披露、Effect(skill) 履约
+5. **P3**：多 Agent（Supervisor/Handoff/Blackboard）、Graph/DAG + static_check、组合算子全家桶、Eval 回归、RouterSkill 与 M11 联调
 
 风险提示：链路每个 middleware 必须在 trace 里留名（拒绝黑盒魔法）；Effect 粒度别拆太细（否则回放成本爆炸）。
 
 ---
 
-*整理日期：2026-11-13*
+*整理日期：2026-11-13 · 更新：2026-11-16（§3.3 渐进式披露升级为 M11 技能系统，目录加 harness/skills/）*

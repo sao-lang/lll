@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from harness.tools import (
     DangerLevel, SandboxPolicy, ToolDefinitionError, ToolRegistry, tool,
 )
-from harness.tools.fakes import FakeSandbox, StaticApprover
+from tests.fakes.m4 import FakeSandbox, StaticApprover
 from ports import PortCtx, ToolCall, ToolSpec
 from tests.fakes import run
 

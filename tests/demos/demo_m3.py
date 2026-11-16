@@ -10,7 +10,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT))
 
@@ -25,7 +25,7 @@ from ports import (  # noqa: E402
 from ports.adapters import (  # noqa: E402
     InMemoryToolRegistry, JsonlTelemetry, OpenAICompatLLM,
 )
-from ports.adapters.fakes import (  # noqa: E402
+from tests.fakes.m3 import (  # noqa: E402
     FailingAdapter, ScriptedLLM, StaticHuman, StaticSkillPort,
 )
 from ports.protocols import PORT_PROTOCOLS, LLMPort, ToolPort  # noqa: E402

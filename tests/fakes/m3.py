@@ -10,9 +10,9 @@ from typing import Any, AsyncIterator, Iterator
 
 from runtime import Usage
 
-from ..dto import LLMResponse
-from ..registry import PortCtx
-from .telemetry import TraceSpan
+from ports.dto import LLMResponse
+from ports.registry import PortCtx
+from ports.adapters.telemetry import TraceSpan
 
 __all__ = ["ScriptedLLM", "StaticHuman", "InMemoryTelemetry", "StaticSkillPort", "FailingAdapter"]
 

@@ -1,6 +1,6 @@
 """M1 独立闭环 demo：fake dispatch/call 跑通 ReAct + 确定性 + 回放 + checkpoint。
 
-运行：make demo-m1   （或 .venv/Scripts/python demos/demo_m1.py）
+运行：make demo-m1   （或 .venv/Scripts/python tests/demos/demo_m1.py）
 """
 from __future__ import annotations
 
@@ -8,12 +8,12 @@ import asyncio
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(ROOT))
 
 from runtime import (  # noqa: E402
     AgentState, Effect, EffectKind, Runner, Session, fingerprint,
-    fold_tool_calls, fold_tool_results,
 )
 from tests.fakes import FakeCall, FakeDispatch, llm_response  # noqa: E402
 
@@ -25,9 +25,7 @@ def react_program(state: AgentState):
         if not getattr(resp, "tool_calls", None):
             yield Effect(EffectKind.END, {"output": resp.content})
             return
-        state = fold_tool_calls(state, resp.tool_calls)
-        results = yield Effect(EffectKind.TOOL, {"calls": resp.tool_calls}, batch=True)
-        state = fold_tool_results(state, results)
+        yield Effect(EffectKind.TOOL, {"calls": resp.tool_calls}, batch=True)
 
 
 def make_session() -> tuple[Session, FakeCall]:

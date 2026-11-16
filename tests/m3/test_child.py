@@ -6,7 +6,7 @@ from chains.builtins import AllowFilter
 from ports import (
     LLMResponse, PortRegistry, ToolCall, call, make_call,
 )
-from ports.adapters.fakes import ScriptedLLM
+from tests.fakes.m3 import ScriptedLLM
 from ports.adapters.tools import InMemoryToolRegistry
 from runtime import (
     AgentState, Effect, EffectKind, Runner, Session, Usage,

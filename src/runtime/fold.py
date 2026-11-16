@@ -5,6 +5,7 @@
 - Program 内不直接改 messages / scratchpad，用本文件的 helper 产生新 State；
 - 预算由 payload["budget"] 声明、运行时在 fold 里统一扣减（Program 不许自己数数）。
 """
+
 from __future__ import annotations
 
 from typing import Any, Iterable, Sequence
@@ -12,8 +13,11 @@ from typing import Any, Iterable, Sequence
 from .types import AgentState, Effect, EffectKind, Message, PortError, Result, canonical
 
 __all__ = [
-    "fold", "field", "state_set", "state_append_message", "fold_tool_calls",
-    "fold_tool_results", "replay_events",
+    "field",
+    "fold",
+    "replay_events",
+    "state_append_message",
+    "state_set",
 ]
 
 
@@ -33,16 +37,6 @@ def state_set(state: AgentState, key: str, value: Any) -> AgentState:
 
 def state_append_message(state: AgentState, message: Message) -> AgentState:
     return state.with_(messages=(*state.messages, message))
-
-
-def fold_tool_calls(state: AgentState, calls: Iterable[Any]) -> AgentState:
-    """ReAct 用：把本轮模型给出的 tool_calls 记进 scratchpad（纯函数）。"""
-    return state.set("pending_tool_calls", [_plain_value(c) for c in calls])
-
-
-def fold_tool_results(state: AgentState, results: Iterable[Any]) -> AgentState:
-    """ReAct 用：把工具结果记进 scratchpad（纯函数）。"""
-    return state.set("last_tool_results", [_plain_value(r) for r in results])
 
 
 def _plain_value(obj: Any) -> Any:
@@ -74,8 +68,11 @@ def _message_for(effect: Effect, result: Result) -> Message | None:
     if effect.kind is EffectKind.TOOL:
         call = effect.payload.get("call") or {}
         call_id = field(call, "call_id", effect.payload.get("call_id", ""))
-        payload = {"ok": field(data, "ok", True), "value": _plain_value(field(data, "value")),
-                   "error": field(data, "error")}
+        payload = {
+            "ok": field(data, "ok", True),
+            "value": _plain_value(field(data, "value")),
+            "error": field(data, "error"),
+        }
         return Message(role="tool", content=canonical(payload), name=str(call_id))
     return None
 
@@ -99,9 +96,8 @@ def fold(
             messages.append(message)
         if effect.kind in (EffectKind.SKILL, EffectKind.CHILD, EffectKind.WAIT_HUMAN):
             scratchpad[f"last_{effect.kind.value}"] = _plain_value(result.data)
-        if effect.kind is EffectKind.END:
-            if "output" in effect.payload:
-                scratchpad["output"] = _plain_value(effect.payload["output"])
+        if effect.kind is EffectKind.END and "output" in effect.payload:
+            scratchpad["output"] = _plain_value(effect.payload["output"])
         if result.usage is not None:
             cost += float(field(result.usage, "cost_usd", 0.0))
             tokens += int(field(result.usage, "prompt_tokens", 0)) + int(

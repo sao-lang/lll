@@ -70,16 +70,12 @@ def test_fold_all_effect_kinds_and_failures():
     assert field(obj(a=2), "a") == 2 and field(obj(), "a", 9) == 9
 
 
-def test_fold_tool_helpers_and_budget_delta():
+def test_fold_and_budget_delta():
     state = AgentState()
     state = fold(state, (Effect(EffectKind.TOOL, {"call": {"call_id": "c1"}}),),
                  (Result.success(obj(ok=True, value={"k": "v"}, error=None)),))
     assert '"value"' in state.messages[-1].content or "value" in state.messages[-1].content
     assert state.messages[-1].name == "c1"
-    from runtime.fold import fold_tool_calls, fold_tool_results
-    s = fold_tool_calls(state, [{"name": "t"}])
-    s = fold_tool_results(s, [obj(value=1)])
-    assert s.get("pending_tool_calls") == [{"name": "t"}]
 
 
 def test_dataclass_contracts():

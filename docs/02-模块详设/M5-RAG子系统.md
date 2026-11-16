@@ -138,7 +138,7 @@ class RAGPipeline:
 | 空结果降级 | M5-T05 | `pytest tests/m5/test_fallback.py -q` | 明确提示"未检索到"，模型不编造 |
 | 检索注入检测 | M5-T06 | 与 M8 联测 `tests/m8/test_guardrail.py` | 检索文本含指令被 ON_STATE filter 拦截 |
 | 检索缓存 | M5-T07 | `pytest tests/m5/test_cache.py -q` | 同 Query 命中缓存、invalidate 生效 |
-| 溯源红线 | M5-T08 | `python tools/ast_scan.py --module m5` | 所有拼接路径均附 citations |
+| 溯源红线 | M5-T08 | `python tests/tools/ast_scan.py --module m5` | 所有拼接路径均附 citations |
 | 独立闭环 | M5-D01 | `make demo-m5` + `gate_check --module m5` | 入库 3 篇 → 查询 → 带引用上下文，G0~G4 全绿 |
 
 ---

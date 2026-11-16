@@ -8,7 +8,7 @@ import asyncio
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT))
 
@@ -19,7 +19,7 @@ from chains.builtins import AllowFilter  # noqa: E402
 from harness.tools import (  # noqa: E402
     DangerLevel, ToolDefinitionError, ToolIndex, ToolRegistry, tool,
 )
-from harness.tools.fakes import (  # noqa: E402
+from tests.fakes.m4 import (  # noqa: E402
     DictSkillProvider, FakeMCPTransport, FakeSandbox, StaticApprover,
 )
 from harness.tools.mcp import MCPManager  # noqa: E402

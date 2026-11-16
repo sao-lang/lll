@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 
 from harness.tools import ToolRegistry
-from harness.tools.fakes import FakeMCPTransport, FakeSandbox, StaticApprover
+from tests.fakes.m4 import FakeMCPTransport, FakeSandbox, StaticApprover
 from harness.tools.mcp import MCPManager
 from ports import DangerLevel, PortCtx, ToolCall, ToolSpec
 from tests.fakes import run
