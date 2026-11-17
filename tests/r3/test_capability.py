@@ -9,7 +9,7 @@ import asyncio
 
 from hooks import Decision, DecisionAction, HookBus, HookCtx, HookMode
 
-from harness.resilience import DegradeLadder, Degradation, ResilienceCapability, RetryPolicy
+from harness.resilience import DegradeLadder, DegradeMode, DegradeStep, Degradation, ResilienceCapability, RetryPolicy
 from runtime import AgentState, Effect, EffectKind, Result, Session
 from tests.r3.conftest import err_result, make_ctx, ok_result
 
@@ -108,3 +108,31 @@ class TestR1Integration:
         session = Session(session_id="s-full", program_factory=lambda: program())
         result = asyncio.run(runner.run(session))
         assert result.output == "answer"
+
+
+class TestCustomDegradationAndBudgetGuard:
+    """Degradation / BudgetGuard 可注入（补齐与其余 7 插件的对称性）。"""
+
+    def test_custom_degradation_injected(self) -> None:
+        """注入自定义 Degradation 实例，hooks() 应原样返回该实例。"""
+        ladder = DegradeLadder(steps=(
+            DegradeStep(target="custom", mode=DegradeMode.REROUTE, quality=1.0),
+            DegradeStep(target="", mode=DegradeMode.REFUSE, quality=0.0),
+        ))
+        custom = Degradation(ladder)
+        cap = ResilienceCapability(degradation=custom)
+        hooks = cap.hooks()
+        assert any(h is custom for h in hooks), "自定义 Degradation 未被装配"
+
+    def test_custom_budget_guard_injected(self) -> None:
+        """注入自定义 BudgetGuard（如改 soft 阈值），hooks() 应原样返回。"""
+        from harness.resilience import BudgetGuard
+        custom = BudgetGuard(soft=0.5)
+        cap = ResilienceCapability(budget_guard=custom)
+        hooks = cap.hooks()
+        assert any(h is custom for h in hooks), "自定义 BudgetGuard 未被装配"
+
+    def test_defaults_still_present(self) -> None:
+        """不注入时仍有默认 Degradation / BudgetGuard（行为不变）。"""
+        names = [h.name for h in ResilienceCapability().hooks()]
+        assert "r3_degrade" in names and "r3_budgetguard" in names

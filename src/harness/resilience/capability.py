@@ -48,6 +48,8 @@ class ResilienceCapability:
         watchdog: Watchdog | None = None,
         killswitch: KillSwitch | None = None,
         idempotency: Idempotency | None = None,
+        degradation: Degradation | None = None,
+        budget_guard: BudgetGuard | None = None,
         clock: Callable[[], float] | None = None,
         rng: Random | None = None,
     ) -> None:
@@ -56,6 +58,7 @@ class ResilienceCapability:
         参数：
             ladder: 降级阶梯（缺省 LLM 默认阶梯）。
             breaker/retry/rate_limit/bulkhead/watchdog/killswitch/idempotency: 自定义插件实例。
+            degradation/budget_guard: 自定义降级/软预算守卫实例（缺省由 ladder / 默认阈值构造）。
             clock/rng: 注入时钟与随机源（传给默认插件）。
         """
         self._ladder = ladder or _default_ladder()
@@ -66,6 +69,8 @@ class ResilienceCapability:
         self._watchdog = watchdog
         self._killswitch = killswitch
         self._idempotency = idempotency
+        self._degradation = degradation
+        self._budget_guard = budget_guard
         self._clock = clock
         self._rng = rng
 
@@ -83,8 +88,8 @@ class ResilienceCapability:
             self._rate_limit or RateLimit(clock=self._clock),
             self._breaker or CircuitBreaker(clock=self._clock),
             self._retry or RetryPolicy(rng=self._rng),
-            Degradation(self._ladder),
-            BudgetGuard(),
+            self._degradation or Degradation(self._ladder),
+            self._budget_guard or BudgetGuard(),
         ]
         # 规则 8 例外：装配期对鸭子插件的容错（自定义插件可能非 Hook 子类，
         # 只约定带 priority 属性），故在此用 getattr 兜底 100；运行期无此动态读取。
