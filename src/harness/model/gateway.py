@@ -7,10 +7,13 @@ from __future__ import annotations
 
 from hooks import LLMPort, LLMRequest, LLMResponse, PortCtx
 
+from harness._ctxview import coerce_port_ctx
+
 from .cache import ExactCache, SemanticCache
 from .router import ModelRouter, RuleRouter
 from .structured import StructuredOutputValidator, validate_json_schema
 from .types import (
+    ChatMessage,
     CostAttributor,
     CostGuard,
     CostRecord,
@@ -81,16 +84,22 @@ class ModelGateway:
         return response
 
     def _record_cost(self, response: LLMResponse, ctx: PortCtx) -> None:
-        """从响应的 usage 记录成本（不自行估算），过成本硬闸。"""
+        """从响应的 usage 记录成本（不自行估算），过成本硬闸。
+
+        参数：
+            response: LLM 响应（usage 提供 token/成本）。ctx: Port 上下文，
+                agent_id/user_id 由 coerce_port_ctx 具名视图提供（规则 8）。
+        """
         cost = float(response.usage.cost_usd)
         if self._cost_guard is not None and not self._cost_guard.allow(cost):
             raise ValueError("cost budget exceeded (CostGuard)")
         if self._cost_guard is not None:
             self._cost_guard.charge(cost)
+        view = coerce_port_ctx(ctx)  # 唯一 PortCtx 动态边界（规则 8）
         self.ledger.record(CostRecord(
             run_id=ctx.run_id,
-            agent_id=str(ctx.meta.get("agent_id", "")),
-            user_id=str(ctx.meta.get("user_id", "")),
+            agent_id=view.agent_id,
+            user_id=view.user_id,
             model=response.model,
             usage=response.usage,
         ))
@@ -108,8 +117,10 @@ class ModelGateway:
             if not errors:
                 return current
             repair_prompt = self._validator.build_repair_prompt(current.content or "", errors)
+            # 具名消息结构（规则 3）：明确字段 role/content 不写动态 dict 拼装。
+            repair_message = ChatMessage(role="system", content=repair_prompt)
             patched = LLMRequest(
-                messages=[*request.messages, {"role": "system", "content": repair_prompt}],
+                messages=[*request.messages, dict(repair_message)],
                 model=request.model,
             )
             current = await self._llm.complete(patched, ctx)

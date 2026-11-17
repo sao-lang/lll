@@ -98,6 +98,14 @@
       ],
       "methods": []
     },
+    "harness/model.types.ChatMessage": {
+      "enum_values": [],
+      "fields": [
+        "content",
+        "role"
+      ],
+      "methods": []
+    },
     "harness/model.types.CostAttributor": {
       "enum_values": [],
       "fields": [],
@@ -373,6 +381,18 @@
       ],
       "methods": [
         "classify"
+      ]
+    },
+    "harness/resilience.types.Jitter": {
+      "enum_values": [
+        "DECORRELATED",
+        "EQUAL",
+        "FULL",
+        "NONE"
+      ],
+      "fields": [],
+      "methods": [
+        "coerce"
       ]
     },
     "hooks.bus.DispatchResult": {
@@ -1114,7 +1134,7 @@
     }
   },
   "description": "R1/R2 已实现模块公共契约基线；变更须走设计稳定性门禁评审",
-  "hash": "f9e8d9d50d953b48dcd7f0aad8a9ca248e8659d7df1f34334d550bcced6d9002",
+  "hash": "94921daae1bda8d7e17a2fe4a7f2f408bd2900fc988aa5fe3e67f23945f8e5c9",
   "locked_packages": [
     "runtime",
     "hooks",

@@ -9,11 +9,12 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Literal, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from hooks import LLMRequest, Usage
+from runtime import DynamicValue
 
 __all__ = [
     "StructuredOutputSpec",
@@ -25,7 +26,20 @@ __all__ = [
     "CostGuard",
     "build_cache_key",
     "cache_key_string",
+    "ChatMessage",
 ]
+
+
+class ChatMessage(TypedDict):
+    """LLM 对话消息的具名结构（规则 3：明确字段不写动态 dict）。
+
+    字段：
+        role: 角色（system/user/assistant/tool）。
+        content: 正文。
+    """
+
+    role: str
+    content: str
 
 
 class StructuredOutputSpec(BaseModel):
@@ -42,7 +56,8 @@ class StructuredOutputSpec(BaseModel):
 
     # 对外契约字段名为 "schema"（R4 §4）；内部属性用别名 json_schema，
     # 避免遮蔽 BaseModel.schema() 方法的告警。populate_by_name 让 schema=/json_schema= 均可构造。
-    json_schema: dict[str, Any] = Field(
+    # schema 形态由外部 JSON Schema 决定（规则 4 动态边界），用 DynamicValue 具名别名。
+    json_schema: dict[str, DynamicValue] = Field(
         default_factory=dict, alias="schema", description="JSON Schema"
     )
     mode: Literal["constrained", "prompt", "repair"] = Field(

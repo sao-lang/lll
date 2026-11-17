@@ -19,6 +19,7 @@ from .types import (
     DimensionKey,
     FailureClass,
     FailureClassifier,
+    Jitter,
     backoff_delay,
     classify_failure,
     normalize_code,
@@ -31,7 +32,7 @@ __all__ = [
     "FailureClass", "FailureClassifier", "DimensionKey", "DEFAULT_FAILURE_TABLE",
     "backoff_delay", "classify_failure", "normalize_code",
     "validate_retry_spec", "validate_ladder",
-    "DegradeMode", "DegradeStep", "DegradeLadder",
+    "DegradeMode", "DegradeStep", "DegradeLadder", "Jitter",
     "BreakerStatus", "BreakerState",
     # 插件
     "RetryPolicy", "CircuitBreaker", "Degradation", "RateLimit", "Bulkhead",

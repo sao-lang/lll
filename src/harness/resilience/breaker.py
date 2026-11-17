@@ -9,15 +9,15 @@ from __future__ import annotations
 from collections.abc import Callable, MutableMapping
 from dataclasses import replace
 
-from hooks import Decision, HookCtx, HookMode
+from hooks import Decision, HookCtx, HookMode, LifecycleEvent
 from runtime import Result
+
+from harness._ctxview import Dimension, coerce_ctx
 
 from .types import BreakerState, BreakerStatus
 
 __all__ = ["CircuitBreaker"]
 
-Dimension = tuple[str, str]
-"""维度键：("provider", "openai") 这类二元组。"""
 _EMPTY: Dimension = ("", "")
 
 
@@ -110,15 +110,13 @@ class CircuitBreaker:
         return Decision.continue_()
 
     def _dim_from_ctx(self, ctx: HookCtx) -> Dimension:
-        """从 HookCtx.meta 读取显式维度（装配层写入）；无则空维度。
+        """从具名视图读取显式维度（装配层写入）；无则空维度。
 
+        动态读取已收敛到 coerce_ctx（规则 8），此处只做属性访问。
         不自动从 Effect.payload 推断 model：推理维度由装配层决定（模型路由/工具），
         熔断器只认结构化维度键，避免把 payload 动态键误当隔离维度。
         """
-        raw = ctx.meta.get("breaker_dimension")
-        if isinstance(raw, tuple) and len(raw) == 2:
-            return (str(raw[0]), str(raw[1]))
-        return _EMPTY
+        return coerce_ctx(ctx).breaker_dimension or _EMPTY
 
     def maybe_half_open(self, key: object) -> None:
         """冷却期届满时把 OPEN 迁移到 HALF_OPEN（重置探测窗）。"""
@@ -183,8 +181,9 @@ class CircuitBreaker:
 
     async def __call__(self, ctx: HookCtx) -> Decision:
         """Hook 入口：invoke_error 事件记录失败，其余事件做拦截检查。"""
-        if ctx.event == "invoke_error":
-            result = ctx.meta.get("last_result")
+        if ctx.event == LifecycleEvent.INVOKE_ERROR.value:
+            # last_result 由 coerce_ctx 具名视图提供（规则 8，不再散落 meta.get）。
+            result = coerce_ctx(ctx).last_result
             if isinstance(result, Result):
                 # 失败是否计入熔断由失败分类决定；这里保守计入（429 由上层传 count=False）。
                 self.record(result, ctx)

@@ -31,12 +31,45 @@ __all__ = [
     "DimensionKey",
     "FailureClass",
     "FailureClassifier",
+    "Jitter",
     "backoff_delay",
     "classify_failure",
     "normalize_code",
     "validate_ladder",
     "validate_retry_spec",
 ]
+
+
+class Jitter(str, Enum):
+    """退避抖动策略（有限取值集合，规则 7）。
+
+    成员：
+        NONE: 无抖动（base_delay=0 时禁用，防重试风暴）。
+        FULL: uniform(0, raw)，最常用。
+        EQUAL: raw/2 + uniform(0, raw/2)。
+        DECORRELATED: min(max, prev × uniform(1,3))（AWS 推荐）。
+    """
+
+    NONE = "none"
+    FULL = "full"
+    EQUAL = "equal"
+    DECORRELATED = "decorrelated"
+
+    @classmethod
+    def coerce(cls, raw: Jitter | str) -> Jitter:
+        """把字符串归一为枚举成员；未知值显式回退到 FULL（规则 7）。
+
+        参数：
+            raw: 枚举成员或等价字符串（跨层 RetrySpec.jitter 为 str）。
+        返回：
+            Jitter 成员；无法识别时 FULL（安全防风暴）。
+        """
+        if isinstance(raw, cls):
+            return raw
+        try:
+            return cls(raw)
+        except ValueError:
+            return cls.FULL
 
 
 # --------------------------------------------------------------------------- #
@@ -222,7 +255,7 @@ def validate_retry_spec(spec: RetrySpec) -> None:
         raise ValueError("RetrySpec.max_delay must be >= 0")
     if spec.multiplier < 1:
         raise ValueError("RetrySpec.multiplier must be >= 1")
-    if spec.base_delay == 0 and spec.jitter == "none":
+    if spec.base_delay == 0 and Jitter.coerce(spec.jitter) is Jitter.NONE:
         raise ValueError("base_delay=0 with jitter=none would cause a retry storm")
 
 
@@ -251,19 +284,17 @@ def backoff_delay(
         本次应等待的秒数（≥0）。
     """
     raw = min(spec.max_delay, spec.base_delay * (spec.multiplier ** max(0, attempt - 1)))
-    jitter = spec.jitter
-    if jitter == "none":
+    jitter = Jitter.coerce(spec.jitter)  # 未知值显式回退 FULL（规则 7）
+    if jitter is Jitter.NONE:
         delay = raw
-    elif jitter == "full":
+    elif jitter is Jitter.FULL:
         delay = rng.uniform(0.0, raw)
-    elif jitter == "equal":
+    elif jitter is Jitter.EQUAL:
         half = raw / 2
         delay = half + rng.uniform(0.0, half)
-    elif jitter == "decorrelated":
+    else:  # Jitter.DECORRELATED
         base = prev_delay if prev_delay > 0 else spec.base_delay
         delay = min(spec.max_delay, base * rng.uniform(1.0, 3.0))
-    else:  # 未知 jitter → 安全回退 full（防重试风暴，规则 7 显式回退）
-        delay = rng.uniform(0.0, raw)
     if spec.respect_retry_after and retry_after is not None:
         delay = max(delay, retry_after)
     return max(0.0, delay)

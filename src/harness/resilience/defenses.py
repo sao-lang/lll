@@ -6,14 +6,61 @@
 from __future__ import annotations
 
 from collections.abc import Callable, MutableMapping
+from enum import Enum
 
 from hooks import Decision, HookCtx, HookMode
+
+from harness._ctxview import coerce_ctx
 
 from .types import DegradeLadder, DegradeMode, DegradeStep, validate_ladder
 
 __all__ = [
     "Degradation", "RateLimit", "Bulkhead", "Idempotency", "Watchdog", "KillSwitch",
 ]
+
+
+class _ExceedPolicy(str, Enum):
+    """超限策略的有限取值（规则 7；私有枚举，不进 G5 公共契约）。
+
+    成员：
+        WAIT: 等待/降级（令牌桶缺省，交上层走降级链）。
+        REJECT: 直接拒绝（舱壁缺省）。
+        DEGRADE: 降级。
+    """
+
+    WAIT = "wait"
+    REJECT = "reject"
+    DEGRADE = "degrade"
+
+    @classmethod
+    def coerce(cls, raw: _ExceedPolicy | str) -> _ExceedPolicy:
+        """字符串归一为成员；未知值显式回退 DEGRADE（规则 7），不静默放行。"""
+        if isinstance(raw, cls):
+            return raw
+        try:
+            return cls(raw)
+        except ValueError:
+            return cls.DEGRADE
+
+
+class _KillScope(str, Enum):
+    """killswitch 作用域的有限取值（规则 7；私有枚举）。
+
+    成员：SESSION 仅会话级标志；GLOBAL 含全局标志。
+    """
+
+    SESSION = "session"
+    GLOBAL = "global"
+
+    @classmethod
+    def coerce(cls, raw: _KillScope | str) -> _KillScope:
+        """字符串归一为成员；未知值显式回退 SESSION（最小权限，规则 7）。"""
+        if isinstance(raw, cls):
+            return raw
+        try:
+            return cls(raw)
+        except ValueError:
+            return cls.SESSION
 
 
 class Degradation:
@@ -42,8 +89,14 @@ class Degradation:
         return self._ladder.pick(available if available is not None else self._available)
 
     async def __call__(self, ctx: HookCtx) -> Decision:
-        """GUARD：若有可用降级目标且被显式请求（meta['degrade']），返回 DEGRADE。"""
-        if ctx.meta.get("force_degrade"):
+        """GUARD：被显式请求降级时返回 DEGRADE，否则放行。
+
+        参数：
+            ctx: 钩子上下文；force_degrade 由 coerce_ctx 具名视图提供。
+        返回：
+            DEGRADE（选中的降级目标）或 CONTINUE。
+        """
+        if coerce_ctx(ctx).force_degrade:
             choice = self.pick()
             return Decision.degrade(choice.target or DegradeMode.REFUSE.value)
         return Decision.continue_()
@@ -63,13 +116,19 @@ class RateLimit:
         *,
         rate: float = 60.0,
         burst: int = 10,
-        on_exceed: str = "wait",
+        on_exceed: _ExceedPolicy | str = _ExceedPolicy.WAIT,
         clock: Callable[[], float] | None = None,
     ) -> None:
-        """装配令牌桶：rate 令牌/秒，burst 容量，超限策略 on_exceed。"""
+        """装配令牌桶：rate 令牌/秒，burst 容量，超限策略 on_exceed。
+
+        参数：
+            rate: 每秒补充令牌数。burst: 桶容量。
+            on_exceed: 超限策略，接受 _ExceedPolicy 或字符串，未知值回退 DEGRADE。
+            clock: 注入时钟（秒），缺省常量 0（单实例闭环）。
+        """
         self._rate = rate
         self._burst = burst
-        self._on_exceed = on_exceed
+        self._on_exceed = _ExceedPolicy.coerce(on_exceed)
         self._clock = clock or (lambda: 0.0)
         self._tokens = float(burst)
         self._last = self._clock()
@@ -82,17 +141,24 @@ class RateLimit:
         self._last = now
 
     def check(self, ctx: HookCtx) -> Decision:
-        """取一个令牌；不足按策略返回 DENY（reject）或 DEGRADE（wait/degrade）。"""
+        """取一个令牌；不足按策略返回 DENY（reject）或 DEGRADE（wait/degrade）。
+
+        参数：
+            ctx: 钩子上下文（仅写 trace）。
+        返回：
+            CONTINUE / DENY / DEGRADE。
+        """
         self._refill()
         if self._tokens >= 1.0:
             self._tokens -= 1.0
             return Decision.continue_()
         ctx.trace.append("ratelimit:exceed")
-        if self._on_exceed == "reject":
+        if self._on_exceed is _ExceedPolicy.REJECT:
             return Decision.deny("rate_limited")
         return Decision.degrade("rate_limited")
 
     async def __call__(self, ctx: HookCtx) -> Decision:
+        """GUARD 入口：复用 check 的令牌桶判定。"""
         return self.check(ctx)
 
 
@@ -110,16 +176,27 @@ class Bulkhead:
         *,
         pools: dict[str, int] | None = None,
         acquire_timeout: float = 5.0,
-        on_full: str = "reject",
+        on_full: _ExceedPolicy | str = _ExceedPolicy.REJECT,
     ) -> None:
-        """装配舱壁：pools 为 池名→容量；on_full 为满时策略。"""
+        """装配舱壁：pools 为池名→容量；on_full 为满时策略（未知值回退 DEGRADE）。
+
+        参数：
+            pools: 池名→并发上限；缺省 {"default": 10}。
+            acquire_timeout: 获取槽的超时（单实例闭环暂不阻塞，仅元数据）。
+            on_full: 池满策略，接受 _ExceedPolicy 或字符串。
+        """
         self._capacity = dict(pools or {"default": 10})
         self._used: dict[str, int] = {name: 0 for name in self._capacity}
         self._timeout = acquire_timeout
-        self._on_full = on_full
+        self._on_full = _ExceedPolicy.coerce(on_full)
 
     def acquire(self, pool: str, ctx: HookCtx | None = None) -> bool:
-        """占用一个槽内；成功 True，池满 False。"""
+        """占用一个槽内；成功 True，池满 False。
+
+        参数：
+            pool: 池名（未声明时回退 default 容量）。
+            ctx: 保留参数（供未来 trace），当前不读取。
+        """
         cap = self._capacity.get(pool, self._capacity.get("default", 0))
         used = self._used.get(pool, 0)
         if used >= cap:
@@ -132,10 +209,15 @@ class Bulkhead:
         self._used[pool] = max(0, self._used.get(pool, 0) - 1)
 
     async def __call__(self, ctx: HookCtx) -> Decision:
-        pool = str(ctx.meta.get("bulkhead_pool", "default"))
+        """GUARD 入口：按具名视图的池名占槽，满时按策略拒绝或降级。"""
+        pool = coerce_ctx(ctx).bulkhead_pool
         if self.acquire(pool, ctx):
             return Decision.continue_()
-        return Decision.deny("bulkhead_full") if self._on_full == "reject" else Decision.degrade("bulkhead_full")
+        return (
+            Decision.deny("bulkhead_full")
+            if self._on_full is _ExceedPolicy.REJECT
+            else Decision.degrade("bulkhead_full")
+        )
 
 
 class Idempotency:
@@ -160,8 +242,9 @@ class Idempotency:
         return False
 
     async def __call__(self, ctx: HookCtx) -> Decision:
-        key = ctx.effect.payload.get("x-idempotency-key")
-        if key and self.check_and_mark(str(key)):
+        """GUARD 入口：幂等键来自具名视图，重复副作用直接 DENY。"""
+        key = coerce_ctx(ctx).idempotency_key
+        if key and self.check_and_mark(key):
             ctx.trace.append("idempotency:duplicate")
             return Decision.deny("duplicate_side_effect")
         return Decision.continue_()
@@ -184,7 +267,13 @@ class Watchdog:
         self._history: list[str] = []
 
     def observe(self, kind: str, ctx: HookCtx | None = None) -> Decision:
-        """记录一个观测点；命中重复或交替模式返回 ABORT。"""
+        """记录一个观测点；命中重复或交替模式返回 ABORT。
+
+        参数：
+            kind: 观测标识（重复判定用）。ctx: 上下文（调用方传入，当前不读取）。
+        返回：
+            ABORT 或 CONTINUE。
+        """
         self._history.append(kind)
         self._history = self._history[-self._window:]
         if self._repeat_k > 0 and len(self._history) >= self._repeat_k:
@@ -198,7 +287,9 @@ class Watchdog:
         return Decision.continue_()
 
     async def __call__(self, ctx: HookCtx) -> Decision:
-        kind = str(ctx.meta.get("watchdog_kind", ctx.effect.kind.value))
+        """GUARD 入口：观测标识取自具名视图，缺省回退到 effect.kind。"""
+        view = coerce_ctx(ctx)
+        kind = view.watchdog_kind or ctx.effect.kind.value
         return self.observe(kind, ctx)
 
 
@@ -215,19 +306,30 @@ class KillSwitch:
         self,
         *,
         flag_store: MutableMapping[str, bool] | None = None,
-        scope: str = "session",
+        scope: _KillScope | str = _KillScope.SESSION,
     ) -> None:
-        """装配标志存储（缺省进程内字典）与作用域（session/global）。"""
+        """装配标志存储（缺省进程内字典）与作用域（未知值回退 SESSION，规则 7）。
+
+        参数：
+            flag_store: 标志存储（可注入共享 store）。scope: 作用域枚举或字符串。
+        """
         self.flag_store = flag_store if flag_store is not None else {}
-        self._scope = scope
+        self._scope = _KillScope.coerce(scope)
 
     def check(self, ctx: HookCtx) -> Decision:
-        """任一全局标志或会话标志置位 → ABORT。"""
-        keys = [f"kill:global", f"kill:{self._scope}"]
+        """任一全局标志或本作用域标志置位 → ABORT。
+
+        参数：
+            ctx: 钩子上下文（仅写 trace）。
+        返回：
+            ABORT 或 CONTINUE。
+        """
+        keys = ("kill:global", f"kill:{self._scope.value}")
         if any(self.flag_store.get(k, False) for k in keys):
             ctx.trace.append("killswitch:triggered")
             return Decision.abort("killswitch")
         return Decision.continue_()
 
     async def __call__(self, ctx: HookCtx) -> Decision:
+        """GUARD 入口：复用 check 的标志判定。"""
         return self.check(ctx)

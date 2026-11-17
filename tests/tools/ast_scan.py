@@ -128,6 +128,65 @@ IO_SDK_PREFIXES = (
     "httpx", "requests", "aiohttp", "boto3", "sqlalchemy", "urllib", "socket",
 )
 
+# 规则 8 允许的"动态读取边界"模块：context 动态字段只读在这里发生。
+DYNAMIC_BOUNDARY_FILES = {"_ctxview.py"}
+
+
+def _scan_coding_rules(files: list[Path], pkg: Path) -> list[str]:
+    """编码规则 7/8 红线（防回归）：禁魔法串比较 + 动态读取须收敛到边界。
+
+    规则 7：有限取值集合用 Enum，禁止 `x == "literal"` 这类裸字符串比较
+            （trace 标签/错误码作为参数传给 Decision 不算比较，不拦）。
+    规则 8：ctx.meta / effect.payload 的动态读取只允许在 _ctxview.py 边界模块；
+            插件内出现 .meta.get/.payload.get/getattr 即违规（除非上一行有
+            "规则 8 例外" 注释，用于鸭子插件装配期容错）。
+    """
+    violations: list[str] = []
+    for path in files:
+        if not path.is_relative_to(pkg) or path.name in DYNAMIC_BOUNDARY_FILES:
+            continue
+        tree = parse(path)
+        lines = path.read_text(encoding="utf-8").splitlines()
+
+        # 规则 7：字符串字面量比较
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Compare):
+                for op, comp in zip(node.ops, node.comparators):
+                    if isinstance(op, (ast.Eq, ast.NotEq, ast.In, ast.NotIn)):
+                        if isinstance(comp, ast.Constant) and isinstance(comp.value, str):
+                            violations.append(
+                                f"{path.relative_to(ROOT)}:{node.lineno} 规则7 魔法串比较 "
+                                f"{ast.unparse(node.left)} vs {comp.value!r}（应改用 Enum）"
+                            )
+
+        # 规则 8：动态读取须在边界模块
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            is_dynamic = False
+            # .meta.get(...) / .payload.get(...)
+            if isinstance(func, ast.Attribute) and func.attr == "get":
+                base = ast.unparse(func.value)
+                if base.endswith(".meta") or base.endswith(".payload"):
+                    is_dynamic = True
+            # getattr(...)
+            if isinstance(func, ast.Name) and func.id == "getattr":
+                is_dynamic = True
+            if not is_dynamic:
+                continue
+            # 例外：紧邻上方 3 行内含"规则 8 例外"注释（装配期鸭子插件容错）
+            comment_ok = any(
+                "规则 8 例外" in lines[i]
+                for i in range(max(0, node.lineno - 4), min(len(lines), node.lineno - 1))
+            )
+            if not comment_ok:
+                violations.append(
+                    f"{path.relative_to(ROOT)}:{node.lineno} 规则8 动态读取未收敛到 "
+                    f"_ctxview.py 边界（或缺少'规则 8 例外'注释）"
+                )
+    return violations
+
 
 def scan_r3(files: list[Path]) -> list[str]:
     """R3 红线：降级装配期校验 + 幂等键检查 + hook 留名 + 不 import IO SDK。"""
@@ -140,9 +199,10 @@ def scan_r3(files: list[Path]) -> list[str]:
         violations.append("Degradation 未调用 validate_ladder（降级成环/无拒答兜底未拦截）")
 
     # 重试插件必须检查幂等键（无幂等键的副作用不得重试）。
+    # 幂等键由 _ctxview 边界读取后以具名字段提供，故检查 idempotency_key 引用。
     retry = pkg / "retry.py"
-    if retry.exists() and "x-idempotency-key" not in retry.read_text(encoding="utf-8"):
-        violations.append("RetryPolicy 未检查 x-idempotency-key（无幂等键副作用可能重复执行）")
+    if retry.exists() and "idempotency_key" not in retry.read_text(encoding="utf-8"):
+        violations.append("RetryPolicy 未检查 idempotency_key（无幂等键副作用可能重复执行）")
 
     # 能力插件不得直接 import IO SDK（分层纪律：只依赖 R1+R2）。
     for path in files:
@@ -167,6 +227,9 @@ def scan_r3(files: list[Path]) -> list[str]:
             if isinstance(node, ast.ClassDef) and node.name.endswith("Hook"):
                 if not _declares_name(node):
                     violations.append(f"{path.relative_to(ROOT)} hook 类 {node.name} 无 name 属性")
+
+    # 编码规则 7/8 红线（防回归）
+    violations.extend(_scan_coding_rules(files, pkg))
     return violations
 
 
@@ -202,6 +265,9 @@ def scan_r4(files: list[Path]) -> list[str]:
             elif isinstance(node, ast.ImportFrom) and node.module:
                 if any(node.module.startswith(p) for p in IO_SDK_PREFIXES):
                     violations.append(f"{path.relative_to(ROOT)} import IO SDK {node.module}")
+
+    # 编码规则 7/8 红线（防回归）
+    violations.extend(_scan_coding_rules(files, pkg))
     return violations
 
 

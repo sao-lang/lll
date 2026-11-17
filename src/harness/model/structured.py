@@ -7,19 +7,67 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from collections.abc import Callable
+from enum import Enum
+
+from runtime import DynamicValue
 
 from .types import StructuredOutputSpec
 
 __all__ = ["validate_json_schema", "StructuredOutputValidator"]
 
 
-def validate_json_schema(value: object, schema: dict[str, Any]) -> list[str]:
+class _JsonType(str, Enum):
+    """JSON Schema 的 type 有限取值（规则 7；私有枚举，不进 G5 公共契约）。
+
+    成员对应 JSON Schema 标准类型；_type_ok 用查表分派，未知值显式回退"不校验"。
+    """
+
+    OBJECT = "object"
+    ARRAY = "array"
+    STRING = "string"
+    NUMBER = "number"
+    INTEGER = "integer"
+    BOOLEAN = "boolean"
+    NULL = "null"
+
+    @classmethod
+    def coerce(cls, raw: object) -> _JsonType | None:
+        """字符串归一为成员；未知/缺省值回退 None（不校验，规则 7 显式回退）。"""
+        if not isinstance(raw, str):
+            return None
+        try:
+            return cls(raw)
+        except ValueError:
+            return None
+
+
+class _OutputMode(str, Enum):
+    """结构化输出模式的有限取值（规则 7；与 pydantic Literal 契约对齐）。
+
+    成员：CONSTRAINED 约束解码 / PROMPT 仅提示 / REPAIR 校验失败后修复重试。
+    """
+
+    CONSTRAINED = "constrained"
+    PROMPT = "prompt"
+    REPAIR = "repair"
+
+    @classmethod
+    def coerce(cls, raw: str) -> _OutputMode:
+        """字符串归一为成员；未知值显式回退 REPAIR（保守校验，规则 7）。"""
+        try:
+            return cls(raw)
+        except ValueError:
+            return cls.REPAIR
+
+
+def validate_json_schema(value: object, schema: dict[str, DynamicValue]) -> list[str]:
     """校验一个值是否符合最小 JSON Schema，返回错误列表（空表示合法）。
 
     参数：
         value: 待校验值；若为 str 先尝试 json.loads（模型常返回 JSON 文本）。
         schema: 支持 type/required/properties/enum/minimum 关键字。
+            schema 由外部注入、形态由 JSON Schema 决定，故用 DynamicValue（规则 4）。
     返回：
         错误描述列表；空列表表示通过。
     """
@@ -34,45 +82,51 @@ def validate_json_schema(value: object, schema: dict[str, Any]) -> list[str]:
     return errors
 
 
-def _check(data: Any, schema: dict[str, Any], path: str, errors: list[str]) -> None:
-    """递归校验单个节点，把错误追加到 errors。"""
-    expected = schema.get("type")
-    if expected:
-        ok = _type_ok(data, expected)
-        if not ok:
-            errors.append(f"{path}: expected {expected}, got {type(data).__name__}")
-            return  # 类型错则不继续深挖，避免噪音
+def _check(data: DynamicValue, schema: dict[str, DynamicValue], path: str, errors: list[str]) -> None:
+    """递归校验单个节点，把错误追加到 errors。
 
-    if "enum" in schema and data not in schema["enum"]:
-        errors.append(f"{path}: value {data!r} not in enum {schema['enum']}")
+    参数：
+        data: 待校验节点（形态由 JSON 决定，DynamicValue 动态边界）。
+        schema: 该节点对应的 schema 片段。path: 错误路径（如 $.name）。
+        errors: 累计错误列表（原地追加）。
+    """
+    expected = _JsonType.coerce(schema.get("type"))
+    if expected is not None and not _type_ok(data, expected):
+        errors.append(f"{path}: expected {expected.value}, got {type(data).__name__}")
+        return  # 类型错则不继续深挖，避免噪音
 
-    if expected == "object" and isinstance(data, dict):
+    raw_enum = schema.get("enum")
+    if isinstance(raw_enum, list) and data not in raw_enum:
+        errors.append(f"{path}: value {data!r} not in enum {raw_enum}")
+
+    if expected is _JsonType.OBJECT and isinstance(data, dict):
         for req in schema.get("required", []):
             if req not in data:
                 errors.append(f"{path}.{req}: required field missing")
-        for prop, sub_schema in schema.get("properties", {}).items():
-            if prop in data:
-                _check(data[prop], sub_schema, f"{path}.{prop}", errors)
+        raw_props = schema.get("properties", {})
+        if isinstance(raw_props, dict):
+            for prop, sub_schema in raw_props.items():
+                if prop in data and isinstance(sub_schema, dict):
+                    _check(data[prop], sub_schema, f"{path}.{prop}", errors)
 
-    if expected == "number" or expected == "integer":
+    if expected in (_JsonType.NUMBER, _JsonType.INTEGER):
         minimum = schema.get("minimum")
-        if minimum is not None and isinstance(data, (int, float)) and data < minimum:
+        if isinstance(minimum, (int, float)) and isinstance(data, (int, float)) and data < minimum:
             errors.append(f"{path}: {data} < minimum {minimum}")
 
 
-def _type_ok(data: Any, expected: str) -> bool:
-    """判断数据是否符合 JSON Schema 的 type 声明。"""
-    mapping = {
-        "object": lambda v: isinstance(v, dict),
-        "array": lambda v: isinstance(v, list),
-        "string": lambda v: isinstance(v, str),
-        "number": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool),
-        "integer": lambda v: isinstance(v, int) and not isinstance(v, bool),
-        "boolean": lambda v: isinstance(v, bool),
-        "null": lambda v: v is None,
+def _type_ok(data: DynamicValue, expected: _JsonType) -> bool:
+    """判断数据是否符合 JSON Schema 的 type 声明（枚举分派，规则 7）。"""
+    checkers: dict[_JsonType, Callable[[DynamicValue], bool]] = {
+        _JsonType.OBJECT: lambda v: isinstance(v, dict),
+        _JsonType.ARRAY: lambda v: isinstance(v, list),
+        _JsonType.STRING: lambda v: isinstance(v, str),
+        _JsonType.NUMBER: lambda v: isinstance(v, (int, float)) and not isinstance(v, bool),
+        _JsonType.INTEGER: lambda v: isinstance(v, int) and not isinstance(v, bool),
+        _JsonType.BOOLEAN: lambda v: isinstance(v, bool),
+        _JsonType.NULL: lambda v: v is None,
     }
-    check = mapping.get(expected)
-    return check(data) if check else True
+    return checkers[expected](data)
 
 
 class StructuredOutputValidator:
@@ -85,24 +139,26 @@ class StructuredOutputValidator:
     def __init__(self, spec: StructuredOutputSpec) -> None:
         """装配规格。"""
         self._spec = spec
+        self._mode = _OutputMode.coerce(spec.mode)
 
     @property
     def should_repair(self) -> bool:
-        """是否允许自然语言修复重试。"""
-        return self._spec.mode == "repair"
+        """是否允许自然语言修复重试（枚举比较，非裸字符串）。"""
+        return self._mode is _OutputMode.REPAIR
 
     @property
     def max_repair(self) -> int:
         """最大修复次数。"""
         return self._spec.max_repair
 
-    def validate(self, text: str) -> tuple[dict[str, Any] | list[Any] | str | int | None, bool]:
+    def validate(self, text: str) -> tuple[dict[str, DynamicValue] | list[DynamicValue] | str | int | None, bool]:
         """校验模型输出：解析 + schema 校验。
 
         参数：
             text: 模型原始输出文本。
         返回：
-            (解析值, 是否合法)；strict 模式下非法输出 ok 必为 False。
+            (解析值, 是否合法)；解析值形态由模型/JSON 决定，故用 DynamicValue（规则 4）。
+            strict 模式下非法输出 ok 必为 False。
         """
         errors = validate_json_schema(text, self._spec.json_schema)
         if errors:
