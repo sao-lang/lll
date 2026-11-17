@@ -517,7 +517,7 @@ def _plain(obj: DynamicValue) -> DynamicValue:
     if isinstance(obj, (list, tuple, set, frozenset)):
         return [_plain(v) for v in obj]
     if hasattr(obj, "to_dict"):
-        return _plain(obj.to_dict())
+        return _plain(obj.to_dict()) # type: ignore
     return str(obj)
 
 
