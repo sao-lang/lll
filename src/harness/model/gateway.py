@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+
 from harness._ctxview import coerce_port_ctx
 from hooks import LLMPort, LLMRequest, LLMResponse, PortCtx
 
@@ -81,6 +83,42 @@ class ModelGateway:
 
         self._cache.put(key, response, version=self._prompt_version)
         return response
+
+    async def stream(self, request: LLMRequest, ctx: PortCtx) -> AsyncIterator[str]:
+        """流式补全（R4 §4.1）：缓存命中吐缓存，否则逐块转发并在结束时结算。
+
+        参数：
+            request: LLM 请求。ctx: Port 上下文。
+        产出：
+            文本块（逐块）；取消由消费方 aclose() 传播。
+        说明：
+            流式路径禁用结构化校验（无法校验半截流），不经过 R1 Effect 循环。
+        """
+        key = build_cache_key(request, prompt_version=self._prompt_version).value
+        cached = self._cache.get(key, version=self._prompt_version)
+        if cached is not None:
+            # 流式是 Port 层，ctx 是 PortCtx（无 hook trace）；缓存命中信息随响应走。
+            for ch in cached.content or "":
+                yield ch
+            return
+
+        chunks: list[str] = []
+        # LLMPort.stream 返回 AsyncIterator（PEP 525 签名），直接 async for 迭代。
+        async for chunk in self._llm.stream(request, ctx):
+            chunks.append(chunk)
+            yield chunk
+
+        # 流结束：后端必须已把 usage 写入协议成员 last_usage（LLMPort 契约）。
+        # 缺失即拒绝服务并显式报错——绝不记一笔假 zero-cost 掩盖账单缺口。
+        usage = self._llm.last_usage
+        if usage is None:
+            raise ValueError(
+                "LLMPort.stream() finished without setting last_usage; "
+                "cost cannot be settled (fake/zero-cost accounting forbidden)"
+            )
+        full_response = LLMResponse(content="".join(chunks), usage=usage)
+        self._record_cost(full_response, ctx)
+        self._cache.put(key, full_response, version=self._prompt_version)
 
     def _record_cost(self, response: LLMResponse, ctx: PortCtx) -> None:
         """从响应的 usage 记录成本（不自行估算），过成本硬闸。

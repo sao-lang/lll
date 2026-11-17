@@ -21,7 +21,7 @@ from typing import Protocol, runtime_checkable
 
 from runtime import DynamicValue
 
-from .dto import LLMRequest, LLMResponse, PortCtx, ToolCall, ToolResult, ToolSpec
+from .dto import LLMRequest, LLMResponse, PortCtx, ToolCall, ToolResult, ToolSpec, Usage
 
 __all__ = [
     "PORT_PROTOCOLS",
@@ -45,13 +45,24 @@ __all__ = [
 class LLMPort(Protocol):
     """LLM 能力：一次性补全与流式补全。"""
     name: str
+    last_usage: Usage | None
+    """最近一次调用的 token/成本结算数据；流式路径结束后由网关读取并记账。
+
+    为何是协议成员：SSE 流的文本块不携带 usage，真实后端（OpenAI 需 stream_options.include_usage）
+    必须在末块收齐后写入本属性，否则成本无法结算。网关不估算、不兜零。
+    """
 
     async def complete(self, req: LLMRequest, ctx: PortCtx) -> LLMResponse:
-        """一次性补全：返回结构化响应（含 tool_calls 与 usage）。"""
+        """一次性补全：返回结构化响应（含 tool_calls 与 usage）；同时写 last_usage。"""
         ...
 
-    async def stream(self, req: LLMRequest, ctx: PortCtx) -> AsyncIterator[str]:
-        """流式补全：逐块产出文本，取消由调用方传播。"""
+    def stream(self, req: LLMRequest, ctx: PortCtx) -> AsyncIterator[str]:
+        """流式补全：返回异步迭代器逐块产出文本，取消由调用方 aclose() 传播。
+
+        签名为何不是 async def：Python 异步生成器函数（async def + yield）调用即返回
+        AsyncIterator，若声明 async def -> AsyncIterator 会得到"coroutine of iterator"，
+        调用方需 await 才能迭代，与 async for 惯例不符。PEP 525 标准签名即 `def -> AsyncIterator`。
+        """
         ...
 
 

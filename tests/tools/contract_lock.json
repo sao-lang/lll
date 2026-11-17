@@ -39,7 +39,8 @@
       "enum_values": [],
       "fields": [],
       "methods": [
-        "complete"
+        "complete",
+        "stream"
       ]
     },
     "harness/model.router.ModelRouter": {
@@ -518,6 +519,7 @@
     "hooks.protocols.LLMPort": {
       "enum_values": [],
       "fields": [
+        "last_usage",
         "name"
       ],
       "methods": [
@@ -910,6 +912,16 @@
         "exceeded"
       ]
     },
+    "runtime.types.CancellationToken": {
+      "enum_values": [],
+      "fields": [
+        "cancelled",
+        "reason"
+      ],
+      "methods": [
+        "cancel"
+      ]
+    },
     "runtime.types.Effect": {
       "enum_values": [],
       "fields": [
@@ -1114,7 +1126,7 @@
     }
   },
   "description": "R1/R2 已实现模块公共契约基线；变更须走设计稳定性门禁评审",
-  "hash": "85cc8bae4be73bef4de1d1deb94988dd07cd552282ea8ef9b437eabeca14be10",
+  "hash": "58544c9f72c0ed314050bbe51e596b8726e09ed17a97aaf618b389912244f8fc",
   "locked_packages": [
     "runtime",
     "hooks",

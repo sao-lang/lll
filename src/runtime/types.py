@@ -23,7 +23,7 @@ __all__ = [
     "DoneSentinel", "DynamicValue", "Effect", "EffectKind", "EffectPayload", "Event",
     "EventStore", "JsonSnapshot", "Message", "Payload", "PortError", "Program",
     "Result", "RunResult", "RuntimeCtx", "Scratchpad", "Session", "StateSnapshot",
-    "StepReport", "Usage", "canonical", "checkpoint", "fingerprint", "restore_checkpoint",
+    "StepReport", "Usage", "CancellationToken", "canonical", "checkpoint", "fingerprint", "restore_checkpoint",
 ]
 
 # --------------------------------------------------------------------------- #
@@ -496,6 +496,23 @@ class Event:
     tokens: int = 0
     status: str = "running"
     reason: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class CancellationToken:
+    """取消令牌（R1-A5）：显式注入，向子 effect/流递归传播，不用全局状态。
+
+    字段：
+        cancelled: 是否已取消。reason: 取消原因（进事件溯源）。
+    不可变：cancel() 返回新令牌，避免共享状态被就地改写（并发安全）。
+    """
+
+    cancelled: bool = False
+    reason: str = ""
+
+    def cancel(self, reason: str) -> CancellationToken:
+        """生成已取消的新令牌（原令牌不变）。"""
+        return CancellationToken(cancelled=True, reason=reason)
 
 
 @dataclass

@@ -23,6 +23,7 @@ from .types import (
     DONE,
     AgentState,
     CallFn,
+    CancellationToken,
     DispatchFn,
     DynamicValue,
     Effect,
@@ -211,6 +212,7 @@ class Runner:
         ctx_factory: Callable[[Effect, Session], DynamicValue] | None = None,
         checkpoint_every: int = 1,
         max_steps: int = 1000,
+        cancellation: CancellationToken | None = None,
     ) -> None:
         """装配 Runner：dispatch（上层判决）与 call（Port 调用）为必注入函数。
 
@@ -221,6 +223,7 @@ class Runner:
             ctx_factory: 上下文工厂；缺省构造 RuntimeCtx。上层可换成 HookCtx。
             checkpoint_every: 每 N 步落一次快照（终态总是落），最小强制为 1。
             max_steps: 单 run 的步数硬上限，防止死循环。
+            cancellation: 取消令牌；缺省不取消。子 Agent 派生时继承同一令牌（A5 递归传播）。
         """
         self._dispatch = dispatch  # 上层链路判决
         self._call = call  # Port 实际调用
@@ -232,6 +235,7 @@ class Runner:
         )
         self._checkpoint_every = max(1, checkpoint_every)  # 至少每步落盘
         self._max_steps = max_steps  # 步数硬上限
+        self._cancellation = cancellation  # 取消令牌（A5；None 表示不可取消）
         self._runtimes: dict[str, _Runtime] = {}  # session_id → 执行态
         self._reasons: dict[str, str] = {}  # session_id → 最近一次结束原因
         self._errors: dict[str, str | None] = {}  # session_id → 最近一次错误码
@@ -297,6 +301,8 @@ class Runner:
             注入 invoke 后的同一上下文对象（原地设置字段）。
         """
         ctx.invoke = lambda effect, c: runner._call(effect, c)
+        # A5：子 Agent 继承父 Runner 的取消令牌（递归传播）。
+        ctx.cancellation = runner._cancellation
         return ctx
 
     async def _execute(
@@ -379,6 +385,26 @@ class Runner:
         返回：
             StepReport：本步步号、新 State、Effect/Result、状态与事件。
         """
+        # A5 取消检查：令牌已置位则本步不执行任何 Effect，写 cancelled 事件并报告。
+        if self._cancellation is not None and self._cancellation.cancelled:
+            session.events.append(Event(
+                seq=len(session.events) + 1,
+                session_id=session.session_id,
+                step=0,
+                state_snapshot=session.state,
+                effects=(),
+                results=(),
+                status="cancelled",
+                reason=self._cancellation.reason,
+            ))
+            return StepReport(
+                step=0,
+                state=session.state,
+                status="cancelled",
+                reason=self._cancellation.reason,
+                events=tuple(session.events),
+            )
+
         try:
             rt = self._runtime(session)
         except (ProgramInvalid, ProgramCrashed) as exc:

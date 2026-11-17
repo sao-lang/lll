@@ -11,7 +11,7 @@ from .errors import (
 from .fold import fold, replay_events, state_append_message, state_set
 from .interpreter import EffectBatch, Interpreter, InterpreterImpl
 from .types import (
-    DONE, AgentState, BudgetDelta, Budgets, CallFn, DispatchFn, DoneSentinel,
+    DONE, AgentState, BudgetDelta, Budgets, CallFn, CancellationToken, DispatchFn, DoneSentinel,
     DynamicValue, Effect, EffectKind, EffectPayload, Event, EventStore,
     JsonSnapshot, Message, Payload, PortError, Program, Result, RunResult,
     RuntimeCtx, Scratchpad, Session, StateSnapshot, StepReport, Usage,
@@ -24,7 +24,7 @@ __all__ = [
     "Event", "EventStore", "Message", "PortError", "Program", "Result", "Usage",
     "RunResult", "RuntimeCtx", "Session", "StepReport", "JsonSnapshot", "StateSnapshot",
     "BudgetDelta", "DynamicValue", "Payload", "Scratchpad", "DoneSentinel",
-    "CallFn", "DispatchFn", "canonical", "checkpoint", "fingerprint", "restore_checkpoint",
+    "CallFn", "CancellationToken", "DispatchFn", "canonical", "checkpoint", "fingerprint", "restore_checkpoint",
     "fold", "replay_events", "state_append_message", "state_set",
     "Interpreter", "InterpreterImpl", "EffectBatch", "Runner", "InMemoryEventStore",
     "AgentKitError", "BudgetExceeded", "ChainAborted", "PortMissing",

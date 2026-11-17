@@ -3,14 +3,9 @@
 > **地位**：本文件是框架的唯一权威总设计（Single Source of Truth）。所有模块详设、实现、评测都从本文派生，冲突时以本文为准。
 > **公式**：`Agent 应用 = LLM + Harness`。Harness = 一个微内核 + 一组可插拔能力插件 + 内置架构 + 四组对外 API。
 > **主线**：唯一执行循环解释 Program 产出的 Effect；一切能力是挂在 Hook 上的插件；一切架构是插件的装配脚本；一切外部系统经契约接入。
-> **配套**：模块详设 `docs/02-模块详设/Agent/`（由本文按 R1~R13 拆分派生，每模块模块内闭环、含 API/字段/门禁）；能力全集见[《能力域全景》](./能力域全景.md)；自查补齐依据见[《设计自查报告》](./设计自查报告.md)。
-> **状态**：v2.0 设计定稿（提案），落地时按 R1~R13 逐模块过门禁；已实现 R1（src/runtime）与 R2（src/hooks），其余为设计态。
+> **配套**：模块详设 `docs/02-模块详设/Agent/`（由本文按 R1~R13 拆分派生，每模块模块内闭环、含 API/字段/门禁）；能力全集见[《能力域全景》](./能力域全景.md)；自查补齐依据见[《设计自查报告》](../04-审查与自查/设计自查报告.md)。
+> **状态**：v2.0 设计定稿（提案），落地时按 R1~R13 逐模块过门禁；已实现 R1（src/runtime）、R2（src/hooks）、R3（src/harness/resilience）、R4（src/harness/model）且各有门禁，其余为设计态。
 > **防漂移**：已实现模块的契约受 G5 设计稳定性门禁保护，任何设计改动若触碰其公共 API 必须通过契约变更评审（见[《设计稳定性门禁》](../03-流程与规范/设计稳定性门禁.md)）。
-
-> ⚠️ **自查标注（2026-11-17，待修正）**：以下三处与当前状态不符，详见[《设计完整性重新自查》](../设计完整性重新自查-20261117.md) §2：
-> ① 本页"状态"行称"已实现 R1/R2，其余设计态"，实际 **R3/R4 已实现并有门禁**（r3/r4 各 14/14）；
-> ② 本文架构数量表述前后不一（§分层图/能力表写 10，§认知章归约/G1 门禁写另一数字），组合算子数量亦不一致（§API 表 vs §R12 引用）——请以 R12 详设为准并统一；
-> ③ G5 文档锚点已锁定"10 内置架构"为正确值，故修正时**保留该锚点词**、只改冲突处。
 
 ---
 
@@ -64,7 +59,7 @@
 3. **最小内核**：能做成插件的绝不进 L0；L0 只保留"要做成插件就无法实现"的机制。
 4. **强制在内核**：预算、终止、挂起、checkpoint 在内核硬强制，不靠插件自觉。
 5. **一切外部输入不可信**：工具/检索/网页/技能正文都必须过注入检测；引用溯源不可关。
-6. **一切可插拔需四要素**：协议定义 + 默认实现 + 替换入口 + 履约校验，缺一是假可插拔。
+6. **一切可插拔需四要素**：协议定义 + 默认实现 + 替换入口 + 履约校验，缺一是假可插拔。默认实现由对应能力模块提供（R4 给 LLMPort、R5 给 ToolPort……）并由装配层（R12/R13）在用户未注入时注册；内核模块只定协议不内置实现。
 
 ### 1.3 三层可插拔模型（框架的核心卖点）
 
@@ -144,7 +139,7 @@ flowchart TD
 | API | 面向 | 内容 |
 |-----|------|------|
 | **A1 集成契约** | 平台/工具集成者 | Port 契约 + Event Stream + Projection 三类契约 |
-| **A2 架构组合** | 选型用户 | 10 内置架构 + 组合算子（seq/par/branch/race/budget） |
+| **A2 架构组合** | 选型用户 | 10 内置架构 + 7 组合算子（seq/par/branch/race/retry/map_state/budget） |
 | **A3 应用开发** | 普通开发者 | `Agent(arch=...).profile(...).capability(...).run()` |
 | **A4 组件开发** | 插件作者 | Hook / Decision / Port / Program / fold 全部低层接口 |
 
@@ -154,7 +149,7 @@ flowchart TD
 
 ### 3.1 能力域 → 模块映射
 
-框架完整能力 = 18 域 / 约 160 项（完整清单见[《能力域全景》](./能力域全景.md)）。按"内聚能力合并、避免一域一模块"原则聚合为 13 个模块：
+框架完整能力 = 18 域 / 169 项（完整清单见[《能力域全景》](./能力域全景.md)）。按"内聚能力合并、避免一域一模块"原则聚合为 13 个模块：
 
 | 模块 | 层 | 覆盖能力域 | 能力项数 |
 |------|----|-----------|---------|
@@ -467,7 +462,7 @@ class Provider(Protocol):                                # 策略级契约（基
 
 class Registry:                                          # 注册表
     def register(self, name: str, provider: Provider) -> None: ...
-    def resolve(self, name: str) -> Provider: ...        # 缺失→PortMissing
+    def resolve(self, name: str) -> Provider: ...        # 缺失→HookBusError
     def replace(self, name: str, provider: Provider) -> None: ...
 ```
 
@@ -501,7 +496,7 @@ class Registry:                                          # 注册表
 | 门禁 | 条目 | 达标标准 | 级别 |
 |------|------|---------|------|
 | R2-G1 | 覆盖 | 四 mode × 事件组合矩阵用例全过，≥90% | G1 |
-| R2-G2 | action 语义 | 8 种 action 各有独立生效用例 | G2 |
+| R2-G2 | action 语义 | 8 种 action 定义齐全；R1 当前消费 4 种（continue/deny/abort/fallback），另 4 种待 R3/R4/R9 接线 | G2 |
 | R2-G2 | 隔离 | hook 抛异常不影响主流程且记 trace | G2 |
 | R2-G2 | 顺序 | 同配置 emit 顺序确定（快照测试） | G2 |
 | R2-G3 | 留名 | 一次 emit 后 trace 含全部 hook name | G3 |
@@ -657,7 +652,8 @@ flowchart TD
 ```python
 class LLMPort(Protocol):                              # 已在 ports/protocols.py
     async def complete(self, req: LLMRequest, ctx: PortCtx) -> LLMResponse: ...
-    async def stream(self, req: LLMRequest, ctx: PortCtx) -> AsyncIterator[str]: ...
+    last_usage: Usage | None   # 流式结算口，末块后写入；网关不估算不兜零
+    def stream(self, req: LLMRequest, ctx: PortCtx) -> AsyncIterator[str]: ...  # PEP525：async gen 用 def 声明
 
 class ModelRouter(Protocol):
     name: str
@@ -1077,6 +1073,8 @@ class Executor(Protocol):
     async def execute(self, step, ctx) -> StepResult: ...
 
 class Arch(Protocol):                              # 架构统一协议
+    name: str
+    version: str
     def static_check(self) -> StaticCheckReport: ...
     def compile(self) -> Program: ...
 
@@ -1100,7 +1098,7 @@ seq(a,b); par([...]); branch(fn, arms); race([...]); retry(n,backoff); map_state
 | JoinStrategy | all / any / majority / reduce + timeout |
 | StaticCheckReport | errors / arch / version / ports_required |
 
-**11 架构归约**：ToolUse=并行 Effect；ReAct=自循环；PlanExecute=状态机游标；Reflection=budget 轮换；Router=branch；RouterSkill=分流+skill 正文；Supervisor=par(child)+join；Handoff=换 program+hops；Blackboard=共享 scratch；Graph=声明式编译+static_check；+（组合算子支撑嵌套）。
+**10 架构归约**：ToolUse=并行 Effect；ReAct=自循环；PlanExecute=状态机游标；Reflection=budget 轮换；Router=branch；RouterSkill=分流+skill 正文；Supervisor=par(child)+join；Handoff=换 program+hops；Blackboard=共享 scratch；Graph=声明式编译+static_check；+（7 组合算子支撑嵌套）。
 
 ### R8.6 可插拔契约
 
@@ -1108,13 +1106,13 @@ seq(a,b); par([...]); branch(fn, arms); race([...]); retry(n,backoff); map_state
 |--------|------|------|------|
 | 意图/反思/规划 | IntentStrategy 等 | LLM 分类/critic/分解 | 返回结构完整；缺 name 拒绝 |
 | 子 Agent | ChildSpec | ReAct 子 | 并发上限/预算分账 |
-| 架构 | Arch | 11 内置 | static_check 查悬空边/环/缺 port |
+| 架构 | Arch | 10 内置 | static_check 查悬空边/环/缺 port |
 
 ### R8.7 验收门禁
 
 | 门禁 | 条目 | 达标标准 | 级别 |
 |------|------|---------|------|
-| R8-G1 | 覆盖 | 认知服务 + 11 架构各有端到端用例 | G1 |
+| R8-G1 | 覆盖 | 认知服务 + 10 架构各有端到端用例 | G1 |
 | R8-G2 | 装配检查 | 悬空边/环/不可达/缺port/预算冲突 装配期报错 | G2 |
 | R8-G2 | 幂等 | 同 Arch 多次 compile 行为一致；算子不改原对象 | G2 |
 | R8-G3 | 嵌套 | Router→Graph→ReAct 三层嵌套跑通；换架构零改动 | G3 |
@@ -1372,7 +1370,7 @@ bus.on(MyGuard())
 
 | 字段 | 说明 |
 |------|------|
-| AgentSpec | program_version/chains_version/ports_version/optional_modules[]（进 trace） |
+| AgentSpec | program_version/arch_version/ports_version/optional_modules[]（进 trace） |
 | StaticCheckReport | errors/arch/version/ports_required/budgets_resolved |
 | profile | dev/production/regulated 三档插件预设 |
 | port 命名空间 | 内置固定名；用户自定义须 `x-` 前缀 |
@@ -1487,7 +1485,7 @@ bus.on(MyGuard())
 | 模块 | G1 质量 | G2 语义/隔离 | G3 集成 | 红线 |
 |------|--------|-------------|---------|------|
 | R1 | ≥90% 覆盖 | 确定性/回放/6维预算 | 主流程+挂起恢复 | Program 纯函数 |
-| R2 | 矩阵覆盖 | 8 action/异常隔离/顺序 | 组件留名 | 唯一扩展点 |
+| R2 | 矩阵覆盖 | 8 action 定义齐全；R1 当前消费 continue/deny/abort/fallback 4 种，rewrite/ask/retry/degrade 待 R3/R4/R9 接线 | 组件留名 | 唯一扩展点 |
 | R3 | ≥90% | 重试/熔断/降级语义 | 五插件协同顺序 | 幂等键 |
 | R4 | ≥85% | 结构化/缓存 | 换 Port 零改动 | 预算不绕过 |
 | R5 | ≥85% | 合并/披露 | danger 四级路由 | 审批/披露红线 |
