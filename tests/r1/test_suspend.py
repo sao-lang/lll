@@ -23,7 +23,7 @@ def test_suspend_and_resume():
         session = Session(session_id="h1", program_factory=lambda: human_program(AgentState()))
         r1 = await runner.run(session)
         assert r1.status == "suspended"
-        assert runner._store.load("h1") is not None  # checkpoint 已落
+        assert await runner._store.load("h1") is not None  # checkpoint 已落
         r2 = await runner.resume(session, "yes")
         assert r2.status == "done"
         assert r2.output == "yes"

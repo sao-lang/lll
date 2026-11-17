@@ -52,7 +52,7 @@ class InMemoryEventStore(EventStore):
         """初始化内存快照表（无持久化，仅用于独立闭环测试）。"""
         self.snapshots: dict[str, JsonSnapshot] = {}
 
-    def save(self, session_id: str, snapshot: JsonSnapshot) -> None:
+    async def save(self, session_id: str, snapshot: JsonSnapshot) -> None:
         """把快照按会话 id 存入内存字典。
 
         参数：
@@ -61,7 +61,7 @@ class InMemoryEventStore(EventStore):
         """
         self.snapshots[session_id] = snapshot
 
-    def load(self, session_id: str) -> JsonSnapshot | None:
+    async def load(self, session_id: str) -> JsonSnapshot | None:
         """按会话 id 读取快照；不存在返回 None。"""
         return self.snapshots.get(session_id)
 
@@ -542,7 +542,7 @@ class Runner:
         self._errors[session.session_id] = error
         # 终态总落快照；运行中按 checkpoint_every 节流。
         if status != _StepStatus.RUNNING.value or rt.step % self._checkpoint_every == 0:
-            self._store.save(session.session_id, checkpoint(session))
+            await self._store.save(session.session_id, checkpoint(session))
         return StepReport(
             step=step_no,
             state=new_state,
@@ -636,7 +636,7 @@ class Runner:
         """
         return replay_events(session.events, initial_state)
 
-    def load(self, session_id: str, program_factory: Callable[[], Program]) -> Session:
+    async def load(self, session_id: str, program_factory: Callable[[], Program]) -> Session:
         """从 checkpoint 恢复 Session。
 
         参数：
@@ -647,7 +647,7 @@ class Runner:
         异常：
             PortMissing: 该会话无 checkpoint。
         """
-        snap = self._store.load(session_id)
+        snap = await self._store.load(session_id)
         if snap is None:
             raise PortMissing(f"no checkpoint for session {session_id}")
         return restore_checkpoint(snap, program_factory)

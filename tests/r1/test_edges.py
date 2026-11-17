@@ -162,10 +162,10 @@ def test_load_checkpoint():
         s = Session(session_id="loadme", program_factory=lambda: program(AgentState()))
         await store_runner.run(s)
         new_runner = Runner(dispatch=dispatch, call=fake_call, store=store_runner._store)
-        loaded = new_runner.load("loadme", program)
+        loaded = await new_runner.load("loadme", program)
         assert loaded.state.output == "done"
         with pytest.raises(PortMissing):
-            new_runner.load("missing", program)
+            await new_runner.load("missing", program)
     asyncio.run(run())
 
 
@@ -227,7 +227,7 @@ def test_checkpoint_every_multiple():
         s = Session(session_id="ce", program_factory=lambda: program(AgentState()))
         r = await runner.run(s)
         assert r.status == "done"
-        assert runner._store.load("ce") is not None
+        assert await runner._store.load("ce") is not None
     asyncio.run(run())
 
 

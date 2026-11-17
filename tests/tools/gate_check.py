@@ -58,7 +58,7 @@ MODULES = {
         "doc": "docs/02-模块详设/Agent/R4-模型与推理.md", "demo": "tests/demos/demo_r4.py", "coverage": 85,
         "symbols": ["StructuredOutputSpec", "CacheKey", "RouteDecision", "CostRecord",
                     "UsageLedger", "CostAttributor", "CostGuard", "build_cache_key",
-                    "ModelRouter", "RuleRouter", "SemanticCache", "ExactCache",
+                    "ModelRouter", "RuleRouter", "CachePort", "ExactCache",
                     "validate_json_schema", "StructuredOutputValidator",
                     "ModelGateway", "ModelCapability"],
         "behavior": ["test_types.py", "test_router.py", "test_structured.py", "test_cache.py"],

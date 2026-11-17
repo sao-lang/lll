@@ -25,7 +25,7 @@ from hooks import LLMRequest, LLMResponse
 from .types import build_cache_key
 
 __all__ = [
-    "CachePort", "SemanticCache", "ExactCache", "SimilarityCache",
+    "CachePort", "ExactCache", "SimilarityCache",
     "CacheStore", "InMemoryCacheStore", "CacheEmbedder",
 ]
 
@@ -56,9 +56,6 @@ class CachePort(Protocol):
         """失效该请求对应的缓存条目。"""
         ...
 
-
-# 向后兼容别名：旧代码 `from harness.model import SemanticCache` 仍可用。
-SemanticCache = CachePort
 
 
 # --------------------------------------------------------------------------- #

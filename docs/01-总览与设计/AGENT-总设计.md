@@ -658,11 +658,18 @@ class ModelRouter(Protocol):
     name: str
     def route(self, effect: Effect, ctx: StrategyCtx) -> str: ...   # 返回 model 名
 
-class SemanticCache(Protocol):
+class CachePort(Protocol):                         # 缓存策略（异步）
     name: str
-    def get(self, key: str) -> LLMResponse|None: ...
-    def put(self, key: str, resp: LLMResponse) -> None: ...
-    def invalidate(self, key: str) -> None: ...
+    async def get(self, request: LLMRequest, *, version: str = "v1") -> LLMResponse|None: ...
+    async def put(self, request: LLMRequest, resp: LLMResponse, *, version: str = "v1") -> None: ...
+    async def invalidate(self, request: LLMRequest, *, version: str = "v1") -> None: ...
+class CacheStore(Protocol):                        # 存储工具（可换 Redis/DB）
+    async def get(self, key: str) -> str|None: ...
+    async def put(self, key: str, value: str, *, ttl: int|None = None) -> None: ...
+    async def delete(self, key: str) -> None: ...
+    async def scan(self, prefix: str) -> list[tuple[str, str]]: ...
+class CacheEmbedder(Protocol):                     # embedding（可换向量模型）
+    async def embed(self, text: str) -> tuple[float, ...]: ...
 
 @dataclass(frozen=True)
 class StructuredOutputSpec:
@@ -690,7 +697,7 @@ class StructuredOutputSpec:
 |--------|------|------|------|
 | LLM 后端 | LLMPort | OpenAI-compat | 实现 complete/stream |
 | 路由 | ModelRouter | 规则路由 | 返回目标已注册 |
-| 缓存 | SemanticCache | 精确缓存 | 键含版本；语义阈值保守 |
+| 缓存 | CachePort | ExactCache + SimilarityCache | 异步；收 request；可换 store/embedder |
 | 结构化输出 | StructuredOutputSpec | repair 模式 | schema 合法 |
 
 ### R4.7 验收门禁
@@ -1480,7 +1487,7 @@ bus.on(MyGuard())
 | FailureClassifier | _DefaultClassifier | `src/harness/resilience/types.py` | ✅ 已实现 |
 | DegradeLadder | _default_ladder() | `src/harness/resilience/capability.py` | ✅ 已实现 |
 | ModelRouter | RuleRouter | `src/harness/model/router.py` | ✅ 已实现 |
-| SemanticCache | ExactCache | `src/harness/model/cache.py` | ✅ 已实现 |
+| CachePort | ExactCache + SimilarityCache | `src/harness/model/cache.py` | ✅ 已实现（异步+可换 store/embedder） |
 | StructuredOutputSpec | repair 模式 | `src/harness/model/structured.py` | ✅ 已实现 |
 | LLMPort | OpenAICompatLLM | `src/ports/adapters/llm.py` | ✅ 已实现（R4 §6.1） |
 
@@ -1534,6 +1541,17 @@ bus.on(MyGuard())
 > **协议可达性纪律**：新增/修改 Port 协议时，必须自问"实现者拿到的输入够不够兑现协议承诺的能力"，
 > 避免再次出现 SemanticCache 那种"协议名承诺语义、参数只给哈希"的名实分离。
 > 详见[《协议可达性审查》](./协议可达性审查-20261118.md)。
+>
+> **协议可插拔三维度纪律**（2026-11-18 已对 47 协议全查，见[《协议可插拔完备性审查》](./协议可插拔完备性审查-20261118.md)）：
+> ① 每个自定义协议必须标默认实现（四要素②）；② 涉及 IO 的协议方法必须 async
+> （已修：CachePort/StorePort/EventStore/AuditPort；TelemetryPort 采集保持同步=OTel 惯例）；
+> ③ 需要外部系统的协议必须抽象可注入 client/store（已加 CacheStore/CacheEmbedder/AuditStore/TelemetryExporter）。
+> 新增协议一律按此三维自检。
+
+**2026-11-18 已修（当前模块 R1/R2/R4，从本表勾销）**：
+- EventStore / Runner.load 异步化（checkpoint 可落 DB/Redis）；StorePort / AuditPort 异步化；
+- 新增 AuditStore / TelemetryExporter 后端协议；CachePort 三层可插拔（CacheStore/CacheEmbedder）；
+- SemanticCache 别名彻底删除（统一 CachePort）。
 
 **纪律**：本表项在对应模块开发验收时逐项勾销；新增框架能力必须先入本表再动手，避免遗漏。
 

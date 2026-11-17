@@ -44,6 +44,7 @@ from .dto import LLMRequest, LLMResponse, PortCtx, ToolCall, ToolResult, ToolSpe
 __all__ = [
     "PORT_PROTOCOLS",
     "AuditPort",
+    "AuditStore",
     "EvalPort",
     "EventStreamPort",
     "HumanPort",
@@ -55,6 +56,7 @@ __all__ = [
     "SkillPort",
     "StorePort",
     "TelemetryPort",
+    "TelemetryExporter",
     "ToolPort",
 ]
 
@@ -155,14 +157,18 @@ class MemoryPort(Protocol):
 
 @runtime_checkable
 class StorePort(Protocol):
-    """持久化能力：会话快照存取。"""
+    """持久化能力：会话快照存取（异步，可落 DB/Redis）。
+
+    v1.1 异步化：save/load 涉及外部 IO（DB/Redis/文件），同步会阻塞 Runner 事件循环；
+    默认实现 InMemoryStorePort（R7）内部无 IO，但签名统一 async 以支持远程后端。
+    """
     name: str
 
-    def save(self, session_id: str, snapshot: dict[str, DynamicValue]) -> None:
+    async def save(self, session_id: str, snapshot: dict[str, DynamicValue]) -> None:
         """保存会话快照；结构须可确定性 JSON 序列化。"""
         ...
 
-    def load(self, session_id: str) -> dict[str, DynamicValue] | None:
+    async def load(self, session_id: str) -> dict[str, DynamicValue] | None:
         """读取会话快照；不存在返回 None。"""
         ...
 
@@ -180,12 +186,25 @@ class SandboxPort(Protocol):
 
 
 @runtime_checkable
-class AuditPort(Protocol):
-    """审计能力：记录结构化事件。"""
+class AuditStore(Protocol):
+    """审计存储后端（外部工具可注入）：append-only 追加，不可篡改。
+
+    默认实现（R9 开发时提供）：内存/文件；用户可注入 DB/远程审计系统。
+    异步：审计落盘/远程是 IO，不阻塞事件循环。
+    """
     name: str
 
-    def record(self, event: dict[str, DynamicValue], ctx: PortCtx) -> None:
-        """追加审计事件（append-only + 哈希链，不可旁路）。"""
+    async def append(self, event: dict[str, DynamicValue]) -> None:
+        """追加一条审计事件（append-only，写入后不可改）。"""
+        ...
+
+
+class AuditPort(Protocol):
+    """审计能力：记录结构化事件（异步；存储后端经 AuditStore 注入）。"""
+    name: str
+
+    async def record(self, event: dict[str, DynamicValue], ctx: PortCtx) -> None:
+        """追加审计事件（append-only + 哈希链，不可旁路）；内部委托 AuditStore。"""
         ...
 
 
@@ -200,8 +219,27 @@ class EvalPort(Protocol):
 
 
 @runtime_checkable
+class TelemetryExporter(Protocol):
+    """遥测导出后端（外部工具可注入）：把采集的 span/metric/log 导出到外部系统。
+
+    默认实现（R10 开发时提供）：in-process（仅内存收集，供测试）；用户可注入 OTLP/Jaeger/Langfuse。
+    export 是 IO：异步，且由 TelemetryPort 实现内部批量/后台调用——
+    **这是 OTel 标准做法**：采集 API 同步（关键路径不 await），导出异步（不阻塞）。
+    """
+    name: str
+
+    async def export(self, records: tuple[DynamicValue, ...]) -> None:
+        """批量导出遥测记录；失败内部消化，不抛穿到业务路径。"""
+        ...
+
+
 class TelemetryPort(Protocol):
-    """可观测能力：span / metric / log 三件套。"""
+    """可观测能力：span / metric / log 三件套。
+
+    同步 API 是有意为之（OTel 惯例）：span 是上下文管理器必须同步；
+    metric/log 采集同步入队，远程导出由注入的 TelemetryExporter 异步批量完成——
+    关键业务路径不因遥测 IO 阻塞。外部系统接入点 = TelemetryExporter。
+    """
     name: str
 
     def span(self, name: str, ctx: PortCtx) -> AbstractContextManager[DynamicValue]:

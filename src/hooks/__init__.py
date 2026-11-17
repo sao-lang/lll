@@ -10,8 +10,8 @@ from .dto import (
     ToolCall, ToolResult, ToolSpec, Usage, make_call,
 )
 from .protocols import (
-    PORT_PROTOCOLS, AuditPort, EvalPort, EventStreamPort, HumanPort, LLMPort,
-    MCPPort, MemoryPort, RAGPort, SandboxPort, SkillPort, StorePort, TelemetryPort, ToolPort,
+    PORT_PROTOCOLS, AuditPort, AuditStore, EvalPort, EventStreamPort, HumanPort, LLMPort,
+    MCPPort, MemoryPort, RAGPort, SandboxPort, SkillPort, StorePort, TelemetryExporter, TelemetryPort, ToolPort,
 )
 from .types import (
     Capability, Decision, DecisionAction, Hook, HookBusError, HookCtx, HookMode,
@@ -23,7 +23,7 @@ __all__ = [
     "DecisionAction", "RetrySpec", "Matcher", "Capability", "Provider", "Registry",
     "HookBusError", "LifecycleEvent",
     "LLMPort", "ToolPort", "SkillPort", "RAGPort", "MemoryPort", "StorePort",
-    "SandboxPort", "AuditPort", "EvalPort", "TelemetryPort", "HumanPort",
+    "SandboxPort", "AuditPort", "AuditStore", "EvalPort", "TelemetryPort", "TelemetryExporter", "HumanPort",
     "MCPPort", "EventStreamPort", "PORT_PROTOCOLS",
     "LLMRequest", "LLMResponse", "ToolCall", "ToolResult", "ToolSpec", "Usage",
     "DangerLevel", "PortCtx", "make_call", "StreamEvent", "StreamEventKind",

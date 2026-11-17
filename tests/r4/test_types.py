@@ -7,7 +7,7 @@ from harness.model import (
     CacheKey,
     CostRecord,
     ModelRouter,
-    SemanticCache,
+    CachePort,
     StructuredOutputSpec,
     UsageLedger,
     build_cache_key,
@@ -95,4 +95,4 @@ class TestProtocols:
     def test_model_router_protocol_shape(self) -> None:
         """ModelRouter 是可注入协议：带 name + route。"""
         assert hasattr(ModelRouter, "route")
-        assert hasattr(SemanticCache, "get")
+        assert hasattr(CachePort, "get")

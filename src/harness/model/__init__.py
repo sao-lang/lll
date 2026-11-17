@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from .cache import (
     CacheEmbedder, CachePort, CacheStore, ExactCache,
-    InMemoryCacheStore, SemanticCache, SimilarityCache,
+    InMemoryCacheStore, SimilarityCache,
 )
 from .capability import ModelCapability
 from .gateway import ModelGateway
@@ -41,7 +41,6 @@ __all__ = [
     "ModelRouter",
     "RouteDecision",
     "RuleRouter",
-    "SemanticCache",
     "StructuredOutputSpec",
     "StructuredOutputValidator",
     "UsageLedger",

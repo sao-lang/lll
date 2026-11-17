@@ -597,17 +597,20 @@ CallFn = Callable[[Effect, DynamicValue], Awaitable[Result]]
 
 
 class EventStore(Protocol):
-    """checkpoint 存储协议（R1 §4）；上层提供持久化实现，R1 内置内存默认以独立闭环。
+    """checkpoint 存储协议（R1 §4）；异步以支持 DB/Redis 持久化后端。
 
     方法体 `...` 是 Protocol 语法要求（接口定义），不是省略实现——默认实现
     `InMemoryEventStore` 在 runner.py 提供，装配期由 `Runner(store=...)` 注入。
+
+    异步化（v2.1）：checkpoint 落 Redis/DB 是生产刚需，同步会在 Runner 的 async
+    路径（step/run/resume）上阻塞事件循环；签名统一 async，内存实现内部无 IO 直接返回。
     """
 
-    def save(self, session_id: str, snapshot: JsonSnapshot) -> None:
+    async def save(self, session_id: str, snapshot: JsonSnapshot) -> None:
         """持久化会话快照。参数：session_id 会话标识，snapshot 可 JSON 序列化快照信封。"""
         ...
 
-    def load(self, session_id: str) -> JsonSnapshot | None:
+    async def load(self, session_id: str) -> JsonSnapshot | None:
         """读取会话快照；不存在返回 None。"""
         ...
 

@@ -19,7 +19,7 @@ from hooks import (
 )
 from runtime import Message
 
-from .cache import CachePort, ExactCache, SemanticCache
+from .cache import CachePort, ExactCache
 from .router import ModelRouter, RuleRouter
 from .stream import has_stream_events, wrap_text_stream
 from .structured import StructuredOutputValidator, validate_json_schema
