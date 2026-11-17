@@ -128,18 +128,18 @@ IO_SDK_PREFIXES = (
     "httpx", "requests", "aiohttp", "boto3", "sqlalchemy", "urllib", "socket",
 )
 
-# 规则 8 允许的"动态读取边界"模块：context 动态字段只读在这里发生。
+# 规则 6 允许的"动态读取边界"模块：context 动态字段只读在这里发生。
 DYNAMIC_BOUNDARY_FILES = {"_ctxview.py"}
 
 
 def _scan_coding_rules(files: list[Path], pkg: Path) -> list[str]:
-    """编码规则 7/8 红线（防回归）：禁魔法串比较 + 动态读取须收敛到边界。
+    """编码规则 5/6 红线（防回归）：禁魔法串比较 + 动态读取须收敛到边界。
 
-    规则 7：有限取值集合用 Enum，禁止 `x == "literal"` 这类裸字符串比较
+    规则 5：有限取值集合用 Enum，禁止 `x == "literal"` 这类裸字符串比较
             （trace 标签/错误码作为参数传给 Decision 不算比较，不拦）。
-    规则 8：ctx.meta / effect.payload 的动态读取只允许在 _ctxview.py 边界模块；
+    规则 6：ctx.meta / effect.payload 的动态读取只允许在 _ctxview.py 边界模块；
             插件内出现 .meta.get/.payload.get/getattr 即违规（除非上一行有
-            "规则 8 例外" 注释，用于鸭子插件装配期容错）。
+            "规则 6 例外" 注释，用于鸭子插件装配期容错）。
     """
     violations: list[str] = []
     for path in files:
@@ -148,18 +148,18 @@ def _scan_coding_rules(files: list[Path], pkg: Path) -> list[str]:
         tree = parse(path)
         lines = path.read_text(encoding="utf-8").splitlines()
 
-        # 规则 7：字符串字面量比较
+        # 规则 5：字符串字面量比较
         for node in ast.walk(tree):
             if isinstance(node, ast.Compare):
                 for op, comp in zip(node.ops, node.comparators):
                     if isinstance(op, (ast.Eq, ast.NotEq, ast.In, ast.NotIn)):
                         if isinstance(comp, ast.Constant) and isinstance(comp.value, str):
                             violations.append(
-                                f"{path.relative_to(ROOT)}:{node.lineno} 规则7 魔法串比较 "
+                                f"{path.relative_to(ROOT)}:{node.lineno} 规则5 魔法串比较 "
                                 f"{ast.unparse(node.left)} vs {comp.value!r}（应改用 Enum）"
                             )
 
-        # 规则 8：动态读取须在边界模块
+        # 规则 6：动态读取须在边界模块
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
@@ -175,15 +175,15 @@ def _scan_coding_rules(files: list[Path], pkg: Path) -> list[str]:
                 is_dynamic = True
             if not is_dynamic:
                 continue
-            # 例外：紧邻上方 3 行内含"规则 8 例外"注释（装配期鸭子插件容错）
+            # 例外：紧邻上方 3 行内含"规则 6 例外"注释（装配期鸭子插件容错）
             comment_ok = any(
-                "规则 8 例外" in lines[i]
+                "规则 6 例外" in lines[i]
                 for i in range(max(0, node.lineno - 4), min(len(lines), node.lineno - 1))
             )
             if not comment_ok:
                 violations.append(
-                    f"{path.relative_to(ROOT)}:{node.lineno} 规则8 动态读取未收敛到 "
-                    f"_ctxview.py 边界（或缺少'规则 8 例外'注释）"
+                    f"{path.relative_to(ROOT)}:{node.lineno} 规则6 动态读取未收敛到 "
+                    f"_ctxview.py 边界（或缺少'规则 6 例外'注释）"
                 )
     return violations
 
@@ -228,7 +228,7 @@ def scan_r3(files: list[Path]) -> list[str]:
                 if not _declares_name(node):
                     violations.append(f"{path.relative_to(ROOT)} hook 类 {node.name} 无 name 属性")
 
-    # 编码规则 7/8 红线（防回归）
+    # 编码规则 5/6 红线（防回归）
     violations.extend(_scan_coding_rules(files, pkg))
     return violations
 
@@ -266,7 +266,7 @@ def scan_r4(files: list[Path]) -> list[str]:
                 if any(node.module.startswith(p) for p in IO_SDK_PREFIXES):
                     violations.append(f"{path.relative_to(ROOT)} import IO SDK {node.module}")
 
-    # 编码规则 7/8 红线（防回归）
+    # 编码规则 5/6 红线（防回归）
     violations.extend(_scan_coding_rules(files, pkg))
     return violations
 

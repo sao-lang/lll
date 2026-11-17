@@ -43,7 +43,7 @@ class StructuredOutputSpec(BaseModel):
 
     # 对外契约字段名为 "schema"（R4 §4）；内部属性用别名 json_schema，
     # 避免遮蔽 BaseModel.schema() 方法的告警。populate_by_name 让 schema=/json_schema= 均可构造。
-    # schema 形态由外部 JSON Schema 决定（规则 4 动态边界），用 DynamicValue 具名别名。
+    # schema 形态由外部 JSON Schema 决定（规则 3 动态边界），用 DynamicValue 具名别名。
     json_schema: dict[str, DynamicValue] = Field(
         default_factory=dict, alias="schema", description="JSON Schema"
     )

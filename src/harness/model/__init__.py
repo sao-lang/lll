@@ -11,6 +11,7 @@ from .cache import (
 )
 from .capability import ModelCapability
 from .gateway import ModelGateway
+from .registry import InMemoryModelRegistry, ModelEndpoint, ModelRegistry
 from .router import ModelRouter, RuleRouter
 from .structured import StructuredOutputValidator, validate_json_schema
 from .types import (
@@ -34,6 +35,10 @@ __all__ = [
     "CacheStore",
     "InMemoryCacheStore",
     "CacheEmbedder",
+    "ModelEndpoint",
+    "ModelRegistry",
+    "InMemoryModelRegistry",
+    "RouteDecision",
     "ExactCache",
     "SimilarityCache",
     "ModelCapability",

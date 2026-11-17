@@ -336,7 +336,7 @@ class AgentState:
             写入后的新 AgentState。
         """
         if key in _MANAGED_SCRATCH_KEYS:
-            # 显式分派到具名字段，不用 **{key: value} 动态拼装（编码规则 3）
+            # 显式分派到具名字段，不用 **{key: value} 动态拼装（编码规则 4）
             return self.with_(
                 output=value if key == "output" else self.output,
                 last_skill=value if key == "last_skill" else self.last_skill,

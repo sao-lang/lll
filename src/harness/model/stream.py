@@ -15,7 +15,7 @@ __all__ = ["has_stream_events", "wrap_text_stream"]
 
 def has_stream_events(llm: object) -> bool:
     """后端是否已实现 stream_events()（具名能力探测，非动态 getattr 链）。"""
-    # 规则 8 例外：可选能力探测，具名固定字符串，非 ctx.meta/effect.payload 动态键。
+    # 规则 6 例外：可选能力探测，具名固定字符串，非 ctx.meta/effect.payload 动态键。
     return callable(getattr(llm, "stream_events", None))
 
 
@@ -34,7 +34,7 @@ def wrap_text_stream(
 async def _wrap(
     llm: object, req: LLMRequest, ctx: PortCtx,
 ) -> AsyncIterator[StreamEvent]:
-    # 规则 8 例外：包装具名固定能力的旧后端（stream/last_usage），非动态键读取。
+    # 规则 6 例外：包装具名固定能力的旧后端（stream/last_usage），非动态键读取。
     stream = getattr(llm, "stream")
     last_usage = getattr(llm, "last_usage", None)
     async for chunk in stream(req, ctx):

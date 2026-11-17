@@ -14,10 +14,10 @@ from __future__ import annotations
 import asyncio
 import inspect
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 
-from runtime import DynamicValue, Effect, Session
+from runtime import DynamicValue, Effect, EffectKind, Session
 
 from .types import (
     Decision,
@@ -61,6 +61,12 @@ class _Registered:
     priority: int
     order: int  # 注册序号，保证同优先级稳定顺序
     mode: HookMode
+
+
+def _ctx_with_event(ctx: HookCtx, event: str) -> HookCtx:
+    """复制 HookCtx 并改 event 字段（dataclass 非 frozen，replace 即共享 meta 引用）。"""
+    from dataclasses import replace
+    return replace(ctx, event=event)
 
 
 async def _maybe(value: DynamicValue) -> DynamicValue:
@@ -177,6 +183,62 @@ class HookBus:
             )
 
         return factory
+
+    def dispatch(self) -> Callable[[Effect, HookCtx], Coroutine[object, object, Decision]]:
+        """给 R1 Runner 的 dispatch 适配器：按 effect 自动 emit 全套事件并回传判决。
+
+        返回：
+            (effect, ctx) → Decision 的异步回调（可直接注入 Runner(dispatch=...)）。
+        事件序列（v2.1 补齐断点）：
+            - LLM Effect：before_model → before_invoke（前者让 BudgetGuard 真正触发）
+            - 其它 Effect：before_invoke
+            - 若判决为 DEGRADE：把 target 写入 ctx.meta["degrade_target"]，
+              再原样回传 Decision（供 R4 gateway.call 接力切端点）；仍写回 target 以兼容
+              只看 meta 的调用方。
+        说明：dispatch 本身不执行副作用，只分发 hook；R1 收到非 CONTINUE 判决会短路。
+        """
+        async def adapter(effect: Effect, ctx: HookCtx) -> Decision:
+            # 每次 dispatch 重置降级目标，避免上一轮残留串到本轮
+            ctx.meta.pop("degrade_target", None)
+            if effect.kind is EffectKind.LLM:
+                model_decision = await self.emit("before_model", ctx)
+                if model_decision.action is not DecisionAction.CONTINUE:
+                    self._stash_degrade(model_decision, ctx)
+                    return model_decision
+            final = await self.emit("before_invoke", ctx)
+            self._stash_degrade(final, ctx)
+            return final
+
+        return adapter
+
+    @staticmethod
+    def _stash_degrade(decision: Decision, ctx: HookCtx) -> None:
+        """DEGRADE 判决的 target 写入 ctx.meta（接力给 R4 call 适配器）。"""
+        if decision.action is DecisionAction.DEGRADE and decision.target:
+            ctx.meta["degrade_target"] = decision.target
+
+    def call(self, inner: Callable[[Effect, HookCtx], object]) -> Callable[[Effect, HookCtx], object]:
+        """包装 R1 的 call 回调：副作用后 emit after_invoke，异常时 emit invoke_error。
+
+        补齐断点：CircuitBreaker 订阅 after_invoke/invoke_error，此前生产代码零 emit，
+        导致熔断三态在真实链路里不翻转。
+        参数：
+            inner: 原 call 回调（同步或异步均可）。
+        返回：
+            同签名包装器，保留原返回值/异常语义。
+        """
+        async def wrapped(effect: Effect, ctx: HookCtx) -> object:
+            try:
+                result = await _maybe(inner(effect, ctx))
+            except Exception:
+                err_ctx = _ctx_with_event(ctx, "invoke_error")
+                await self.emit("invoke_error", err_ctx)
+                raise  # 异常语义不变，只补 emit
+            post_ctx = _ctx_with_event(ctx, "after_invoke")
+            await self.emit("after_invoke", post_ctx)
+            return result
+
+        return wrapped
 
     async def emit(self, event: str, ctx: HookCtx) -> Decision:
         """对某事件分发全部 hook，返回合并后的 Decision。

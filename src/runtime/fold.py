@@ -140,7 +140,7 @@ def fold(
     """
     messages: list[Message] = list(state.messages)  # 消息累积（从旧消息副本起步）
     budgets = state.budgets  # 预算累积（不可变，逐 Effect 替换）
-    # 托管字段用显式局部变量（编译期可枚举），不用 **dict 拼装（编码规则 3）
+    # 托管字段用显式局部变量（编译期可枚举），不用 **dict 拼装（编码规则 4）
     output: DynamicValue = state.output
     last_skill: DynamicValue = state.last_skill
     last_child: DynamicValue = state.last_child

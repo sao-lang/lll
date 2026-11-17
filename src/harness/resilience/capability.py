@@ -91,7 +91,7 @@ class ResilienceCapability:
             self._degradation or Degradation(self._ladder),
             self._budget_guard or BudgetGuard(),
         ]
-        # 规则 8 例外：装配期对鸭子插件的容错（自定义插件可能非 Hook 子类，
+        # 规则 6 例外：装配期对鸭子插件的容错（自定义插件可能非 Hook 子类，
         # 只约定带 priority 属性），故在此用 getattr 兜底 100；运行期无此动态读取。
         return sorted(items, key=lambda h: getattr(h, "priority", 100))
 

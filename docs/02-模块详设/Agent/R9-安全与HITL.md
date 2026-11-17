@@ -51,7 +51,7 @@ class SecurityCtx:
         direction: "input"/"output"——护栏方向。
         danger: DangerLevel——当前操作的危险级别。
         trust: bool——内容是否来自可信内核（False 则必须过注入检测）。
-        meta: dict[str, DynamicValue]——扩展元数据（规则 4 动态边界）。
+        meta: dict[str, DynamicValue]——扩展元数据（规则 3 动态边界）。
     构造：由 R9 护栏 hook 从 HookCtx 投影生成（from_hook_ctx 类方法），不改 HookCtx 本身。
     """
     session_id: str

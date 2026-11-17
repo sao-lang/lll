@@ -111,7 +111,7 @@ class CircuitBreaker:
     def _dim_from_ctx(self, ctx: HookCtx) -> Dimension:
         """从具名视图读取显式维度（装配层写入）；无则空维度。
 
-        动态读取已收敛到 coerce_ctx（规则 8），此处只做属性访问。
+        动态读取已收敛到 coerce_ctx（规则 6），此处只做属性访问。
         不自动从 Effect.payload 推断 model：推理维度由装配层决定（模型路由/工具），
         熔断器只认结构化维度键，避免把 payload 动态键误当隔离维度。
         """
@@ -181,7 +181,7 @@ class CircuitBreaker:
     async def __call__(self, ctx: HookCtx) -> Decision:
         """Hook 入口：invoke_error 事件记录失败，其余事件做拦截检查。"""
         if ctx.event == LifecycleEvent.INVOKE_ERROR.value:
-            # last_result 由 coerce_ctx 具名视图提供（规则 8，不再散落 meta.get）。
+            # last_result 由 coerce_ctx 具名视图提供（规则 6，不再散落 meta.get）。
             result = coerce_ctx(ctx).last_result
             if isinstance(result, Result):
                 # 失败是否计入熔断由失败分类决定；这里保守计入（429 由上层传 count=False）。

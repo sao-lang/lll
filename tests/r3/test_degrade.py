@@ -79,7 +79,7 @@ class TestRateLimit:
 class TestBulkhead:
     def test_pool_limit(self) -> None:
         """舱壁池满：拒绝新占用。"""
-        bh = Bulkhead(pools={"default": 1}, acquire_timeout=0, on_full="reject")
+        bh = Bulkhead(pools={"default": 1}, on_full="reject")
         ctx = make_ctx()
         assert bh.acquire("default", ctx) is True
         assert bh.acquire("default", ctx) is False
@@ -139,3 +139,21 @@ class TestKillSwitch:
         store = _DictStore()
         ks = KillSwitch(flag_store=store, scope="session")
         assert ks.check(make_ctx()).action is DecisionAction.CONTINUE
+
+
+class TestIdempotencyTTL:
+    def test_ttl_evicts_expired_key(self) -> None:
+        """TTL 真淘汰：过期后同键视为首次（此前 ttl 只是不生效的元数据）。"""
+        now = [1000.0]
+        idem = Idempotency(ttl=60, clock=lambda: now[0])
+        assert idem.check_and_mark("k") is False   # 首次
+        assert idem.check_and_mark("k") is True    # 窗口内重复
+        now[0] += 61                                # 推进过 TTL
+        assert idem.check_and_mark("k") is False   # 已淘汰，重新视为首次
+
+    def test_explicit_store_receives_timestamps(self) -> None:
+        """注入 store 存的是登记时间戳（可被外部检查/共享）。"""
+        store: dict[str, float] = {}
+        idem = Idempotency(store=store, ttl=10, clock=lambda: 500.0)
+        idem.check_and_mark("x")
+        assert store["x"] == 500.0

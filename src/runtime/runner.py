@@ -134,7 +134,7 @@ type _DispatchOutcome = Result | _Verdict | None
 def _coerce_verdict(outcome: DynamicValue) -> _Verdict:
     """把 dispatch 的鸭子判决归一为 _Verdict；唯一的动态字段读取边界。
 
-    getattr 集中于此，下游只访问具名类型字段（编码规则 4）。
+    getattr 集中于此，下游只访问具名类型字段（编码规则 3）。
     历史兼容：abort 为 callable（Decision.abort 类方法）不算标志，布尔真值才算。
     """
     raw_action: DynamicValue = getattr(outcome, "action", None)

@@ -54,7 +54,7 @@ class RetryPolicy:
         参数：
             max_attempts/base_delay/multiplier/max_delay: 退避参数。
             jitter: 抖动策略，接受 Jitter 或等价字符串（跨层 RetrySpec 用 str）；
-                未知值由 Jitter.coerce 显式回退到 full（规则 7）。
+                未知值由 Jitter.coerce 显式回退到 full（规则 5）。
             respect_retry_after: 是否遵守服务端 Retry-After。
             idempotency_required: 副作用重试是否强制幂等键。
             rng: 注入的随机源（缺省新建，测试可注入固定种子）。
@@ -93,7 +93,7 @@ class RetryPolicy:
         返回：
             成功/耗尽的最终 Decision（value 装 Result）。
         """
-        view = coerce_ctx(ctx)  # 唯一动态读取边界（规则 8）
+        view = coerce_ctx(ctx)  # 唯一动态读取边界（规则 6）
         next_fn = view.next_fn
         if next_fn is None:  # 无 next（独立调用）：放行，交内核正常调用
             return Decision.continue_()

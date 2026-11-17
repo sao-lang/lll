@@ -6,7 +6,7 @@
 - 退避算法为纯函数（随机源显式注入），墙钟/随机不隐式进入，保证可测试、可回放。
 - 降级阶梯装配期强校验（无环、末级必须拒答、quality 严格递减），防止编造与死循环。
 
-分层纪律：只依赖 R1（runtime）与 R2（hooks），不 import 任何 IO SDK（编码规则 6）。
+分层纪律：只依赖 R1（runtime）与 R2（hooks），不 import 任何 IO SDK（编码规则 8）。
 公共 API 见 docs/02-模块详设/Agent/R3-可靠性.md §4。
 """
 from __future__ import annotations
@@ -42,7 +42,7 @@ __all__ = [
 
 
 class Jitter(str, Enum):
-    """退避抖动策略（有限取值集合，规则 7）。
+    """退避抖动策略（有限取值集合，规则 5）。
 
     成员：
         NONE: 无抖动（base_delay=0 时禁用，防重试风暴）。
@@ -58,7 +58,7 @@ class Jitter(str, Enum):
 
     @classmethod
     def coerce(cls, raw: Jitter | str) -> Jitter:
-        """把字符串归一为枚举成员；未知值显式回退到 FULL（规则 7）。
+        """把字符串归一为枚举成员；未知值显式回退到 FULL（规则 5）。
 
         参数：
             raw: 枚举成员或等价字符串（跨层 RetrySpec.jitter 为 str）。
@@ -160,7 +160,7 @@ def normalize_code(raw: str) -> str:
     参数：
         raw: 原始错误码（如 "429" / "SERVICE_UNAVAILABLE"）。
     返回：
-        归一化族名；无法识别时原样返回（规则 7：未知值不静默改写语义，由分类兜底）。
+        归一化族名；无法识别时原样返回（规则 5：未知值不静默改写语义，由分类兜底）。
     """
     upper = raw.strip().upper()
     if upper in _CODE_ALIASES:
@@ -291,7 +291,7 @@ def backoff_delay(
         本次应等待的秒数（≥0）。
     """
     raw = min(spec.max_delay, spec.base_delay * (spec.multiplier ** max(0, attempt - 1)))
-    jitter = Jitter.coerce(spec.jitter)  # 未知值显式回退 FULL（规则 7）
+    jitter = Jitter.coerce(spec.jitter)  # 未知值显式回退 FULL（规则 5）
     if jitter is Jitter.NONE:
         delay = raw
     elif jitter is Jitter.FULL:
@@ -311,7 +311,7 @@ def backoff_delay(
 # 降级阶梯：无环 + 末级拒答 + quality 递减
 # --------------------------------------------------------------------------- #
 class DegradeMode(str, Enum):
-    """降级方式（有限取值集合，规则 7）。"""
+    """降级方式（有限取值集合，规则 5）。"""
 
     REROUTE = "reroute"                   # 换备用模型/port
     CACHE = "cache"                       # 用语义缓存答案
@@ -392,7 +392,7 @@ def validate_ladder(ladder: DegradeLadder) -> None:
 # 熔断状态：三态机的不可变快照
 # --------------------------------------------------------------------------- #
 class BreakerStatus(str, Enum):
-    """熔断器三态（有限取值，规则 7）。"""
+    """熔断器三态（有限取值，规则 5）。"""
 
     CLOSED = "closed"
     OPEN = "open"

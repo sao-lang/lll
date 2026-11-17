@@ -18,7 +18,7 @@ __all__ = ["StructuredOutputValidator", "validate_json_schema"]
 
 
 class _JsonType(str, Enum):
-    """JSON Schema 的 type 有限取值（规则 7；私有枚举，不进 G5 公共契约）。
+    """JSON Schema 的 type 有限取值（规则 5；私有枚举，不进 G5 公共契约）。
 
     成员对应 JSON Schema 标准类型；_type_ok 用查表分派，未知值显式回退"不校验"。
     """
@@ -33,7 +33,7 @@ class _JsonType(str, Enum):
 
     @classmethod
     def coerce(cls, raw: object) -> _JsonType | None:
-        """字符串归一为成员；未知/缺省值回退 None（不校验，规则 7 显式回退）。"""
+        """字符串归一为成员；未知/缺省值回退 None（不校验，规则 5 显式回退）。"""
         if not isinstance(raw, str):
             return None
         try:
@@ -43,7 +43,7 @@ class _JsonType(str, Enum):
 
 
 class _OutputMode(str, Enum):
-    """结构化输出模式的有限取值（规则 7；与 pydantic Literal 契约对齐）。
+    """结构化输出模式的有限取值（规则 5；与 pydantic Literal 契约对齐）。
 
     成员：CONSTRAINED 约束解码 / PROMPT 仅提示 / REPAIR 校验失败后修复重试。
     """
@@ -54,7 +54,7 @@ class _OutputMode(str, Enum):
 
     @classmethod
     def coerce(cls, raw: str) -> _OutputMode:
-        """字符串归一为成员；未知值显式回退 REPAIR（保守校验，规则 7）。"""
+        """字符串归一为成员；未知值显式回退 REPAIR（保守校验，规则 5）。"""
         try:
             return cls(raw)
         except ValueError:
@@ -67,7 +67,7 @@ def validate_json_schema(value: object, schema: dict[str, DynamicValue]) -> list
     参数：
         value: 待校验值；若为 str 先尝试 json.loads（模型常返回 JSON 文本）。
         schema: 支持 type/required/properties/enum/minimum 关键字。
-            schema 由外部注入、形态由 JSON Schema 决定，故用 DynamicValue（规则 4）。
+            schema 由外部注入、形态由 JSON Schema 决定，故用 DynamicValue（规则 3）。
     返回：
         错误描述列表；空列表表示通过。
     """
@@ -116,7 +116,7 @@ def _check(data: DynamicValue, schema: dict[str, DynamicValue], path: str, error
 
 
 def _type_ok(data: DynamicValue, expected: _JsonType) -> bool:
-    """判断数据是否符合 JSON Schema 的 type 声明（枚举分派，规则 7）。"""
+    """判断数据是否符合 JSON Schema 的 type 声明（枚举分派，规则 5）。"""
     checkers: dict[_JsonType, Callable[[DynamicValue], bool]] = {
         _JsonType.OBJECT: lambda v: isinstance(v, dict),
         _JsonType.ARRAY: lambda v: isinstance(v, list),
@@ -157,7 +157,7 @@ class StructuredOutputValidator:
         参数：
             text: 模型原始输出文本。
         返回：
-            (解析值, 是否合法)；解析值形态由模型/JSON 决定，故用 DynamicValue（规则 4）。
+            (解析值, 是否合法)；解析值形态由模型/JSON 决定，故用 DynamicValue（规则 3）。
             strict 模式下非法输出 ok 必为 False。
         """
         errors = validate_json_schema(text, self._spec.json_schema)

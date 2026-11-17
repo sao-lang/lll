@@ -2,7 +2,7 @@
 
 字段只增不改语义；废弃字段先标记 deprecated 至少一个 minor 版本。
 所有形态由外部 port 决定的字段统一用 DynamicValue（动态边界具名别名），
-禁止散落裸 Any（见 docs/编码规则.md 规则 4）。
+禁止散落裸 Any（见 docs/编码规则.md 规则 3）。
 每个字段的 Field(description) 说明语义；复杂类在类 docstring 补字段约束。
 """
 
@@ -52,7 +52,7 @@ class StreamEventKind(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class StreamEvent:
-    """结构化流式事件（跨 Port/网关统一载体，规则 4 动态边界用具名 kind）。
+    """结构化流式事件（跨 Port/网关统一载体，规则 3 动态边界用具名 kind）。
 
     字段：
         kind: 事件类型。data: 载荷形态由 kind 决定（文本为 str，工具为 dict，USAGE 为 Usage）。

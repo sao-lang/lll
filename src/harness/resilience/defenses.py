@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, MutableMapping
 from enum import Enum
+import time
 
 from harness._ctxview import coerce_ctx
 from hooks import Decision, HookCtx, HookMode
@@ -25,7 +26,7 @@ __all__ = [
 
 
 class _ExceedPolicy(str, Enum):
-    """超限策略的有限取值（规则 7；私有枚举，不进 G5 公共契约）。
+    """超限策略的有限取值（规则 5；私有枚举，不进 G5 公共契约）。
 
     成员：
         WAIT: 等待/降级（令牌桶缺省，交上层走降级链）。
@@ -39,7 +40,7 @@ class _ExceedPolicy(str, Enum):
 
     @classmethod
     def coerce(cls, raw: _ExceedPolicy | str) -> _ExceedPolicy:
-        """字符串归一为成员；未知值显式回退 DEGRADE（规则 7），不静默放行。"""
+        """字符串归一为成员；未知值显式回退 DEGRADE（规则 5），不静默放行。"""
         if isinstance(raw, cls):
             return raw
         try:
@@ -49,7 +50,7 @@ class _ExceedPolicy(str, Enum):
 
 
 class _KillScope(str, Enum):
-    """killswitch 作用域的有限取值（规则 7；私有枚举）。
+    """killswitch 作用域的有限取值（规则 5；私有枚举）。
 
     成员：SESSION 仅会话级标志；GLOBAL 含全局标志。
     """
@@ -59,7 +60,7 @@ class _KillScope(str, Enum):
 
     @classmethod
     def coerce(cls, raw: _KillScope | str) -> _KillScope:
-        """字符串归一为成员；未知值显式回退 SESSION（最小权限，规则 7）。"""
+        """字符串归一为成员；未知值显式回退 SESSION（最小权限，规则 5）。"""
         if isinstance(raw, cls):
             return raw
         try:
@@ -180,19 +181,18 @@ class Bulkhead:
         self,
         *,
         pools: dict[str, int] | None = None,
-        acquire_timeout: float = 5.0,
         on_full: _ExceedPolicy | str = _ExceedPolicy.REJECT,
     ) -> None:
         """装配舱壁：pools 为池名→容量；on_full 为满时策略（未知值回退 DEGRADE）。
 
         参数：
             pools: 池名→并发上限；缺省 {"default": 10}。
-            acquire_timeout: 获取槽的超时（单实例闭环暂不阻塞，仅元数据）。
             on_full: 池满策略，接受 _ExceedPolicy 或字符串。
+        注：acquire_timeout 已移除（v2.3）——舱壁满即按 on_full 拒绝，无等待语义；
+        保留一个不生效的超时参数会误导用户，故彻底删除。
         """
         self._capacity = dict(pools or {"default": 10})
         self._used: dict[str, int] = {name: 0 for name in self._capacity}
-        self._timeout = acquire_timeout
         self._on_full = _ExceedPolicy.coerce(on_full)
 
     def acquire(self, pool: str, ctx: HookCtx | None = None) -> bool:
@@ -226,7 +226,7 @@ class Bulkhead:
 
 
 class Idempotency:
-    """幂等插件：按幂等键去重，防止重复执行副作用。"""
+    """幂等插件：按幂等键去重，TTL 到期自动淘汰（v2.3 补齐真淘汰）。"""
 
     name = "r3_idempotency"
     events = ("before_invoke",)
@@ -234,16 +234,37 @@ class Idempotency:
     priority = 10
     requires_ports: tuple[str, ...] = ()
 
-    def __init__(self, *, store: MutableMapping[str, bool] | None = None, ttl: int = 86400) -> None:
-        """装配去重存储（缺省进程内字典）与 TTL（仅元数据，单实例闭环不淘汰）。"""
+    def __init__(
+        self,
+        *,
+        store: MutableMapping[str, float] | None = None,
+        ttl: float = 86400,
+        clock: Callable[[], float] | None = None,
+    ) -> None:
+        """装配去重存储（值为登记时间戳）与 TTL（真淘汰）。
+
+        参数：
+            store: 幂等键→登记时间戳的映射（缺省进程内字典）。
+            ttl: 去重窗口秒数；到期后同键视为首次，允许重试。
+            clock: 注入时钟（缺省 time.time），便于测试确定性推进。
+        """
         self._store = store if store is not None else {}
         self._ttl = ttl
+        self._clock = clock or time.time  # 墙钟在此具名边界进入，不隐式散落
 
     def check_and_mark(self, key: str) -> bool:
-        """返回 True 表示已见过（命中去重），False 表示首次（并登记）。"""
-        if key in self._store:
+        """返回 True 表示窗口内已见过（命中去重），False 表示首次（并登记）。
+
+        先清理该键的过期记录（now - 登记时间 ≥ ttl 即淘汰），再判定。
+        """
+        now = self._clock()
+        marked_at = self._store.get(key)
+        if marked_at is not None and now - marked_at >= self._ttl:
+            self._store.pop(key, None)
+            marked_at = None
+        if marked_at is not None:
             return True
-        self._store[key] = True
+        self._store[key] = now
         return False
 
     async def __call__(self, ctx: HookCtx) -> Decision:
@@ -313,7 +334,7 @@ class KillSwitch:
         flag_store: MutableMapping[str, bool] | None = None,
         scope: _KillScope | str = _KillScope.SESSION,
     ) -> None:
-        """装配标志存储（缺省进程内字典）与作用域（未知值回退 SESSION，规则 7）。
+        """装配标志存储（缺省进程内字典）与作用域（未知值回退 SESSION，规则 5）。
 
         参数：
             flag_store: 标志存储（可注入共享 store）。scope: 作用域枚举或字符串。
@@ -371,7 +392,7 @@ class BudgetGuard:
         budgets = ctx.budget_left
         if budgets is None:
             return Decision.continue_()  # 未注入预算投影：无信息，不误判
-        # 显式六维判断：直接读具名字段（无 getattr 动态读取，满足规则 8；类型安全满足 mypy strict）
+        # 显式六维判断：直接读具名字段（无 getattr 动态读取，满足规则 6；类型安全满足 mypy strict）
         hit = (
             (budgets.max_turns > 0 and budgets.used_turns / budgets.max_turns >= self._soft)
             or (budgets.max_hops > 0 and budgets.used_hops / budgets.max_hops >= self._soft)

@@ -9,9 +9,10 @@ from runtime import DynamicValue, Effect
 
 from .types import RouteDecision
 
-__all__ = ["ModelRouter", "RuleRouter"]
+__all__ = ["ModelRouter", "RuleRouter", "NO_DEFAULT"]
 
-_NO_DEFAULT = "default"
+NO_DEFAULT = "default"
+_NO_DEFAULT = NO_DEFAULT  # 内部兼容别名
 """未显式配置默认模型时的哨兵值（命名常量，替代散落的裸字符串）。"""
 
 
@@ -33,7 +34,7 @@ class ModelRouter(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class _RouteInput:
-    """路由输入的具名视图（规则 8：payload 动态字段一次读取成具名视图）。
+    """路由输入的具名视图（规则 6：payload 动态字段一次读取成具名视图）。
 
     字段：
         task_hint: 任务类型提示（如 code/chat）。
@@ -48,7 +49,7 @@ def _coerce_route(effect: Effect) -> _RouteInput:
     """唯一的 payload 动态读取边界：task_hint 与 meta.max_cost_per_call。
 
     effect.payload 的 task_hint/meta 是 R4 约定的扩展键（不在 R1 EffectPayload
-    已知键全集内），形态由装配层决定，故在此一次读取并归名为具名视图（规则 8）。
+    已知键全集内），形态由装配层决定，故在此一次读取并归名为具名视图（规则 6）。
 
     参数：
         effect: 待路由的 LLM Effect。
@@ -121,7 +122,7 @@ class RuleRouter:
         返回：
             RouteDecision(model, reason) —— reason 供 trace。
         """
-        route_input = _coerce_route(effect)  # 唯一 payload 动态边界（规则 8）
+        route_input = _coerce_route(effect)  # 唯一 payload 动态边界（规则 6）
         target = self._routes.get(route_input.task_hint, self._default)
         reason = f"task_hint={route_input.task_hint or 'none'}"
 

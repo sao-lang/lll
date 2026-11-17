@@ -5,9 +5,9 @@
 """
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 
-from harness._ctxview import coerce_port_ctx
+from harness._ctxview import as_port_ctx, coerce_port_ctx, read_meta
 from hooks import (
     LLMPort,
     LLMRequest,
@@ -17,10 +17,11 @@ from hooks import (
     StreamEventKind,
     Usage,
 )
-from runtime import Message
+from runtime import Effect, EffectKind, Message, Result
 
 from .cache import CachePort, ExactCache
-from .router import ModelRouter, RuleRouter
+from .registry import ModelRegistry
+from .router import NO_DEFAULT, ModelRouter, RuleRouter
 from .stream import has_stream_events, wrap_text_stream
 from .structured import StructuredOutputValidator, validate_json_schema
 from .types import (
@@ -31,6 +32,7 @@ from .types import (
 )
 
 __all__ = ["ModelGateway"]
+
 
 
 class ModelGateway:
@@ -49,18 +51,22 @@ class ModelGateway:
         spec: StructuredOutputSpec | None = None,
         prompt_version: str = "v1",
         cost_guard: CostGuard | None = None,
+        registry: ModelRegistry | None = None,
     ) -> None:
         """装配网关：只 llm 必填，其余缺省用默认实现。
 
         参数：
-            llm: 模型后端（实现 LLMPort.complete/stream）。
-            router: 路由策略（缺省规则路由）。cache: 缓存（缺省精确缓存）。
+            llm: 默认模型后端（实现 LLMPort.complete/stream）。
+            router: 路由策略（缺省规则路由）——complete 时真调用，不再空转。
+            cache: 缓存（缺省精确缓存）。
             spec: 结构化输出规格（None 表示不校验）。
             prompt_version: prompt 版本（进缓存键）。cost_guard: 成本硬闸。
+            registry: 模型端点注册表（缺省 None=仅默认后端，兼容旧行为）。
         """
         self._llm = llm
         self._router = router or RuleRouter()
         self._cache = cache if cache is not None else ExactCache()
+        self._registry = registry
         self._spec = spec
         self._validator = StructuredOutputValidator(spec) if spec else None
         self._prompt_version = prompt_version
@@ -68,7 +74,71 @@ class ModelGateway:
         self.ledger = CostAttributor()
         self.cache = self._cache
 
-    async def complete(self, request: LLMRequest, ctx: PortCtx) -> LLMResponse:
+    def _resolve_llm(
+        self, request: LLMRequest, ctx: PortCtx, *, degrade_target: str | None = None
+    ) -> LLMPort:
+        """解析本次调用的真实后端：router 选模型 → registry 映射实例（v1.5 接通）。
+
+        参数：
+            request: LLM 请求。ctx: Port 上下文。
+            degrade_target: 降级目标名（优先于 router 结果；来自 dispatch 回传）。
+        返回：
+            目标 LLMPort 实例；未注册/无路由目标时回退默认 llm。
+        说明：
+            - router 总是被调用（修复 _router 空转），路由理由进 ctx.meta 供 trace。
+            - 注册表缺省（None）时 router 仍调用但不切实例——兼容旧行为。
+        """
+        # 构造 router 需要的最小 Effect（R4 内部适配，task_hint 来自请求 model 覆盖）
+        effect = Effect(
+            kind=EffectKind.LLM,
+            payload={"messages": [dict(m) for m in request.messages], "model": request.model or ""},
+        )
+        decision = self._router.route(effect, ctx)
+        target = degrade_target or (decision.model if decision.model and decision.model != NO_DEFAULT else None)
+        ctx.meta.setdefault("model_route", []).append(
+            f"{decision.reason}->{target or 'default'}"
+        )
+        if target is None or self._registry is None:
+            return self._llm
+        resolved = self._registry.resolve_llm(target)
+        if resolved is None:
+            return self._llm  # 未注册：回退默认，不崩
+        return resolved
+
+    def as_call(self) -> Callable[[Effect, object], object]:
+        """给 R1 Runner 的 call 适配器：Effect→LLMRequest→complete→Result（v1.5 降级接力）。
+
+        返回：
+            (effect, ctx) → Result 的异步回调（注入 Runner(call=...)）。
+        降级接力：
+            从 ctx.meta 读 bus.dispatch() 写入的 degrade_target，传给 complete 切端点；
+            无该字段时走正常路由。ctx 用鸭子读取（gateway 不依赖 R2 的 HookCtx 类型）。
+        """
+        async def adapter(effect: Effect, ctx: object) -> Result:
+            payload = effect.payload
+            request = LLMRequest(
+                messages=list(payload.get("messages", [])),
+                model=str(payload.get("model") or "") or None,
+            )
+            port_ctx = as_port_ctx(ctx)
+            degrade_target = read_meta(ctx, "degrade_target")
+            response = await self.complete(request, port_ctx, degrade_target=degrade_target)
+            # usage 已由 complete() 内部 _record_cost 记账；此处只回填到 data 供上层读取
+            return Result.success({
+                "content": response.content,
+                "tool_calls": response.tool_calls,
+                "usage": response.usage,
+            })
+
+        return adapter
+
+    async def complete(
+        self,
+        request: LLMRequest,
+        ctx: PortCtx,
+        *,
+        degrade_target: str | None = None,
+    ) -> LLMResponse:
         """一次完整模型调用：缓存命中直接返回，否则路由→调用→校验→记账。
 
         参数：
@@ -82,16 +152,19 @@ class ModelGateway:
         if cached is not None:
             return cached
 
-        response = await self._llm.complete(request, ctx)
+        llm = self._resolve_llm(request, ctx, degrade_target=degrade_target)
+        response = await llm.complete(request, ctx)
         self._record_cost(response, ctx)
 
         if self._validator is not None:
-            response = await self._complete_with_repair(response, request, ctx)
+            response = await self._complete_with_repair(response, request, ctx, llm=llm)
 
         await self._cache.put(request, response, version=self._prompt_version)
         return response
 
-    async def stream(self, request: LLMRequest, ctx: PortCtx) -> AsyncIterator[str]:
+    async def stream(
+        self, request: LLMRequest, ctx: PortCtx, *, degrade_target: str | None = None
+    ) -> AsyncIterator[str]:
         """流式补全（R4 §4.1）：缓存命中吐缓存，否则逐块转发并在结束时结算。
 
         参数：
@@ -109,14 +182,15 @@ class ModelGateway:
             return
 
         chunks: list[str] = []
+        llm = self._resolve_llm(request, ctx, degrade_target=degrade_target)
         # LLMPort.stream 返回 AsyncIterator（PEP 525 签名），直接 async for 迭代。
-        async for chunk in self._llm.stream(request, ctx):
+        async for chunk in llm.stream(request, ctx):
             chunks.append(chunk)
             yield chunk
 
         # 流结束：后端必须已把 usage 写入协议成员 last_usage（LLMPort 契约）。
         # 缺失即拒绝服务并显式报错——绝不记一笔假 zero-cost 掩盖账单缺口。
-        usage = self._llm.last_usage
+        usage = llm.last_usage
         if usage is None:
             raise ValueError(
                 "LLMPort.stream() finished without setting last_usage; "
@@ -127,7 +201,7 @@ class ModelGateway:
         await self._cache.put(request, full_response, version=self._prompt_version)
 
     def stream_events(
-        self, request: LLMRequest, ctx: PortCtx,
+        self, request: LLMRequest, ctx: PortCtx, *, degrade_target: str | None = None
     ) -> AsyncIterator[StreamEvent]:
         """结构化流式事件（R4 §4.1 v1.2）：透传后端事件，遇 USAGE 结算成本。
 
@@ -138,10 +212,10 @@ class ModelGateway:
         说明：
             若后端未发 USAGE 事件但 last_usage 已写（旧后端默认包装），在流末补结算。
         """
-        return self._stream_events_impl(request, ctx)
+        return self._stream_events_impl(request, ctx, degrade_target=degrade_target)
 
     async def _stream_events_impl(
-        self, request: LLMRequest, ctx: PortCtx,
+        self, request: LLMRequest, ctx: PortCtx, *, degrade_target: str | None = None
     ) -> AsyncIterator[StreamEvent]:
         cached = await self._cache.get(request, version=self._prompt_version)
         if cached is not None:
@@ -152,13 +226,14 @@ class ModelGateway:
 
         chunks: list[str] = []
         settled: Usage | None = None
+        llm = self._resolve_llm(request, ctx, degrade_target=degrade_target)
         # 后端有 stream_events 直接用；旧后端用帮助函数把文本流包成事件流。
-        # 规则 8 例外：stream_events 是可选能力探测（具名固定字符串），不在 LLMPort 强制协议内。
-        if has_stream_events(self._llm):
-            stream_events_fn = getattr(self._llm, "stream_events")
+        # 规则 6 例外：stream_events 是可选能力探测（具名固定字符串），不在 LLMPort 强制协议内。
+        if has_stream_events(llm):
+            stream_events_fn = getattr(llm, "stream_events")
             source = stream_events_fn(request, ctx)
         else:
-            source = wrap_text_stream(self._llm, request, ctx)
+            source = wrap_text_stream(llm, request, ctx)
         async for event in source:
             if event.kind is StreamEventKind.TEXT_DELTA and isinstance(event.data, str):
                 chunks.append(event.data)
@@ -167,7 +242,7 @@ class ModelGateway:
             yield event  # 原样透传，包含工具/handoff/done
 
         # 结算：优先事件里的 USAGE，其次后端 last_usage；两者都无则拒绝（不记假成本）。
-        usage = settled or self._llm.last_usage
+        usage = settled or llm.last_usage
         if usage is None:
             raise ValueError(
                 "LLMPort.stream_events() finished without USAGE or last_usage; "
@@ -182,14 +257,14 @@ class ModelGateway:
 
         参数：
             response: LLM 响应（usage 提供 token/成本）。ctx: Port 上下文，
-                agent_id/user_id 由 coerce_port_ctx 具名视图提供（规则 8）。
+                agent_id/user_id 由 coerce_port_ctx 具名视图提供（规则 6）。
         """
         cost = float(response.usage.cost_usd)
         if self._cost_guard is not None and not self._cost_guard.allow(cost):
             raise ValueError("cost budget exceeded (CostGuard)")
         if self._cost_guard is not None:
             self._cost_guard.charge(cost)
-        view = coerce_port_ctx(ctx)  # 唯一 PortCtx 动态边界（规则 8）
+        view = coerce_port_ctx(ctx)  # 唯一 PortCtx 动态边界（规则 6）
         self.ledger.record(CostRecord(
             run_id=ctx.run_id,
             agent_id=view.agent_id,
@@ -199,9 +274,17 @@ class ModelGateway:
         ))
 
     async def _complete_with_repair(
-        self, response: LLMResponse, request: LLMRequest, ctx: PortCtx
+        self,
+        response: LLMResponse,
+        request: LLMRequest,
+        ctx: PortCtx,
+        *,
+        llm: LLMPort | None = None,
     ) -> LLMResponse:
-        """异步修复循环：最多 max_repair 次，每次把校验错误附给模型。"""
+        """异步修复循环：最多 max_repair 次，每次把校验错误附给模型。
+
+        llm: 本次调用已解析的后端（缺省用默认，兼容直接调用）。
+        """
         assert self._validator is not None
         assert self._spec is not None  # validator 存在时 spec 必存在（构造时同源创建）
         spec = self._spec
@@ -211,13 +294,13 @@ class ModelGateway:
             if not errors:
                 return current
             repair_prompt = self._validator.build_repair_prompt(current.content or "", errors)
-            # 统一复用 R1 Message 四字段具名结构（规则 3）：消除仅两字段的重复 ChatMessage。
+            # 统一复用 R1 Message 四字段具名结构（规则 4）：消除仅两字段的重复 ChatMessage。
             repair_message = Message(role="system", content=repair_prompt)
             patched = LLMRequest(
                 messages=[*request.messages, repair_message.to_dict()],
                 model=request.model,
             )
-            current = await self._llm.complete(patched, ctx)
+            current = await (llm or self._llm).complete(patched, ctx)
             self._record_cost(current, ctx)
         # 超次：strict 模式拒答（抛错，绝不把非法输出当合法返回）。
         if spec.strict:
