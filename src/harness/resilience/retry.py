@@ -12,10 +12,9 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from random import Random
 
+from harness._ctxview import coerce_ctx
 from hooks import Decision, HookCtx, HookMode, RetrySpec
 from runtime import EffectKind, Result
-
-from harness._ctxview import coerce_ctx
 
 from .types import Jitter, backoff_delay, classify_failure, validate_retry_spec
 

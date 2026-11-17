@@ -5,9 +5,8 @@
 """
 from __future__ import annotations
 
-from hooks import LLMPort, LLMRequest, LLMResponse, PortCtx
-
 from harness._ctxview import coerce_port_ctx
+from hooks import LLMPort, LLMRequest, LLMResponse, PortCtx
 
 from .cache import ExactCache, SemanticCache
 from .router import ModelRouter, RuleRouter

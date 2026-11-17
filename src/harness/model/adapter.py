@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
-from hooks import LLMPort, LLMRequest, LLMResponse, PortCtx
+from hooks import LLMRequest, LLMResponse, PortCtx
 
 __all__ = ["RecordingLLM", "StreamLLM"]
 

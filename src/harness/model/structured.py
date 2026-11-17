@@ -14,7 +14,7 @@ from runtime import DynamicValue
 
 from .types import StructuredOutputSpec
 
-__all__ = ["validate_json_schema", "StructuredOutputValidator"]
+__all__ = ["StructuredOutputValidator", "validate_json_schema"]
 
 
 class _JsonType(str, Enum):

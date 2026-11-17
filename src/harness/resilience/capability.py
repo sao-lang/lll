@@ -11,7 +11,14 @@ from random import Random
 from hooks import HookBus, Registry
 
 from .breaker import CircuitBreaker
-from .defenses import Bulkhead, Degradation, Idempotency, KillSwitch, RateLimit, Watchdog
+from .defenses import (
+    Bulkhead,
+    Degradation,
+    Idempotency,
+    KillSwitch,
+    RateLimit,
+    Watchdog,
+)
 from .retry import RetryPolicy
 from .types import DegradeLadder, DegradeMode, DegradeStep
 

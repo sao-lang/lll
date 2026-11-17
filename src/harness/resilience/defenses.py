@@ -8,9 +8,8 @@ from __future__ import annotations
 from collections.abc import Callable, MutableMapping
 from enum import Enum
 
-from hooks import Decision, HookCtx, HookMode
-
 from harness._ctxview import coerce_ctx
+from hooks import Decision, HookCtx, HookMode
 
 from .types import DegradeLadder, DegradeMode, DegradeStep, validate_ladder
 

@@ -9,10 +9,9 @@ from __future__ import annotations
 from collections.abc import Callable, MutableMapping
 from dataclasses import replace
 
+from harness._ctxview import Dimension, coerce_ctx
 from hooks import Decision, HookCtx, HookMode, LifecycleEvent
 from runtime import Result
-
-from harness._ctxview import Dimension, coerce_ctx
 
 from .types import BreakerState, BreakerStatus
 

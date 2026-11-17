@@ -5,7 +5,7 @@ from typing import Protocol, runtime_checkable
 
 from hooks import LLMResponse
 
-__all__ = ["SemanticCache", "ExactCache"]
+__all__ = ["ExactCache", "SemanticCache"]
 
 
 @runtime_checkable

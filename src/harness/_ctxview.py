@@ -5,6 +5,7 @@
 本模块是这些动态读取的**唯一**边界：coerce_ctx() 一次读取并归一化为具名视图，
 下游插件只做属性访问 + 枚举比较，不再散落 meta.get / getattr。
 """
+
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
@@ -15,8 +16,12 @@ from hooks import Decision, HookCtx, PortCtx
 from runtime import DynamicValue, Result
 
 __all__ = [
-    "CtxView", "PortCtxView", "Dimension", "NextFn",
-    "coerce_ctx", "coerce_port_ctx",
+    "CtxView",
+    "Dimension",
+    "NextFn",
+    "PortCtxView",
+    "coerce_ctx",
+    "coerce_port_ctx",
 ]
 
 Dimension = tuple[str, str]

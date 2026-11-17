@@ -12,19 +12,20 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping, Set
+from collections.abc import Mapping
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
 from enum import Enum
 from random import Random
 from typing import Protocol, runtime_checkable
 
 from hooks import RetrySpec
-from runtime import DynamicValue, Result
+from runtime import Result
 
 __all__ = [
+    "DEFAULT_FAILURE_TABLE",
     "BreakerState",
     "BreakerStatus",
-    "DEFAULT_FAILURE_TABLE",
     "DegradeLadder",
     "DegradeMode",
     "DegradeStep",
@@ -340,7 +341,7 @@ class DegradeLadder:
 
     steps: tuple[DegradeStep, ...]
 
-    def pick(self, available: Set[str]) -> DegradeStep:
+    def pick(self, available: AbstractSet[str]) -> DegradeStep:
         """从可用目标集合里选 quality 最高的一级；无可用则落到拒答级。
 
         参数：
