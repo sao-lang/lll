@@ -78,7 +78,7 @@ class ModelGateway:
         异常：
             ValueError: 结构化校验超次且 strict（拒答）。
         """
-        cached = self._cache.get(request, version=self._prompt_version)
+        cached = await self._cache.get(request, version=self._prompt_version)
         if cached is not None:
             return cached
 
@@ -88,7 +88,7 @@ class ModelGateway:
         if self._validator is not None:
             response = await self._complete_with_repair(response, request, ctx)
 
-        self._cache.put(request, response, version=self._prompt_version)
+        await self._cache.put(request, response, version=self._prompt_version)
         return response
 
     async def stream(self, request: LLMRequest, ctx: PortCtx) -> AsyncIterator[str]:
@@ -101,7 +101,7 @@ class ModelGateway:
         说明：
             流式路径禁用结构化校验（无法校验半截流），不经过 R1 Effect 循环。
         """
-        cached = self._cache.get(request, version=self._prompt_version)
+        cached = await self._cache.get(request, version=self._prompt_version)
         if cached is not None:
             # 流式是 Port 层，ctx 是 PortCtx（无 hook trace）；缓存命中信息随响应走。
             for ch in cached.content or "":
@@ -124,7 +124,7 @@ class ModelGateway:
             )
         full_response = LLMResponse(content="".join(chunks), usage=usage)
         self._record_cost(full_response, ctx)
-        self._cache.put(request, full_response, version=self._prompt_version)
+        await self._cache.put(request, full_response, version=self._prompt_version)
 
     def stream_events(
         self, request: LLMRequest, ctx: PortCtx,
@@ -143,7 +143,7 @@ class ModelGateway:
     async def _stream_events_impl(
         self, request: LLMRequest, ctx: PortCtx,
     ) -> AsyncIterator[StreamEvent]:
-        cached = self._cache.get(request, version=self._prompt_version)
+        cached = await self._cache.get(request, version=self._prompt_version)
         if cached is not None:
             yield StreamEvent(kind=StreamEventKind.TEXT_DELTA, data=cached.content or "")
             yield StreamEvent(kind=StreamEventKind.USAGE, data=cached.usage)
@@ -175,7 +175,7 @@ class ModelGateway:
             )
         full = LLMResponse(content="".join(chunks), usage=usage)
         self._record_cost(full, ctx)
-        self._cache.put(request, full, version=self._prompt_version)
+        await self._cache.put(request, full, version=self._prompt_version)
 
     def _record_cost(self, response: LLMResponse, ctx: PortCtx) -> None:
         """从响应的 usage 记录成本（不自行估算），过成本硬闸。
