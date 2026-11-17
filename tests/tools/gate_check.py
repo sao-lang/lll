@@ -40,6 +40,16 @@ MODULES = {
         "behavior": ["test_verdict.py", "test_trace.py", "test_hooks.py"],
         "integration": ["test_ports.py", "test_registry.py", "test_errors.py"],
     },
+    "r3": {
+        "title": "R3 可靠性", "pkg": "harness.resilience", "path": "harness/resilience",
+        "doc": "docs/02-模块详设/Agent/R3-可靠性.md", "demo": "tests/demos/demo_r3.py", "coverage": 90,
+        "symbols": ["FailureClass", "FailureClassifier", "DimensionKey", "DEFAULT_FAILURE_TABLE",
+                    "backoff_delay", "classify_failure", "normalize_code", "validate_ladder",
+                    "RetryPolicy", "CircuitBreaker", "Degradation", "RateLimit", "Bulkhead",
+                    "Idempotency", "Watchdog", "KillSwitch", "ResilienceCapability"],
+        "behavior": ["test_types.py", "test_breaker.py", "test_retry.py"],
+        "integration": ["test_degrade.py", "test_capability.py"],
+    },
 }
 
 results: list[tuple[str, bool, str]] = []

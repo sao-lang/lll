@@ -1,7 +1,8 @@
-"""红线静态扫描（AST），按模块：python tests/tools/ast_scan.py --module r1|r2
+"""红线静态扫描（AST），按模块：python tests/tools/ast_scan.py --module r1|r2|r3
 
 R1：Program 内不得有时间/随机/网络调用（破坏确定性）；纯运行时不 import random/datetime。
 R2：hook 强制留名；对外只有 bus.on() 一个注册入口，无 middleware/filter/pipe 独立 API。
+R3：降级阶梯装配期强校验（无环/末级拒答）+ 副作用重试幂等键检查；能力插件不 import IO SDK。
 
 扫描真实源码，不做运行时推断；任一红线命中退出码 1。
 """
@@ -18,6 +19,7 @@ SRC = ROOT / "src"
 TARGETS = {
     "r1": [SRC / "runtime", ROOT / "tests" / "demos" / "demo_r1.py", ROOT / "tests" / "r1"],
     "r2": [SRC / "hooks", ROOT / "tests" / "demos" / "demo_r2.py", ROOT / "tests" / "r2"],
+    "r3": [SRC / "harness" / "resilience", ROOT / "tests" / "demos" / "demo_r3.py", ROOT / "tests" / "r3"],
 }
 
 FORBIDDEN_IN_PROGRAM = (
@@ -120,7 +122,53 @@ def scan_r2(files: list[Path]) -> list[str]:
     return violations
 
 
-SCANNERS = {"r1": scan_r1, "r2": scan_r2}
+IO_SDK_PREFIXES = (
+    "httpx", "requests", "aiohttp", "boto3", "sqlalchemy", "urllib", "socket",
+)
+
+
+def scan_r3(files: list[Path]) -> list[str]:
+    """R3 红线：降级装配期校验 + 幂等键检查 + hook 留名 + 不 import IO SDK。"""
+    violations: list[str] = []
+    pkg = SRC / "harness" / "resilience"
+
+    # 降级阶梯必须调用 validate_ladder（装配期强校验：无环/末级拒答/quality 递减）。
+    degrade = pkg / "defenses.py"
+    if degrade.exists() and "validate_ladder(ladder)" not in degrade.read_text(encoding="utf-8"):
+        violations.append("Degradation 未调用 validate_ladder（降级成环/无拒答兜底未拦截）")
+
+    # 重试插件必须检查幂等键（无幂等键的副作用不得重试）。
+    retry = pkg / "retry.py"
+    if retry.exists() and "x-idempotency-key" not in retry.read_text(encoding="utf-8"):
+        violations.append("RetryPolicy 未检查 x-idempotency-key（无幂等键副作用可能重复执行）")
+
+    # 能力插件不得直接 import IO SDK（分层纪律：只依赖 R1+R2）。
+    for path in files:
+        if not path.is_relative_to(pkg):
+            continue
+        tree = parse(path)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if any(alias.name.startswith(p) for p in IO_SDK_PREFIXES):
+                        violations.append(f"{path.relative_to(ROOT)} import IO SDK {alias.name}")
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                if any(node.module.startswith(p) for p in IO_SDK_PREFIXES):
+                    violations.append(f"{path.relative_to(ROOT)} import IO SDK {node.module}")
+
+    # hook 类必须留名（复用 R2 判定）。
+    for path in files:
+        if not (path.is_relative_to(ROOT / "tests")):
+            continue
+        tree = parse(path)
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef) and node.name.endswith("Hook"):
+                if not _declares_name(node):
+                    violations.append(f"{path.relative_to(ROOT)} hook 类 {node.name} 无 name 属性")
+    return violations
+
+
+SCANNERS = {"r1": scan_r1, "r2": scan_r2, "r3": scan_r3}
 
 
 def main() -> int:

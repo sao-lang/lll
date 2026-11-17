@@ -296,9 +296,15 @@ class HookBus:
             try:
                 d = await _maybe(hook(ctx))
                 ctx.trace.append(f"around:{hook.name}")
-                if isinstance(d, Decision) and d.action is not DecisionAction.CONTINUE:
-                    return d  # 短路（如 fallback/deny）
-                return await nxt()  # 未显式短路则继续下一层
+                # 短路条件：非 continue 动作（fallback/deny/abort...）OR 带 value 的 continue。
+                # 带 value 的 continue 表示插件已在内部调用过 next()/invoke 并拿到 Result
+                # （如 R3 重试插件在洋葱内重试后回填结果）；此时再调 nxt() 会导致真实 Port
+                # 被调用两次（副作用重复）。core 自身返回的就是 continue+value，故必须短路。
+                if isinstance(d, Decision) and (
+                    d.action is not DecisionAction.CONTINUE or d.value is not None
+                ):
+                    return d
+                return await nxt()  # 纯 continue 且无 value：继续下一层
             except Exception as exc:  # noqa: BLE001
                 ctx.trace.append(f"around:{hook.name}:error:{type(exc).__name__}")
                 return Decision.continue_()

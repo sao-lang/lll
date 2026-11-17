@@ -1,5 +1,213 @@
 {
   "contract": {
+    "harness/resilience.breaker.CircuitBreaker": {
+      "enum_values": [
+        "events",
+        "mode",
+        "name",
+        "priority"
+      ],
+      "fields": [
+        "requires_ports"
+      ],
+      "methods": [
+        "check",
+        "maybe_half_open",
+        "record",
+        "state"
+      ]
+    },
+    "harness/resilience.capability.ResilienceCapability": {
+      "enum_values": [
+        "name",
+        "version"
+      ],
+      "fields": [
+        "requires"
+      ],
+      "methods": [
+        "hooks",
+        "install"
+      ]
+    },
+    "harness/resilience.defenses.Bulkhead": {
+      "enum_values": [
+        "events",
+        "mode",
+        "name",
+        "priority"
+      ],
+      "fields": [
+        "requires_ports"
+      ],
+      "methods": [
+        "acquire",
+        "release"
+      ]
+    },
+    "harness/resilience.defenses.Degradation": {
+      "enum_values": [
+        "events",
+        "mode",
+        "name",
+        "priority"
+      ],
+      "fields": [
+        "requires_ports"
+      ],
+      "methods": [
+        "pick"
+      ]
+    },
+    "harness/resilience.defenses.Idempotency": {
+      "enum_values": [
+        "events",
+        "mode",
+        "name",
+        "priority"
+      ],
+      "fields": [
+        "requires_ports"
+      ],
+      "methods": [
+        "check_and_mark"
+      ]
+    },
+    "harness/resilience.defenses.KillSwitch": {
+      "enum_values": [
+        "events",
+        "mode",
+        "name",
+        "priority"
+      ],
+      "fields": [
+        "requires_ports"
+      ],
+      "methods": [
+        "check"
+      ]
+    },
+    "harness/resilience.defenses.RateLimit": {
+      "enum_values": [
+        "events",
+        "mode",
+        "name",
+        "priority"
+      ],
+      "fields": [
+        "requires_ports"
+      ],
+      "methods": [
+        "check"
+      ]
+    },
+    "harness/resilience.defenses.Watchdog": {
+      "enum_values": [
+        "events",
+        "mode",
+        "name",
+        "priority"
+      ],
+      "fields": [
+        "requires_ports"
+      ],
+      "methods": [
+        "observe"
+      ]
+    },
+    "harness/resilience.retry.RetryPolicy": {
+      "enum_values": [
+        "events",
+        "mode",
+        "name",
+        "priority"
+      ],
+      "fields": [
+        "requires_ports"
+      ],
+      "methods": []
+    },
+    "harness/resilience.types.BreakerState": {
+      "enum_values": [],
+      "fields": [
+        "failures",
+        "half_open_successes",
+        "opened_at",
+        "status",
+        "window"
+      ],
+      "methods": [
+        "failure_rate"
+      ]
+    },
+    "harness/resilience.types.BreakerStatus": {
+      "enum_values": [
+        "CLOSED",
+        "HALF_OPEN",
+        "OPEN"
+      ],
+      "fields": [],
+      "methods": []
+    },
+    "harness/resilience.types.DegradeLadder": {
+      "enum_values": [],
+      "fields": [
+        "steps"
+      ],
+      "methods": [
+        "pick"
+      ]
+    },
+    "harness/resilience.types.DegradeMode": {
+      "enum_values": [
+        "CACHE",
+        "FALLBACK_VALUE",
+        "REFUSE",
+        "REROUTE"
+      ],
+      "fields": [],
+      "methods": []
+    },
+    "harness/resilience.types.DegradeStep": {
+      "enum_values": [],
+      "fields": [
+        "condition",
+        "max_latency_ms",
+        "mode",
+        "quality",
+        "target"
+      ],
+      "methods": []
+    },
+    "harness/resilience.types.DimensionKey": {
+      "enum_values": [],
+      "fields": [
+        "dim_type",
+        "name"
+      ],
+      "methods": [
+        "as_tuple"
+      ]
+    },
+    "harness/resilience.types.FailureClass": {
+      "enum_values": [],
+      "fields": [
+        "code",
+        "count_toward_breaker",
+        "retryable",
+        "suggested_delay"
+      ],
+      "methods": []
+    },
+    "harness/resilience.types.FailureClassifier": {
+      "enum_values": [],
+      "fields": [
+        "name"
+      ],
+      "methods": [
+        "classify"
+      ]
+    },
     "hooks.bus.DispatchResult": {
       "enum_values": [],
       "fields": [
@@ -739,10 +947,11 @@
     }
   },
   "description": "R1/R2 已实现模块公共契约基线；变更须走设计稳定性门禁评审",
-  "hash": "a1599c8d0a0b17addcc0edf33fe54f18a03c2fee7e9406c9f7aa7dc923cae22a",
+  "hash": "a9fc9e3f1e1dbcddb9853cd3e541b506ccf2b2f9b94955d6672d8ad87f2f17a0",
   "locked_packages": [
     "runtime",
-    "hooks"
+    "hooks",
+    "harness/resilience"
   ],
   "version": "1.0"
 }
