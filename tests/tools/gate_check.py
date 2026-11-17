@@ -1,10 +1,13 @@
 """门禁执行器：python tests/tools/gate_check.py --module r1|r2
 
-按《门禁体系》G0~G5 逐条检查，全部为合入前置条件：
+按《门禁体系》G0~G4 逐条检查，全部为合入前置条件：
   G0 契约冻结 / G1 质量(mypy strict + 覆盖率 + docstring + 红线扫描)
   G2 行为断言 / G3 集成与 demo 冒烟 / G4 文档与版本一致
-  G5 设计稳定性（契约锁 + 文档锚点，防设计漂移导致已实现功能返工）
 任一不绿 → 退出码 1（拒绝合入，无例外通道）。
+
+G5 设计稳定性（契约锁）已于 2026-11-18 按用户要求删除——它锁死公共 API 与文档锚点，
+导致多轮迭代只敢改文档表述、不敢动代码（薄实现长期得不到纠正）。
+质量门禁（测试/覆盖率/类型/红线）保留不变。
 
 R1=核心运行时(src/runtime)，R2=插件总线与协议(src/hooks)。
 旧 m1~m4 体系已重写为 R1/R2，见 docs/02-模块详设/Agent/。
@@ -161,21 +164,13 @@ def g4(cfg: dict, module: str) -> None:
     print("  人工检查清单：验收用例绿 ✓ / 拆分文档与实现一致 ✓ / 版本号更新 ✓（由评审人确认）")
 
 
-def g5(cfg: dict, module: str) -> None:
-    """G5 设计稳定性：已实现模块的公共契约与文档锚点不得漂移。"""
-    proc = command(["tests/tools/contract_lock.py", "check"])
-    detail = proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else tail(proc)
-    record("G5 设计稳定性（契约锁 + 文档锚点）", proc.returncode == 0,
-           detail if proc.returncode == 0 else tail(proc, 8))
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description="AgentKit 模块门禁（R1/R2）")
     parser.add_argument("--module", required=True, choices=sorted(MODULES))
     args = parser.parse_args()
     cfg = MODULES[args.module]
     print(f"=== 门禁执行：{cfg['title']}（{args.module.upper()}）===")
-    for label, fn in (("G0", g0), ("G1", g1), ("G2", g2), ("G3", g3), ("G4", g4), ("G5", g5)):
+    for label, fn in (("G0", g0), ("G1", g1), ("G2", g2), ("G3", g3), ("G4", g4)):
         print(f"--- {label} ---")
         fn(cfg, args.module)
     failed = [name for name, ok, _ in results if not ok]

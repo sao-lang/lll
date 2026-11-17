@@ -5,14 +5,22 @@
 - 预算由 payload['budget'] 声明、在 fold 统一扣减（Program 不许自己数数）。
 - 所有返回都是新对象（frozen dataclass + with_），绝不就地修改入参 State。
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from typing import cast
 
 from .types import (
-    AgentState, BudgetDelta, DynamicValue, Effect, EffectKind, Message,
-    PortError, Result, canonical,
+    AgentState,
+    BudgetDelta,
+    DynamicValue,
+    Effect,
+    EffectKind,
+    Message,
+    PortError,
+    Result,
+    canonical,
 )
 
 __all__ = ["field", "fold", "replay_events", "state_append_message", "state_set"]
@@ -112,7 +120,9 @@ def _message_for(effect: Effect, result: Result) -> Message | None:
 
 
 def fold(
-    state: AgentState, effects: Sequence[Effect], results: Sequence[Result],
+    state: AgentState,
+    effects: Sequence[Effect],
+    results: Sequence[Result],
     reason: str = "",
 ) -> AgentState:
     """把一批 Effect + Result 折叠为新 State（消息/预算/托管字段全产生新对象）。
@@ -173,8 +183,11 @@ def fold(
 
     # 一次性构造新 State：消息与 kind 序列转 tuple，满足 frozen 不可变约束。
     return state.with_(
-        messages=tuple(messages), budgets=budgets,
-        output=output, last_skill=last_skill, last_child=last_child,
+        messages=tuple(messages),
+        budgets=budgets,
+        output=output,
+        last_skill=last_skill,
+        last_child=last_child,
         last_wait_human=last_wait_human,
         last_step_kinds=tuple(e.kind.value for e in effects),
         last_tokens=tokens,
@@ -182,7 +195,9 @@ def fold(
     )
 
 
-def replay_events(events: Iterable[DynamicValue], initial_state: AgentState) -> AgentState:
+def replay_events(
+    events: Iterable[DynamicValue], initial_state: AgentState
+) -> AgentState:
     """事件溯源重放：逐步 fold 得到终态。
 
     参数：
