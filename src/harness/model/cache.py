@@ -10,7 +10,12 @@ __all__ = ["ExactCache", "SemanticCache"]
 
 @runtime_checkable
 class SemanticCache(Protocol):
-    """缓存协议：get/put/invalidate，键含版本（可插拔契约）。"""
+    """缓存协议：get/put/invalidate，键含版本（可插拔契约）。
+
+    方法体 `...` 是 Protocol 接口语法，不是省略实现。
+    默认实现：本文件下方 `ExactCache`（get/put/invalidate 全部实现），
+    由 ModelGateway 在未注入时默认构造（gateway.py:58）。归属 R4，已实现。
+    """
 
     name: str
 

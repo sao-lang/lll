@@ -33,7 +33,11 @@ type SendResult = EffectBatch | DoneSentinel
 
 
 class Interpreter(Protocol):
-    """解释器协议：send 一次推进一步。"""
+    """解释器协议：send 一次推进一步。
+
+    方法体 `...` 是 Protocol 接口语法，不是省略实现。
+    默认实现：本文件下方 `InterpreterImpl`，归属 R1，已实现。
+    """
 
     def send(self, value: DynamicValue) -> SendResult:
         """推进一步。

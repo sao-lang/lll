@@ -176,6 +176,8 @@ class FailureClassifier(Protocol):
 
     属性：
         name: 策略名（一切可插拔物强制留名）。
+    方法体 `...` 是 Protocol 接口语法，不是省略实现。
+    默认实现：本文件下方 `_DefaultClassifier`（静态规则表），归属 R3，已实现。
     """
 
     name: str

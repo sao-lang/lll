@@ -17,7 +17,12 @@ _NO_DEFAULT = "default"
 
 @runtime_checkable
 class ModelRouter(Protocol):
-    """模型路由协议：name + route(effect, ctx) → RouteDecision。"""
+    """模型路由协议：name + route(effect, ctx) → RouteDecision。
+
+    方法体 `...` 是 Protocol 接口语法，不是省略实现。
+    默认实现：本文件下方 `RuleRouter`（规则路由），由 ModelGateway 在未注入时默认构造。
+    归属 R4，已实现。
+    """
 
     name: str
 
