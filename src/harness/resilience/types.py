@@ -19,7 +19,7 @@ from enum import Enum
 from random import Random
 from typing import Protocol, runtime_checkable
 
-from hooks import RetrySpec
+from hooks import HookCtx, RetrySpec
 from runtime import Result
 
 __all__ = [
@@ -182,8 +182,12 @@ class FailureClassifier(Protocol):
 
     name: str
 
-    def classify(self, result: Result, ctx: object) -> FailureClass:
-        """对一次 Port 结果分类；异常由调用方折叠，不抛穿。"""
+    def classify(self, result: Result, ctx: HookCtx) -> FailureClass:
+        """对一次 Port 结果分类；异常由调用方折叠，不抛穿。
+
+        ctx 用 HookCtx（对齐 R3 设计 §4）：分类器可选读取 effect/state/trace 做上下文相关分类。
+        R3 本就依赖 R2（分层纪律允许），无需放宽为 object。
+        """
         ...
 
 
@@ -192,7 +196,7 @@ class _DefaultClassifier:
 
     name = "default_failure"
 
-    def classify(self, result: Result, ctx: object) -> FailureClass:
+    def classify(self, result: Result, ctx: HookCtx) -> FailureClass:
         """成功→终态；失败→查表；未知码按确定性错误（不重试、不计熔断）。"""
         if result.ok:
             return _SUCCESS_CLASS
@@ -208,7 +212,7 @@ class _DefaultClassifier:
 
 
 def classify_failure(
-    result: Result, ctx: object, *, classifier: FailureClassifier | None = None
+    result: Result, ctx: HookCtx, *, classifier: FailureClassifier | None = None
 ) -> FailureClass:
     """统一分类入口：注入自定义分类器则委托，否则用默认表。
 

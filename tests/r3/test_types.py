@@ -9,6 +9,9 @@ from random import Random
 
 import pytest
 
+from hooks import HookCtx
+from runtime import Result
+
 from harness.resilience import (
     DEFAULT_FAILURE_TABLE,
     BreakerState,
@@ -90,7 +93,7 @@ class TestFailureClassification:
         class Custom:
             name = "custom"
 
-            def classify(self, result: object, ctx: object) -> FailureClass:
+            def classify(self, result: Result, ctx: HookCtx) -> FailureClass:
                 return sentinel
 
         fc = classify_failure(err_result("500"), make_ctx(), classifier=Custom())
