@@ -1,0 +1,31 @@
+"""R2-T06：全部 Port 协议可解析、DTO 校验通过。"""
+import pytest
+
+from hooks import (
+    PORT_PROTOCOLS, LLMPort, ToolPort, MemoryPort, StorePort, TelemetryPort,
+    LLMRequest, LLMResponse, ToolCall, ToolResult, ToolSpec, Usage, PortCtx, make_call,
+)
+
+
+def test_port_protocols_complete():
+    expected = {"llm", "tool", "skill", "rag", "memory", "store", "sandbox",
+                "audit", "eval", "telemetry", "human", "mcp", "event_stream"}
+    assert expected <= set(PORT_PROTOCOLS)
+    for name, proto in PORT_PROTOCOLS.items():
+        assert isinstance(proto, type), name
+
+
+def test_dto_validation():
+    req = LLMRequest(messages=[{"role": "user", "content": "hi"}], model="x")
+    assert req.messages[0]["content"] == "hi"
+    resp = LLMResponse(content="ok", usage=Usage(prompt_tokens=2))
+    assert resp.usage.prompt_tokens == 2
+    call = make_call("transfer", {"amount": 10}, "c1")
+    assert call.name == "transfer" and call.call_id == "c1"
+    spec = ToolSpec(name="t", danger="SAFE")
+    assert spec.source == "local"
+
+
+def test_dto_rejects_extra():
+    with pytest.raises(Exception):
+        ToolCall(call_id="1", name="t", args={}, unexpected="x")

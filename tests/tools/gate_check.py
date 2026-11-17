@@ -1,9 +1,12 @@
-"""门禁执行器：python tests/tools/gate_check.py --module m1|m2|m3|m4
+"""门禁执行器：python tests/tools/gate_check.py --module r1|r2
 
 按《门禁体系》G0~G4 逐条检查，全部为合入前置条件：
   G0 契约冻结 / G1 质量(mypy strict + 覆盖率 + docstring + 红线扫描)
   G2 行为断言 / G3 集成与 demo 冒烟 / G4 文档与版本一致
 任一不绿 → 退出码 1（拒绝合入，无例外通道）。
+
+R1=核心运行时(src/runtime)，R2=插件总线与协议(src/hooks)。
+旧 m1~m4 体系已重写为 R1/R2，见 docs/02-模块详设/Agent/。
 """
 from __future__ import annotations
 
@@ -20,36 +23,21 @@ sys.path.insert(0, str(SRC))
 PY = sys.executable
 
 MODULES = {
-    "m1": {
-        "title": "M1 核心运行时", "pkg": "runtime", "path": "runtime",
-        "doc": "docs/02-模块详设/M1-核心运行时.md", "demo": "tests/demos/demo_m1.py", "coverage": 90,
+    "r1": {
+        "title": "R1 核心运行时", "pkg": "runtime", "path": "runtime",
+        "doc": "docs/02-模块详设/Agent/R1-核心运行时.md", "demo": "tests/demos/demo_r1.py", "coverage": 90,
         "symbols": ["Effect", "EffectKind", "AgentState", "Budgets", "Result", "Runner",
                     "Session", "Event", "fold", "fingerprint", "checkpoint"],
         "behavior": ["test_determinism.py", "test_replay.py", "test_budgets.py", "test_batch.py"],
         "integration": ["test_runner.py", "test_suspend.py", "test_errors.py", "test_types.py"],
     },
-    "m2": {
-        "title": "M2 链路系统", "pkg": "chains", "path": "chains",
-        "doc": "docs/02-模块详设/M2-链路系统.md", "demo": "tests/demos/demo_m2.py", "coverage": 90,
-        "symbols": ["Chains", "MountPoint", "Verdict", "ChainCtx", "ChainEvent", "DispatchResult"],
+    "r2": {
+        "title": "R2 插件总线与协议", "pkg": "hooks", "path": "hooks",
+        "doc": "docs/02-模块详设/Agent/R2-插件总线与协议.md", "demo": "tests/demos/demo_r2.py", "coverage": 85,
+        "symbols": ["HookBus", "Hook", "HookCtx", "HookMode", "Decision", "DecisionAction",
+                    "Registry", "Capability", "PORT_PROTOCOLS", "LLMRequest", "ToolSpec", "make_call"],
         "behavior": ["test_verdict.py", "test_trace.py", "test_hooks.py"],
-        "integration": ["test_chains.py", "test_freeze.py"],
-    },
-    "m3": {
-        "title": "M3 端口协议层", "pkg": "ports", "path": "ports",
-        "doc": "docs/02-模块详设/M3-端口协议层.md", "demo": "tests/demos/demo_m3.py", "coverage": 85,
-        "symbols": ["PortRegistry", "PortCtx", "LLMRequest", "LLMResponse", "ToolCall",
-                    "ToolResult", "ToolSpec", "make_call", "PORT_PROTOCOLS"],
-        "behavior": ["test_errors.py", "test_registry.py", "test_ports.py"],
-        "integration": ["test_adapters.py", "test_child.py"],
-    },
-    "m4": {
-        "title": "M4 工具系统", "pkg": "harness.tools", "path": "harness/tools",
-        "doc": "docs/02-模块详设/M4-工具系统.md", "demo": "tests/demos/demo_m4.py", "coverage": 85,
-        "symbols": ["tool", "ToolRegistry", "ToolIndex", "MCPManager", "DangerLevel",
-                    "SandboxPolicy", "ToolDefinitionError"],
-        "behavior": ["test_decorator.py", "test_index.py", "test_routing.py"],
-        "integration": ["test_mcp.py", "test_errors.py"],
+        "integration": ["test_ports.py", "test_registry.py", "test_errors.py"],
     },
 }
 
@@ -74,12 +62,12 @@ def tail(proc: subprocess.CompletedProcess[str], lines: int = 12) -> str:
     return "\n".join((proc.stdout + proc.stderr).strip().splitlines()[-lines:])
 
 
-# --------------------------------------------------------------------------- #
 def g0(cfg: dict, module: str) -> None:
     try:
         mod = importlib.import_module(cfg["pkg"])
         missing = [name for name in cfg["symbols"] if not hasattr(mod, name)]
-        record("G0 契约符号", not missing, f"{len(cfg['symbols'])} 个公共 API 齐全" if not missing else f"缺失 {missing}")
+        record("G0 契约符号", not missing,
+               f"{len(cfg['symbols'])} 个公共 API 齐全" if not missing else f"缺失 {missing}")
     except Exception as exc:
         record("G0 契约符号", False, f"import 失败: {exc}")
 
@@ -152,7 +140,7 @@ def g4(cfg: dict, module: str) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="AgentKit 模块门禁")
+    parser = argparse.ArgumentParser(description="AgentKit 模块门禁（R1/R2）")
     parser.add_argument("--module", required=True, choices=sorted(MODULES))
     args = parser.parse_args()
     cfg = MODULES[args.module]

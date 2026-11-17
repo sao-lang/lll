@@ -1,7 +1,9 @@
-"""红线静态扫描（AST），按模块执行：python tests/tools/ast_scan.py --module m1
+"""红线静态扫描（AST），按模块：python tests/tools/ast_scan.py --module r1|r2
 
-M1 纯函数 / M2 组件留名与短路 / M3 适配器无状态与错误信封 / M4 MCP 全量注入。
-扫描对象是真实源码，不做运行时推断；任一红线命中即退出码 1。
+R1：Program 内不得有时间/随机/网络调用（破坏确定性）；纯运行时不 import random/datetime。
+R2：hook 强制留名；对外只有 bus.on() 一个注册入口，无 middleware/filter/pipe 独立 API。
+
+扫描真实源码，不做运行时推断；任一红线命中退出码 1。
 """
 from __future__ import annotations
 
@@ -14,10 +16,8 @@ ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"
 
 TARGETS = {
-    "m1": [SRC / "runtime", ROOT / "tests" / "demos" / "demo_m1.py", ROOT / "tests" / "m1"],
-    "m2": [SRC / "chains", ROOT / "tests" / "demos" / "demo_m2.py", ROOT / "tests" / "m2"],
-    "m3": [SRC / "ports", ROOT / "tests" / "demos" / "demo_m3.py", ROOT / "tests" / "m3"],
-    "m4": [SRC / "harness" / "tools", ROOT / "tests" / "demos" / "demo_m4.py", ROOT / "tests" / "m4"],
+    "r1": [SRC / "runtime", ROOT / "tests" / "demos" / "demo_r1.py", ROOT / "tests" / "r1"],
+    "r2": [SRC / "hooks", ROOT / "tests" / "demos" / "demo_r2.py", ROOT / "tests" / "r2"],
 }
 
 FORBIDDEN_IN_PROGRAM = (
@@ -49,7 +49,8 @@ def parse(path: Path) -> ast.Module:
     return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
 
-def scan_m1(files: list[Path]) -> list[str]:
+def scan_r1(files: list[Path]) -> list[str]:
+    """R1 红线：Program 纯函数 + 纯运行时不 import 时间/随机。"""
     violations: list[str] = []
     generators = 0
     for path in files:
@@ -62,19 +63,21 @@ def scan_m1(files: list[Path]) -> list[str]:
             generators += 1
             for call in (n for n in ast.walk(node) if isinstance(n, ast.Call)):
                 name = dotted(call.func)
-                if any(name.startswith(bad) or name == bad for bad in FORBIDDEN_IN_PROGRAM):
+                if any(name.startswith(bad) for bad in FORBIDDEN_IN_PROGRAM):
                     violations.append(f"{path.relative_to(ROOT)}:{call.lineno} Program 内调用 {name}()")
-        for node in tree.body:
-            if isinstance(node, (ast.Import, ast.ImportFrom)):
-                module = ast.unparse(node)
-                if "random" in module or "datetime" in module:
-                    violations.append(f"{path.relative_to(ROOT)} 纯运行时 import {module}")
+        # 仅扫描 src/runtime 的 import（测试/demo 里 import time 做计时是允许的）
+        if path.is_relative_to(SRC / "runtime"):
+            for node in tree.body:
+                if isinstance(node, (ast.Import, ast.ImportFrom)):
+                    module = ast.unparse(node)
+                    if "random" in module or "datetime" in module:
+                        violations.append(f"{path.relative_to(ROOT)} 纯运行时 import {module}")
     print(f"   扫描 {len(files)} 个文件 / {generators} 个 generator 函数")
     return violations
 
 
 def _declares_name(cls_node: ast.ClassDef) -> bool:
-    """类属性 name = ... 或 self.name = ...（含元组赋值 self.name, x = ...）均算留名。"""
+    """类属性 name = ... 或 self.name = ... 均算留名。"""
     for stmt in ast.walk(cls_node):
         if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
             if stmt.target.id == "name":
@@ -89,70 +92,39 @@ def _declares_name(cls_node: ast.ClassDef) -> bool:
     return False
 
 
-def scan_m2(files: list[Path]) -> list[str]:
+def scan_r2(files: list[Path]) -> list[str]:
+    """R2 红线：hook 留名 + 唯一扩展点（无 middleware/filter/pipe 注册 API）。"""
     violations: list[str] = []
-    builtins = SRC / "chains" / "builtins.py"
-    tree = parse(builtins)
-    for node in tree.body:
-        if isinstance(node, ast.ClassDef) and not _declares_name(node):
-            violations.append(f"chains/builtins.py 组件 {node.name} 无 name 属性")
-    source = (SRC / "chains" / "chains.py").read_text(encoding="utf-8")
-    if "require_name(" not in source:
-        violations.append("chains.py 未强制组件留名")
-    if "allow_short_circuit" not in source:
-        violations.append("chains.py 未处理未声明的 middleware 短路")
-    return violations
-
-
-def scan_m3(files: list[Path]) -> list[str]:
-    violations: list[str] = []
-    adapters = SRC / "ports" / "adapters"
-    for path in sorted(adapters.glob("*.py")):
+    # 检查 bus.py 强制留名
+    bus = SRC / "hooks" / "bus.py"
+    if bus.exists():
+        source = bus.read_text(encoding="utf-8")
+        if "hook must have a non-empty name" not in source:
+            violations.append("bus.on() 未强制 hook 留名")
+    # 检查对外 API 里没有 middleware/filter/pipe 的注册方法
+    init = SRC / "hooks" / "__init__.py"
+    if init.exists():
+        text = init.read_text(encoding="utf-8").lower()
+        for banned in ("middleware", "def filter(", "def pipe("):
+            if banned in text:
+                violations.append(f"hooks/__init__.py 出现被禁的独立 API: {banned}")
+    # 检查测试里的 hook 类都声明了 name（留名纪律）
+    for path in files:
+        if not (path.is_relative_to(ROOT / "tests")):
+            continue
         tree = parse(path)
-        for node in tree.body:  # 模块级全局可变状态（__all__ 等元数据除外）
-            if isinstance(node, ast.Assign) and isinstance(node.value, (ast.Dict, ast.List, ast.Set)):
-                targets = [t.id for t in node.targets if isinstance(t, ast.Name)]
-                if targets and all(t.startswith("__") for t in targets):
-                    continue
-                violations.append(f"{path.name}:{node.lineno} 模块级可变全局状态")
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.Assign, ast.AnnAssign)):
-                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-                for target in targets:
-                    if isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name):
-                        if target.value.id == "self" and target.attr in (
-                            "session_id", "session", "_session", "state", "_state"
-                        ):
-                            violations.append(f"{path.name}:{node.lineno} 适配器持有会话状态 self.{target.attr}")
-    call_source = (SRC / "ports" / "call.py").read_text(encoding="utf-8")
-    if "retryable" not in call_source:
-        violations.append("call.py 的错误信封缺少 retryable")
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef) and node.name.endswith("Hook"):
+                if not _declares_name(node):
+                    violations.append(f"{path.relative_to(ROOT)} hook 类 {node.name} 无 name 属性")
     return violations
 
 
-def scan_m4(files: list[Path]) -> list[str]:
-    violations: list[str] = []
-    registry = (SRC / "harness" / "tools" / "registry.py").read_text(encoding="utf-8")
-    mcp = (SRC / "harness" / "tools" / "mcp.py").read_text(encoding="utf-8")
-    decorator = (SRC / "harness" / "tools" / "decorator.py").read_text(encoding="utf-8")
-    if "MCP tools fully injected" not in registry:
-        violations.append("registry.static_check 未拦截 MCP 全量注入")
-    if 'parameters_schema": {}' not in registry:
-        violations.append("catalog(level=1) 未剥离完整 schema")
-    if "messages" in mcp or "context.append" in mcp:
-        violations.append("mcp.py 疑似把工具 schema 注入上下文")
-    if "additionalProperties" not in decorator:
-        violations.append("@tool 未落实 extra=forbid 语义")
-    if "danger" not in decorator:
-        violations.append("@tool 未强制 danger 声明")
-    return violations
-
-
-SCANNERS = {"m1": scan_m1, "m2": scan_m2, "m3": scan_m3, "m4": scan_m4}
+SCANNERS = {"r1": scan_r1, "r2": scan_r2}
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="AgentKit 红线静态扫描")
+    parser = argparse.ArgumentParser(description="AgentKit 红线静态扫描（R1/R2）")
     parser.add_argument("--module", required=True, choices=sorted(SCANNERS))
     args = parser.parse_args()
     files = files_of(TARGETS[args.module])
