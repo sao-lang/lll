@@ -16,7 +16,7 @@ from collections.abc import Awaitable, Callable, Generator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from types import MappingProxyType
-from typing import Any, TypedDict, cast
+from typing import Any, Protocol, TypedDict, cast
 
 __all__ = [
     "DONE", "AgentState", "BudgetDelta", "Budgets", "CallFn", "DispatchFn",
@@ -596,20 +596,20 @@ CallFn = Callable[[Effect, DynamicValue], Awaitable[Result]]
 """port 调用函数签名（上层注入）；返回统一 Result 信封。"""
 
 
-class EventStore:
-    """checkpoint 存储协议；上层提供持久化实现，R1 内置内存默认实现以独立闭环。"""
+class EventStore(Protocol):
+    """checkpoint 存储协议（R1 §4）；上层提供持久化实现，R1 内置内存默认以独立闭环。
 
-    def save(self, session_id: str, snapshot: JsonSnapshot) -> None:  # pragma: no cover
-        """持久化会话快照。
+    方法体 `...` 是 Protocol 语法要求（接口定义），不是省略实现——默认实现
+    `InMemoryEventStore` 在 runner.py 提供，装配期由 `Runner(store=...)` 注入。
+    """
 
-        参数：
-            session_id: 会话标识。snapshot: 快照信封。
-        """
-        raise NotImplementedError
+    def save(self, session_id: str, snapshot: JsonSnapshot) -> None:
+        """持久化会话快照。参数：session_id 会话标识，snapshot 可 JSON 序列化快照信封。"""
+        ...
 
-    def load(self, session_id: str) -> JsonSnapshot | None:  # pragma: no cover
+    def load(self, session_id: str) -> JsonSnapshot | None:
         """读取会话快照；不存在返回 None。"""
-        raise NotImplementedError
+        ...
 
 
 # --------------------------------------------------------------------------- #

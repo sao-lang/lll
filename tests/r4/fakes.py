@@ -8,9 +8,9 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
-from hooks import LLMRequest, LLMResponse, PortCtx, Usage
+from hooks import LLMRequest, LLMResponse, PortCtx, StreamEvent, Usage
 
-__all__ = ["RecordingLLM", "StreamLLM"]
+__all__ = ["RecordingLLM", "StreamLLM", "EventStreamLLM"]
 
 
 class RecordingLLM:
@@ -66,3 +66,44 @@ class StreamLLM:
         """逐块产出；aclose() 可随时中断（由 async generator 语义保证）。"""
         for chunk in self._chunks:
             yield chunk
+
+
+class EventStreamLLM:
+    """结构化事件流 LLM：直接产出预置 StreamEvent 序列（R4 §4.1 v1.2）。"""
+
+    name = "event_stream_llm"
+
+    def __init__(self, events: list[StreamEvent]) -> None:
+        """装配事件序列。"""
+        self._events = list(events)
+        self.last_usage = next(
+            (e.data for e in self._events if e.kind.value == "usage"), None
+        )
+
+    async def complete(self, req: LLMRequest, ctx: PortCtx) -> LLMResponse:
+        """一次性补全：拼接所有 TEXT_DELTA。"""
+        from hooks import StreamEventKind
+        text = "".join(
+            e.data for e in self._events
+            if e.kind is StreamEventKind.TEXT_DELTA and isinstance(e.data, str)
+        )
+        return LLMResponse(content=text, usage=self.last_usage or Usage())
+
+    def stream(self, req: LLMRequest, ctx: PortCtx) -> AsyncIterator[str]:
+        """文本视图：只产出 TEXT_DELTA 的 data。"""
+        from hooks import StreamEventKind
+        return self._text_stream()
+
+    async def _text_stream(self) -> AsyncIterator[str]:
+        from hooks import StreamEventKind
+        for e in self._events:
+            if e.kind is StreamEventKind.TEXT_DELTA and isinstance(e.data, str):
+                yield e.data
+
+    def stream_events(self, req: LLMRequest, ctx: PortCtx) -> AsyncIterator[StreamEvent]:
+        """结构化事件流。"""
+        return self._events_stream()
+
+    async def _events_stream(self) -> AsyncIterator[StreamEvent]:
+        for e in self._events:
+            yield e

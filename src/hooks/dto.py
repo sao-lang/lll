@@ -8,6 +8,9 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from enum import Enum
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from runtime import DynamicValue
@@ -17,12 +20,46 @@ __all__ = [
     "LLMRequest",
     "LLMResponse",
     "PortCtx",
+    "StreamEvent",
+    "StreamEventKind",
     "ToolCall",
     "ToolResult",
     "ToolSpec",
     "Usage",
     "make_call",
 ]
+
+
+class StreamEventKind(str, Enum):
+    """结构化流式事件类型（R4 §4.1 v1.2）。
+
+    成员：
+        TEXT_DELTA: 文本增量，data 为 str。
+        TOOL_CALL_START / DELTA / END: 工具调用生命周期事件。
+        HANDOFF: 角色/程序切换，data 为 {"to": ...}。
+        USAGE: 末块结算，data 为 Usage。
+        DONE: 流结束。
+    """
+
+    TEXT_DELTA = "text_delta"
+    TOOL_CALL_START = "tool_call_start"
+    TOOL_CALL_DELTA = "tool_call_delta"
+    TOOL_CALL_END = "tool_call_end"
+    HANDOFF = "handoff"
+    USAGE = "usage"
+    DONE = "done"
+
+
+@dataclass(frozen=True, slots=True)
+class StreamEvent:
+    """结构化流式事件（跨 Port/网关统一载体，规则 4 动态边界用具名 kind）。
+
+    字段：
+        kind: 事件类型。data: 载荷形态由 kind 决定（文本为 str，工具为 dict，USAGE 为 Usage）。
+    """
+
+    kind: StreamEventKind
+    data: DynamicValue = None
 
 
 class _Strict(BaseModel):

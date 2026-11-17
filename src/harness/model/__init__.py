@@ -12,7 +12,6 @@ from .router import ModelRouter, RuleRouter
 from .structured import StructuredOutputValidator, validate_json_schema
 from .types import (
     CacheKey,
-    ChatMessage,
     CostAttributor,
     CostGuard,
     CostRecord,
@@ -25,7 +24,6 @@ from .types import (
 
 __all__ = [
     "CacheKey",
-    "ChatMessage",
     "CostAttributor",
     "CostGuard",
     "CostRecord",

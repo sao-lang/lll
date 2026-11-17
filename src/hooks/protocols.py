@@ -66,6 +66,7 @@ class LLMPort(Protocol):
         ...
 
 
+
 @runtime_checkable
 class ToolPort(Protocol):
     """工具能力：注册、目录查询、调用。"""

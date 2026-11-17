@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Literal, TypedDict
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -18,7 +18,6 @@ from runtime import DynamicValue
 
 __all__ = [
     "CacheKey",
-    "ChatMessage",
     "CostAttributor",
     "CostGuard",
     "CostRecord",
@@ -28,18 +27,6 @@ __all__ = [
     "build_cache_key",
     "cache_key_string",
 ]
-
-
-class ChatMessage(TypedDict):
-    """LLM 对话消息的具名结构（规则 3：明确字段不写动态 dict）。
-
-    字段：
-        role: 角色（system/user/assistant/tool）。
-        content: 正文。
-    """
-
-    role: str
-    content: str
 
 
 class StructuredOutputSpec(BaseModel):

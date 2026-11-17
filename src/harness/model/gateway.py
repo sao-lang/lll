@@ -8,13 +8,16 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 
 from harness._ctxview import coerce_port_ctx
-from hooks import LLMPort, LLMRequest, LLMResponse, PortCtx
+from hooks import (
+    LLMPort, LLMRequest, LLMResponse, PortCtx, StreamEvent, StreamEventKind, Usage,
+)
+from runtime import Message
 
 from .cache import ExactCache, SemanticCache
 from .router import ModelRouter, RuleRouter
+from .stream import has_stream_events, wrap_text_stream
 from .structured import StructuredOutputValidator, validate_json_schema
 from .types import (
-    ChatMessage,
     CostAttributor,
     CostGuard,
     CostRecord,
@@ -120,6 +123,58 @@ class ModelGateway:
         self._record_cost(full_response, ctx)
         self._cache.put(key, full_response, version=self._prompt_version)
 
+    def stream_events(
+        self, request: LLMRequest, ctx: PortCtx,
+    ) -> AsyncIterator[StreamEvent]:
+        """结构化流式事件（R4 §4.1 v1.2）：透传后端事件，遇 USAGE 结算成本。
+
+        参数：
+            request: LLM 请求。ctx: Port 上下文。
+        产出：
+            StreamEvent 序列（文本/工具/handoff/usage/done）；取消由 aclose() 传播。
+        说明：
+            若后端未发 USAGE 事件但 last_usage 已写（旧后端默认包装），在流末补结算。
+        """
+        return self._stream_events_impl(request, ctx)
+
+    async def _stream_events_impl(
+        self, request: LLMRequest, ctx: PortCtx,
+    ) -> AsyncIterator[StreamEvent]:
+        key = build_cache_key(request, prompt_version=self._prompt_version).value
+        cached = self._cache.get(key, version=self._prompt_version)
+        if cached is not None:
+            yield StreamEvent(kind=StreamEventKind.TEXT_DELTA, data=cached.content or "")
+            yield StreamEvent(kind=StreamEventKind.USAGE, data=cached.usage)
+            yield StreamEvent(kind=StreamEventKind.DONE)
+            return
+
+        chunks: list[str] = []
+        settled: Usage | None = None
+        # 后端有 stream_events 直接用；旧后端用帮助函数把文本流包成事件流。
+        # 规则 8 例外：stream_events 是可选能力探测（具名固定字符串），不在 LLMPort 强制协议内。
+        if has_stream_events(self._llm):
+            stream_events_fn = getattr(self._llm, "stream_events")
+            source = stream_events_fn(request, ctx)
+        else:
+            source = wrap_text_stream(self._llm, request, ctx)
+        async for event in source:
+            if event.kind is StreamEventKind.TEXT_DELTA and isinstance(event.data, str):
+                chunks.append(event.data)
+            elif event.kind is StreamEventKind.USAGE and isinstance(event.data, Usage):
+                settled = event.data
+            yield event  # 原样透传，包含工具/handoff/done
+
+        # 结算：优先事件里的 USAGE，其次后端 last_usage；两者都无则拒绝（不记假成本）。
+        usage = settled or self._llm.last_usage
+        if usage is None:
+            raise ValueError(
+                "LLMPort.stream_events() finished without USAGE or last_usage; "
+                "cost cannot be settled (fake/zero-cost accounting forbidden)"
+            )
+        full = LLMResponse(content="".join(chunks), usage=usage)
+        self._record_cost(full, ctx)
+        self._cache.put(key, full, version=self._prompt_version)
+
     def _record_cost(self, response: LLMResponse, ctx: PortCtx) -> None:
         """从响应的 usage 记录成本（不自行估算），过成本硬闸。
 
@@ -154,10 +209,10 @@ class ModelGateway:
             if not errors:
                 return current
             repair_prompt = self._validator.build_repair_prompt(current.content or "", errors)
-            # 具名消息结构（规则 3）：明确字段 role/content 不写动态 dict 拼装。
-            repair_message = ChatMessage(role="system", content=repair_prompt)
+            # 统一复用 R1 Message 四字段具名结构（规则 3）：消除仅两字段的重复 ChatMessage。
+            repair_message = Message(role="system", content=repair_prompt)
             patched = LLMRequest(
-                messages=[*request.messages, dict(repair_message)],
+                messages=[*request.messages, repair_message.to_dict()],
                 model=request.model,
             )
             current = await self._llm.complete(patched, ctx)

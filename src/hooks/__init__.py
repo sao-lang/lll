@@ -6,7 +6,8 @@ from __future__ import annotations
 
 from .bus import DispatchResult, HookBus
 from .dto import (
-    DangerLevel, LLMRequest, LLMResponse, PortCtx, ToolCall, ToolResult, ToolSpec, Usage, make_call,
+    DangerLevel, LLMRequest, LLMResponse, PortCtx, StreamEvent, StreamEventKind,
+    ToolCall, ToolResult, ToolSpec, Usage, make_call,
 )
 from .protocols import (
     PORT_PROTOCOLS, AuditPort, EvalPort, EventStreamPort, HumanPort, LLMPort,
@@ -25,5 +26,5 @@ __all__ = [
     "SandboxPort", "AuditPort", "EvalPort", "TelemetryPort", "HumanPort",
     "MCPPort", "EventStreamPort", "PORT_PROTOCOLS",
     "LLMRequest", "LLMResponse", "ToolCall", "ToolResult", "ToolSpec", "Usage",
-    "DangerLevel", "PortCtx", "make_call",
+    "DangerLevel", "PortCtx", "make_call", "StreamEvent", "StreamEventKind",
 ]
