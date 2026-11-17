@@ -10,7 +10,25 @@
     MCPPort MCP 工具 / EventStreamPort 事件流（L3 接入契约）。
 
 约定：每个 Protocol 方法签名即契约（参数 + 返回值全部标注）；
-方法体统一 `...` 占位，具体实现由注入的适配器提供。
+方法体统一 `...` 占位——这是 Python Protocol 接口语法（不是实现被省略）。
+具体实现由注入的适配器提供；默认实现的归属模块与类名如下（R2 §1 / R13 §5.1）：
+
+    Port             默认实现类              归属模块（源码位置）
+    LLMPort          OpenAICompatLLM        R4  src/ports/adapters/llm.py ✅已实现
+    ToolPort         ToolRegistry           R5  src/harness/tools/（待实现）
+    MCPPort          MCPManager             R5  src/harness/tools/（待实现）
+    SkillPort        FileSkillProvider      R5  src/harness/skills/（待实现）
+    RAGPort          RAGPipeline            R6  src/harness/rag/（待实现）
+    MemoryPort       MemoryStore            R7  src/harness/memory/（待实现）
+    StorePort        InMemoryStorePort      R7  src/harness/memory/（待实现）
+    SandboxPort      LocalSandbox           R9  src/harness/security/（待实现）
+    AuditPort        AuditLogger            R9  src/harness/security/（待实现）
+    HumanPort        ConsoleHumanPort       R9  src/harness/security/（待实现）
+    EvalPort         RuleEval               R10 src/harness/eval/（待实现）
+    TelemetryPort    NoopTelemetry          R10 src/harness/observability/（待实现）
+    EventStreamPort  InMemoryEventStream    R10 src/harness/observability/（待实现）
+
+"待实现"指对应模块尚未开发；装配层（R12/R13）在用户未注入时注册这些默认实例。
 公共 API 见 docs/02-模块详设/Agent/R2-插件总线与协议.md §4。
 """
 from __future__ import annotations

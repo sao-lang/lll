@@ -4,7 +4,7 @@
 
 
 > **权威来源**：[《AGENT 总设计》](../../01-总览与设计/AGENT-总设计.md) §R5 D+E 域 §3~§6。本文为模块级拆分详设。
-> 层：L1 能力插件 · 依赖：R1+R2 · 源码包：`src/harness/tools/` + skills/ · 门禁 key：`m4`
+> 层：L1 能力插件 · 依赖：R1+R2 · 源码包：`src/harness/tools/` + skills/ · 门禁 key：`r5`（待实现）
 
 ---
 
