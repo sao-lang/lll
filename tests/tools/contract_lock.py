@@ -27,7 +27,7 @@ LOCK = ROOT / "tests" / "tools" / "contract_lock.json"
 
 # 已实现模块 → 源码包。只有这里的公共契约被锁定。
 # R3 已实现 → 纳入锁定（实现后必须 update 基线，之后改动走契约变更评审）。
-LOCKED_PACKAGES = ("runtime", "hooks", "harness/resilience")
+LOCKED_PACKAGES = ("runtime", "hooks", "harness/resilience", "harness/model")
 
 # 设计文档契约锚点：(文件, 必须出现, 禁止出现)。防止文档漂移回旧设计。
 DOC_ANCHORS: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = (
@@ -40,6 +40,9 @@ DOC_ANCHORS: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = (
     ("docs/02-模块详设/Agent/R3-可靠性.md",
      ("FailureClass", "RetryPolicy", "CircuitBreaker", "DegradeLadder", "tests/r3/"),
      ("tests/m3/", "代码待实现")),
+    ("docs/02-模块详设/Agent/R4-模型与推理.md",
+     ("StructuredOutputSpec", "ModelRouter", "ExactCache", "ModelGateway", "tests/r4/"),
+     ("tests/m4/", "代码待实现")),
     ("docs/01-总览与设计/AGENT-总设计.md",
      ("10 内置架构", "R1~R13", "scratch"),
      ("11 内置架构", "R1~R11", "scratchpad:")),

@@ -1,8 +1,9 @@
-"""红线静态扫描（AST），按模块：python tests/tools/ast_scan.py --module r1|r2|r3
+"""红线静态扫描（AST），按模块：python tests/tools/ast_scan.py --module r1|r2|r3|r4
 
 R1：Program 内不得有时间/随机/网络调用（破坏确定性）；纯运行时不 import random/datetime。
 R2：hook 强制留名；对外只有 bus.on() 一个注册入口，无 middleware/filter/pipe 独立 API。
 R3：降级阶梯装配期强校验（无环/末级拒答）+ 副作用重试幂等键检查；能力插件不 import IO SDK。
+R4：网关必须做结构化校验（未过 schema 不进业务）+ 成本闸（路由/重试不得绕过 Budgets）。
 
 扫描真实源码，不做运行时推断；任一红线命中退出码 1。
 """
@@ -20,6 +21,7 @@ TARGETS = {
     "r1": [SRC / "runtime", ROOT / "tests" / "demos" / "demo_r1.py", ROOT / "tests" / "r1"],
     "r2": [SRC / "hooks", ROOT / "tests" / "demos" / "demo_r2.py", ROOT / "tests" / "r2"],
     "r3": [SRC / "harness" / "resilience", ROOT / "tests" / "demos" / "demo_r3.py", ROOT / "tests" / "r3"],
+    "r4": [SRC / "harness" / "model", ROOT / "tests" / "demos" / "demo_r4.py", ROOT / "tests" / "r4"],
 }
 
 FORBIDDEN_IN_PROGRAM = (
@@ -168,7 +170,42 @@ def scan_r3(files: list[Path]) -> list[str]:
     return violations
 
 
-SCANNERS = {"r1": scan_r1, "r2": scan_r2, "r3": scan_r3}
+def scan_r4(files: list[Path]) -> list[str]:
+    """R4 红线：结构化校验 + 成本闸 + 缓存键版本 + 不 import IO SDK。"""
+    violations: list[str] = []
+    pkg = SRC / "harness" / "model"
+
+    # 网关必须做结构化校验（strict：未过 schema 的输出不进业务）。
+    gateway = pkg / "gateway.py"
+    if gateway.exists():
+        text = gateway.read_text(encoding="utf-8")
+        if "validate_json_schema" not in text or "repair exhausted" not in text:
+            violations.append("ModelGateway 未做结构化校验/超次拒答（非法输出可能进业务）")
+        if "_record_cost" not in text or "CostGuard" not in text:
+            violations.append("ModelGateway 未做成本归因/成本闸（可能绕过 Budgets）")
+
+    # 缓存键必须含版本。
+    types = pkg / "types.py"
+    if types.exists() and "prompt_version" not in types.read_text(encoding="utf-8"):
+        violations.append("缓存键未含 prompt_version（版本变化无法失效）")
+
+    # 能力插件不得直接 import IO SDK。
+    for path in files:
+        if not path.is_relative_to(pkg):
+            continue
+        tree = parse(path)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if any(alias.name.startswith(p) for p in IO_SDK_PREFIXES):
+                        violations.append(f"{path.relative_to(ROOT)} import IO SDK {alias.name}")
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                if any(node.module.startswith(p) for p in IO_SDK_PREFIXES):
+                    violations.append(f"{path.relative_to(ROOT)} import IO SDK {node.module}")
+    return violations
+
+
+SCANNERS = {"r1": scan_r1, "r2": scan_r2, "r3": scan_r3, "r4": scan_r4}
 
 
 def main() -> int:

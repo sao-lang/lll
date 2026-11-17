@@ -1,5 +1,172 @@
 {
   "contract": {
+    "harness/model.adapter.RecordingLLM": {
+      "enum_values": [
+        "name"
+      ],
+      "fields": [],
+      "methods": [
+        "complete",
+        "stream"
+      ]
+    },
+    "harness/model.adapter.StreamLLM": {
+      "enum_values": [
+        "name"
+      ],
+      "fields": [],
+      "methods": [
+        "complete",
+        "stream"
+      ]
+    },
+    "harness/model.cache.ExactCache": {
+      "enum_values": [
+        "name"
+      ],
+      "fields": [],
+      "methods": [
+        "get",
+        "invalidate",
+        "put"
+      ]
+    },
+    "harness/model.cache.SemanticCache": {
+      "enum_values": [],
+      "fields": [
+        "name"
+      ],
+      "methods": [
+        "get",
+        "invalidate",
+        "put"
+      ]
+    },
+    "harness/model.capability.ModelCapability": {
+      "enum_values": [
+        "name",
+        "version"
+      ],
+      "fields": [
+        "requires"
+      ],
+      "methods": [
+        "gateway",
+        "install"
+      ]
+    },
+    "harness/model.gateway.ModelGateway": {
+      "enum_values": [],
+      "fields": [],
+      "methods": [
+        "complete"
+      ]
+    },
+    "harness/model.router.ModelRouter": {
+      "enum_values": [],
+      "fields": [
+        "name"
+      ],
+      "methods": [
+        "route"
+      ]
+    },
+    "harness/model.router.RuleRouter": {
+      "enum_values": [
+        "name"
+      ],
+      "fields": [],
+      "methods": [
+        "route"
+      ]
+    },
+    "harness/model.structured.StructuredOutputValidator": {
+      "enum_values": [],
+      "fields": [],
+      "methods": [
+        "build_repair_prompt",
+        "max_repair",
+        "should_repair",
+        "validate"
+      ]
+    },
+    "harness/model.types.CacheKey": {
+      "enum_values": [],
+      "fields": [
+        "value",
+        "version"
+      ],
+      "methods": []
+    },
+    "harness/model.types.CostAttributor": {
+      "enum_values": [],
+      "fields": [],
+      "methods": [
+        "model_cost",
+        "run_cost",
+        "snapshot",
+        "user_cost"
+      ]
+    },
+    "harness/model.types.CostGuard": {
+      "enum_values": [],
+      "fields": [
+        "max_cost_usd",
+        "spent"
+      ],
+      "methods": [
+        "allow",
+        "charge",
+        "remaining"
+      ]
+    },
+    "harness/model.types.CostRecord": {
+      "enum_values": [],
+      "fields": [
+        "agent_id",
+        "model",
+        "run_id",
+        "usage",
+        "user_id"
+      ],
+      "methods": []
+    },
+    "harness/model.types.RouteDecision": {
+      "enum_values": [],
+      "fields": [
+        "model",
+        "reason"
+      ],
+      "methods": []
+    },
+    "harness/model.types.StructuredOutputSpec": {
+      "enum_values": [
+        "model_config"
+      ],
+      "fields": [
+        "json_schema",
+        "max_repair",
+        "mode",
+        "strict"
+      ],
+      "methods": []
+    },
+    "harness/model.types.UsageLedger": {
+      "enum_values": [],
+      "fields": [
+        "_cost",
+        "_count",
+        "_tokens",
+        "_total_cost"
+      ],
+      "methods": [
+        "by",
+        "count",
+        "record",
+        "tokens_by",
+        "total"
+      ]
+    },
     "harness/resilience.breaker.CircuitBreaker": {
       "enum_values": [
         "events",
@@ -947,11 +1114,12 @@
     }
   },
   "description": "R1/R2 已实现模块公共契约基线；变更须走设计稳定性门禁评审",
-  "hash": "a9fc9e3f1e1dbcddb9853cd3e541b506ccf2b2f9b94955d6672d8ad87f2f17a0",
+  "hash": "f9e8d9d50d953b48dcd7f0aad8a9ca248e8659d7df1f34334d550bcced6d9002",
   "locked_packages": [
     "runtime",
     "hooks",
-    "harness/resilience"
+    "harness/resilience",
+    "harness/model"
   ],
   "version": "1.0"
 }
