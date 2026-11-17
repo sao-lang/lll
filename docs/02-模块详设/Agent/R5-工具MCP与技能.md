@@ -1,6 +1,6 @@
 # R5：工具·MCP·技能（tools）
 
-> **实现状态**：设计定稿，代码待实现（当前仓库仅 R1/R2 已实现）。验证矩阵中的 tests/rN/ 为预留路径。
+> **实现状态**：设计定稿，代码待实现（当前仓库已实现 R1~R4：runtime/hooks/resilience/model；本模块为设计态）。验证矩阵中的 tests/rN/ 为预留路径。
 
 
 > **权威来源**：[《AGENT 总设计》](../../01-总览与设计/AGENT-总设计.md) §R5 D+E 域 §3~§6。本文为模块级拆分详设。
@@ -79,11 +79,14 @@ class SkillPort(Protocol):
 class DisclosureIndex(Protocol):
     def disclose(self, names, skills) -> DisclosurePacket: ...   # {L1,L2,L3,token_cost}
 
-class ToolRegistry:   # ToolPort 实现
-    def register(...); def bind(...); def catalog(level=1); def schema_of(...)
-    def static_check() -> list[str]: ...
-    def freeze() -> Self: ...
-    async def call(call, ctx) -> ToolResult: ...
+class ToolRegistry:   # ToolPort 默认实现（签名与上方 ToolPort 协议逐项一致）
+    def register(self, spec: ToolSpec, fn: Callable[..., DynamicValue], *, bind: bool = False) -> None: ...
+    def bind(self, name: str, fn: Callable[..., DynamicValue]) -> None: ...   # 延迟绑定已注册工具
+    def catalog(self, level: int = 1) -> list[ToolSpec]: ...                  # 分级披露 L1/L2/L3
+    def schema_of(self, name: str) -> dict[str, DynamicValue]: ...
+    def static_check(self) -> list[str]: ...   # 返回问题列表；空表示通过
+    def freeze(self) -> Self: ...              # 冻结注册表，之后 register 被拒
+    async def call(self, call: ToolCall, ctx: PortCtx) -> ToolResult: ...
 ```
 
 ## 5. 元数据与关键字段（核心字段）

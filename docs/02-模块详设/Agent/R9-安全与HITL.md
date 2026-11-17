@@ -1,6 +1,6 @@
 # R9：安全与 HITL（security）
 
-> **实现状态**：设计定稿，代码待实现（当前仓库仅 R1/R2 已实现）。验证矩阵中的 tests/rN/ 为预留路径。
+> **实现状态**：设计定稿，代码待实现（当前仓库已实现 R1~R4：runtime/hooks/resilience/model；本模块为设计态）。验证矩阵中的 tests/rN/ 为预留路径。
 
 
 > **权威来源**：[《AGENT 总设计》](../../01-总览与设计/AGENT-总设计.md) §R9。本文为模块级拆分详设。
@@ -40,6 +40,64 @@ flowchart TD
 ## 4. API 规范（完整接口）
 
 ```python
+# ---- 安全域 DTO（v1.1 补齐：此前 SecurityCtx/Verdict/SafetyReport 只有名字无结构）----
+@dataclass(frozen=True, slots=True)
+class SecurityCtx:
+    """安全检查上下文：HookCtx 面向安全域的具名投影，避免检测器直接依赖 R2 全量上下文。
+
+    字段：
+        session_id / run_id: 会话与 run 标识（审计关联）。
+        source: 内容来源（"user"/"tool"/"rag"/"memory"/"skill"/"web"）——注入防御按来源分策。
+        direction: "input"/"output"——护栏方向。
+        danger: DangerLevel——当前操作的危险级别。
+        trust: bool——内容是否来自可信内核（False 则必须过注入检测）。
+        meta: dict[str, DynamicValue]——扩展元数据（规则 4 动态边界）。
+    构造：由 R9 护栏 hook 从 HookCtx 投影生成（from_hook_ctx 类方法），不改 HookCtx 本身。
+    """
+    session_id: str
+    run_id: str
+    source: Literal["user","tool","rag","memory","skill","web"]
+    direction: Literal["input","output"]
+    danger: DangerLevel
+    trust: bool
+    meta: dict[str, DynamicValue] = field(default_factory=dict)
+
+@dataclass(frozen=True, slots=True)
+class Verdict:
+    """护栏判定结果：allow/redact/deny/ask 四态。
+
+    字段：
+        action: 四态之一。redacted: redact 时的替换文本。
+        reason: 判定原因（进 trace）。rule: 命中的规则 id（无则空）。
+    """
+    action: Literal["allow","redact","deny","ask"]
+    redacted: DynamicValue = None
+    reason: str = ""
+    rule: str = ""
+
+@dataclass(frozen=True, slots=True)
+class SafetyReport:
+    """注入检测结果：safe/suspicious/malicious 三级。
+
+    字段：
+        level: 三级之一。rules_hit: 命中的规则 id 列表。
+        confidence: 0~1 判别置信度。evidence: 命中片段（脱敏后，供审计）。
+    """
+    level: Literal["safe","suspicious","malicious"]
+    rules_hit: tuple[str, ...] = ()
+    confidence: float = 0.0
+    evidence: str = ""
+
+@dataclass(frozen=True, slots=True)
+class AuditEvent:
+    """审计条目（append-only + 哈希链）。
+
+    字段：who/when/action/cost/data_touched/rationale + prev_hash/hash（哈希链）。
+    """
+    who: str; when: int; action: str; cost: float
+    data_touched: tuple[str, ...]; rationale: str
+    prev_hash: str = ""; hash: str = ""
+
 class Guardrail(Protocol):
     name: str; direction: Literal["input","output"]
     def check(self, data: DynamicValue, ctx: HookCtx) -> Verdict: ...   # allow/redact/deny/ask
@@ -53,7 +111,10 @@ class AuditPort(Protocol):
 class HumanPort(Protocol):
     async def ask(self, question, options, ctx) -> str: ...
 class ApprovalFlow:
-    def __init__(self, trigger_danger="CRITICAL", timeout=300, resume_strategy="exact"): ...
+    def __init__(self, trigger_danger="CRITICAL", timeout=300, resume_strategy="exact"):
+        """挂起→审批→resume 状态机；resume_strategy=exact 表示从挂起点精确恢复（A5）。
+        timeout 到点按拒答处理，不静默放行。"""
+        ...
 ```
 
 ## 5. 元数据与关键字段（核心字段）
@@ -85,7 +146,7 @@ class ApprovalFlow:
 | CL-1 契约自足 | 依赖 R1 types + R2 Hook + 安全协议 | import 扫描 |
 | CL-2 自带 fake | fake SandboxPort/AuditPort/HumanPort | fake 用例 |
 | CL-3 自带测试 | tests/r9/ | 覆盖率报告 |
-| CL-4 独立 demo | `make demo-sec` | demo 冒烟 |
+| CL-4 独立 demo | `make demo-r9` | demo 冒烟 |
 | CL-5 文档自足 | 本文 + AGENT-总设计对应章节 | 文档评审 |
 
 ## 8. 验收标准
@@ -105,7 +166,7 @@ class ApprovalFlow:
 | 审批流 | R9-T04 | `pytest tests/r9/test_approval.py -q` | 挂起→恢复→续跑 |
 | 审计 | R9-T05 | `pytest tests/r9/test_audit.py -q` | 覆盖 100%+哈希链 |
 | secret 隔离 | R9-T06 | `pytest tests/r9/test_secret.py -q` | 明文不进任何持久化 |
-| 独立闭环 | R9-D01 | `make demo-sec` | demo 冒烟 |
+| 独立闭环 | R9-D01 | `make demo-r9` | demo 冒烟 |
 
 ## 10. 门禁清单
 

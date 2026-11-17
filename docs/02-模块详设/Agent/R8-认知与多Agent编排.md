@@ -1,6 +1,6 @@
 # R8：认知与多 Agent 编排（cognition + archs）
 
-> **实现状态**：设计定稿，代码待实现（当前仓库仅 R1/R2 已实现）。验证矩阵中的 tests/rN/ 为预留路径。
+> **实现状态**：设计定稿，代码待实现（当前仓库已实现 R1~R4：runtime/hooks/resilience/model；本模块为设计态）。验证矩阵中的 tests/rN/ 为预留路径。
 
 
 > **权威来源**：[《AGENT 总设计》](../../01-总览与设计/AGENT-总设计.md) §R8。本文为模块级拆分详设。
@@ -91,7 +91,7 @@ seq / par / branch / race / retry / map_state / budget
 |--------|------|------|------|
 | 意图/反思/规划 | IntentStrategy 等 | LLM 分类/critic/分解 | 返回结构完整；缺 name 拒绝 |
 | 子 Agent | ChildSpec | ReAct 子 | 并发上限/预算分账 |
-| 架构 | Arch | 11 内置 | static_check 查悬空边/环/缺 port |
+| 架构 | Arch | 10 内置（详见 R12） | static_check 查悬空边/环/缺 port |
 
 ## 7. 模块内闭环核对（CL-1~CL-5）
 
