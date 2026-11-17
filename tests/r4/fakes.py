@@ -1,7 +1,8 @@
-"""R4 LLM 适配器（测试/默认 fake）：录制响应 LLM + 流式 LLM。
+"""R4 测试专用 fake LLM：录制响应 / 预置流式块。
 
-实现 hooks.LLMPort 契约（complete/stream）。真实后端（OpenAI-compat）由注入方提供，
-本模块只提供确定性 fake，保证 R4 模块内闭环（CL-2）：不联网、可回放。
+只在 tests/ 与 demos/ 内使用，不属于框架公共 API。
+真实后端（OpenAI-compat 等）由注入方实现 LLMPort 协议提供，框架不内置 fake。
+不联网、确定性可回放，保证 R4 测试模块内闭环（CL-2）。
 """
 from __future__ import annotations
 

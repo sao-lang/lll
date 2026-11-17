@@ -12,10 +12,10 @@ from harness.model import (
     CostGuard,
     ExactCache,
     ModelGateway,
-    RecordingLLM,
     StructuredOutputSpec,
 )
 from tests.r4.conftest import pctx, req, resp, sample_schema
+from tests.r4.fakes import RecordingLLM
 
 
 class TestGatewayCache:

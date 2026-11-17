@@ -5,7 +5,6 @@
 """
 from __future__ import annotations
 
-from .adapter import RecordingLLM, StreamLLM
 from .cache import ExactCache, SemanticCache
 from .capability import ModelCapability
 from .gateway import ModelGateway
@@ -34,11 +33,9 @@ __all__ = [
     "ModelCapability",
     "ModelGateway",
     "ModelRouter",
-    "RecordingLLM",
     "RouteDecision",
     "RuleRouter",
     "SemanticCache",
-    "StreamLLM",
     "StructuredOutputSpec",
     "StructuredOutputValidator",
     "UsageLedger",

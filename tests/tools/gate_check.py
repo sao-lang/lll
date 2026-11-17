@@ -57,7 +57,7 @@ MODULES = {
                     "UsageLedger", "CostAttributor", "CostGuard", "build_cache_key",
                     "ModelRouter", "RuleRouter", "SemanticCache", "ExactCache",
                     "validate_json_schema", "StructuredOutputValidator",
-                    "RecordingLLM", "StreamLLM", "ModelGateway", "ModelCapability"],
+                    "ModelGateway", "ModelCapability"],
         "behavior": ["test_types.py", "test_router.py", "test_structured.py", "test_cache.py"],
         "integration": ["test_adapter.py", "test_cost.py", "test_gateway.py"],
     },

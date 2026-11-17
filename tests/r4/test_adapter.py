@@ -5,8 +5,9 @@ import asyncio
 
 from hooks import LLMPort, LLMRequest, LLMResponse, PortCtx, Usage
 
-from harness.model import ModelCapability, ModelGateway, RecordingLLM, StreamLLM
+from harness.model import ModelCapability, ModelGateway
 from tests.r4.conftest import pctx, resp
+from tests.r4.fakes import RecordingLLM, StreamLLM
 
 
 class TestRecordingLLM:

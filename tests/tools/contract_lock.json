@@ -1,25 +1,5 @@
 {
   "contract": {
-    "harness/model.adapter.RecordingLLM": {
-      "enum_values": [
-        "name"
-      ],
-      "fields": [],
-      "methods": [
-        "complete",
-        "stream"
-      ]
-    },
-    "harness/model.adapter.StreamLLM": {
-      "enum_values": [
-        "name"
-      ],
-      "fields": [],
-      "methods": [
-        "complete",
-        "stream"
-      ]
-    },
     "harness/model.cache.ExactCache": {
       "enum_values": [
         "name"
@@ -1134,7 +1114,7 @@
     }
   },
   "description": "R1/R2 已实现模块公共契约基线；变更须走设计稳定性门禁评审",
-  "hash": "94921daae1bda8d7e17a2fe4a7f2f408bd2900fc988aa5fe3e67f23945f8e5c9",
+  "hash": "85cc8bae4be73bef4de1d1deb94988dd07cd552282ea8ef9b437eabeca14be10",
   "locked_packages": [
     "runtime",
     "hooks",
