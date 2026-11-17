@@ -6,6 +6,8 @@
 > **权威来源**：[《AGENT 总设计》](../../01-总览与设计/AGENT-总设计.md) §R9。本文为模块级拆分详设。
 > 层：L1（横切）· 依赖：R1+R2 · 源码包：`src/harness/security/`（原 M8）· 门禁 key：无（设计态）
 
+> **⏳ 回头实现清单**：本模块负责 SandboxPort→LocalSandbox、AuditPort→AuditLogger、HumanPort→ConsoleHumanPort 三个默认实现（总设计[附录 B.1.2](../../01-总览与设计/AGENT-总设计.md)）。开发时须落地并勾销。
+
 ---
 
 ## 1. 职责与边界

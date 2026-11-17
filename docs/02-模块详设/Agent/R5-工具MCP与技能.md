@@ -6,6 +6,8 @@
 > **权威来源**：[《AGENT 总设计》](../../01-总览与设计/AGENT-总设计.md) §R5 D+E 域 §3~§6。本文为模块级拆分详设。
 > 层：L1 能力插件 · 依赖：R1+R2 · 源码包：`src/harness/tools/` + skills/ · 门禁 key：`r5`（待实现）
 
+> **⏳ 回头实现清单**：本模块负责 ToolPort→ToolRegistry、MCPPort→MCPManager、SkillPort→FileSkillProvider 三个默认实现（总设计[附录 B.1.2](../../01-总览与设计/AGENT-总设计.md)）。开发本模块时须落地并勾销。
+
 ---
 
 ## 1. 职责与边界

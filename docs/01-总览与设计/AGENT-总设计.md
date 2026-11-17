@@ -1460,6 +1460,50 @@ bus.on(MyGuard())
 **可插拔四要素检查表**（每个协议都必须满足）：① 协议定义 ✓ ② 默认实现 ✓ ③ 替换入口 ✓ ④ 装配期履约校验 ✓。
 **注入三形态**：协议替换 / Hook 插件 / 构造参数；L3 另有 Port/EventStream/Projection 三类接入契约。
 
+## 附录 B.1 默认实现状态与回头实现清单（2026-11-18）
+
+> 本表是**权威追踪清单**：凡接口体中 `...`（Protocol 语法占位）或标注"见各模块"的默认实现，
+> 都在此登记归属、状态与回头动作。**不得把"文档标注了归属"当成"已实现"**——必须按本表状态列推进。
+> 协议定义在 `src/hooks/protocols.py`；本表是它的设计侧追踪镜像，两处须一致。
+
+### B.1.1 已实现模块（R1~R4）：默认实现全部落地 ✅
+
+| 协议 | 默认实现 | 源码位置 | 状态 |
+|------|---------|---------|------|
+| EventStore | InMemoryEventStore | `src/runtime/runner.py` | ✅ 已实现 |
+| Interpreter | InterpreterImpl | `src/runtime/interpreter.py` | ✅ 已实现 |
+| FailureClassifier | _DefaultClassifier | `src/harness/resilience/types.py` | ✅ 已实现 |
+| DegradeLadder | _default_ladder() | `src/harness/resilience/capability.py` | ✅ 已实现 |
+| ModelRouter | RuleRouter | `src/harness/model/router.py` | ✅ 已实现 |
+| SemanticCache | ExactCache | `src/harness/model/cache.py` | ✅ 已实现 |
+| StructuredOutputSpec | repair 模式 | `src/harness/model/structured.py` | ✅ 已实现 |
+| LLMPort | OpenAICompatLLM | `src/ports/adapters/llm.py` | ✅ 已实现（R4 §6.1） |
+
+### B.1.2 待实现模块：回头实现清单 ⏳
+
+> 下列默认实现**必须**在对应模块开发时落地（四要素②）。协议已在 R2 定齐、归属在此锁定，
+> 模块开发验收时须逐项勾销。**在模块实现前，这些 `...` 是合法的接口占位，不是遗漏。**
+
+| 协议（接口体 `...`） | 默认实现类 | 归属模块 | 源码位置（模块开发时创建） | 回头动作 |
+|------|------|---------|------|------|
+| ToolPort | ToolRegistry | R5 工具 | `src/harness/tools/` | R5 开发时实现 @tool + 注册 + catalog/call |
+| MCPPort | MCPManager | R5 工具 | `src/harness/tools/` | R5 开发时实现 stdio/http transport + list_tools |
+| SkillPort | FileSkillProvider | R5 技能 | `src/harness/skills/` | R5 开发时实现 discover/catalog/body |
+| RAGPort | RAGPipeline | R6 RAG | `src/harness/rag/` | R6 开发时实现 ingest/retrieve（20 项链路） |
+| MemoryPort | MemoryStore | R7 记忆 | `src/harness/memory/` | R7 开发时实现 read/write/forget（hot/warm/cold） |
+| StorePort | InMemoryStorePort | R7 记忆 | `src/harness/memory/` | R7 开发时实现 save/load（可复用 InMemoryEventStore） |
+| SandboxPort | LocalSandbox | R9 安全 | `src/harness/security/` | R9 开发时实现 run（进程/容器隔离） |
+| AuditPort | AuditLogger | R9 安全 | `src/harness/security/` | R9 开发时实现 record（不可篡改留痕） |
+| HumanPort | ConsoleHumanPort | R9 HITL | `src/harness/security/` | R9 开发时实现 ask（审批/挂起/resume） |
+| EvalPort | RuleEval | R10 评测 | `src/harness/eval/` | R10 开发时实现 score（golden 集 + LLM-as-judge） |
+| TelemetryPort | NoopTelemetry | R10 可观测 | `src/harness/observability/` | R10 开发时实现 span/metric/log（兼容 OTel） |
+| EventStreamPort | InMemoryEventStream | R10 事件流 | `src/harness/observability/` | R10 开发时实现 subscribe/publish（R10 §4.1 schema） |
+
+**回头实现纪律**：
+1. 每完成一个模块，把 B.1.2 对应行移到 B.1.1，状态改 ✅，并更新 `src/hooks/protocols.py` 模块 docstring 的归属表（两处同步）。
+2. 模块验收门禁（G0 契约符号）必须包含该模块的默认实现类，缺失即不绿。
+3. 装配层（R12/R13）在用户未注入时注册这些默认实例；模块未实现前，registry 无默认可注册属预期状态。
+
 ## 附录 C 元数据与版本规范
 
 - **语义化版本**：框架、架构、prompt 模板、技能、Port 实现全部带版本，进 `version` 与 trace。
