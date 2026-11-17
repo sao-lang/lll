@@ -6,6 +6,7 @@ desktop.ini
 # Editors / IDE
 .idea/
 .vscode/
+.VSCodeCounter/
 *.swp
 *.swo
 

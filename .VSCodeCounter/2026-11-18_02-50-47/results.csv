@@ -1,8 +1,0 @@
-"filename", "language", "Python", "comment", "blank", "total"
-"e:\vsc-workspace\lania-zip\lll\src\harness\resilience\__init__.py", "Python", 31, 7, 3, 41
-"e:\vsc-workspace\lania-zip\lll\src\harness\resilience\breaker.py", "Python", 121, 50, 20, 191
-"e:\vsc-workspace\lania-zip\lll\src\harness\resilience\capability.py", "Python", 73, 33, 13, 119
-"e:\vsc-workspace\lania-zip\lll\src\harness\resilience\defenses.py", "Python", 226, 111, 57, 394
-"e:\vsc-workspace\lania-zip\lll\src\harness\resilience\retry.py", "Python", 75, 41, 12, 128
-"e:\vsc-workspace\lania-zip\lll\src\harness\resilience\types.py", "Python", 213, 155, 57, 425
-"Total", "-", 739, 397, 162, 1298
