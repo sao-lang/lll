@@ -49,7 +49,7 @@ MODULES = {
         "symbols": ["FailureClass", "FailureClassifier", "DimensionKey", "DEFAULT_FAILURE_TABLE",
                     "backoff_delay", "classify_failure", "normalize_code", "validate_ladder",
                     "RetryPolicy", "CircuitBreaker", "Degradation", "RateLimit", "Bulkhead",
-                    "Idempotency", "Watchdog", "KillSwitch", "ResilienceCapability"],
+                    "Idempotency", "Watchdog", "KillSwitch", "BudgetGuard", "ResilienceCapability"],
         "behavior": ["test_types.py", "test_breaker.py", "test_retry.py"],
         "integration": ["test_degrade.py", "test_capability.py"],
     },

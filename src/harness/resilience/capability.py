@@ -12,6 +12,7 @@ from hooks import HookBus, Registry
 
 from .breaker import CircuitBreaker
 from .defenses import (
+    BudgetGuard,
     Bulkhead,
     Degradation,
     Idempotency,
@@ -83,6 +84,7 @@ class ResilienceCapability:
             self._breaker or CircuitBreaker(clock=self._clock),
             self._retry or RetryPolicy(rng=self._rng),
             Degradation(self._ladder),
+            BudgetGuard(),
         ]
         # 规则 8 例外：装配期对鸭子插件的容错（自定义插件可能非 Hook 子类，
         # 只约定带 priority 属性），故在此用 getattr 兜底 100；运行期无此动态读取。

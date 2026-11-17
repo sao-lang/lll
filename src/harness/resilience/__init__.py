@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from .breaker import CircuitBreaker
 from .capability import ResilienceCapability
-from .defenses import Bulkhead, Degradation, Idempotency, KillSwitch, RateLimit, Watchdog
+from .defenses import BudgetGuard, Bulkhead, Degradation, Idempotency, KillSwitch, RateLimit, Watchdog
 from .retry import RetryPolicy
 from .types import (
     DEFAULT_FAILURE_TABLE,
@@ -36,5 +36,5 @@ __all__ = [
     "BreakerStatus", "BreakerState",
     # 插件
     "RetryPolicy", "CircuitBreaker", "Degradation", "RateLimit", "Bulkhead",
-    "Idempotency", "Watchdog", "KillSwitch", "ResilienceCapability",
+    "Idempotency", "Watchdog", "KillSwitch", "BudgetGuard", "ResilienceCapability",
 ]

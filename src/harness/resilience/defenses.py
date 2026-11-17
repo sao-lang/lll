@@ -14,6 +14,7 @@ from hooks import Decision, HookCtx, HookMode
 from .types import DegradeLadder, DegradeMode, DegradeStep, validate_ladder
 
 __all__ = [
+    "BudgetGuard",
     "Bulkhead",
     "Degradation",
     "Idempotency",
@@ -336,4 +337,57 @@ class KillSwitch:
 
     async def __call__(self, ctx: HookCtx) -> Decision:
         """GUARD 入口：复用 check 的标志判定。"""
+        return self.check(ctx)
+
+
+class BudgetGuard:
+    """软预算守卫：任一预算维度达到软阈值时注入"收尾"上下文（rewrite）。
+
+    与 R1 硬限的分工（R3 §4）：R1 `Budgets.exceeded()` 负责硬上限拒答；
+    BudgetGuard 在硬限之前给模型一个软提示，让它主动收尾而非撞墙。
+    软阈值用 rewrite（context_inject）而非 abort——这是渐进降级，不是拒绝。
+    """
+
+    name = "r3_budgetguard"
+    events = ("before_model",)
+    mode = HookMode.TRANSFORM  # rewrite 需 transform mode 才会被 bus 应用
+    priority = 90  # 晚于多数 guard/transform，最后再注入收尾提示
+    requires_ports: tuple[str, ...] = ()
+
+    def __init__(self, *, soft: float = 0.8) -> None:
+        """装配软阈值。
+
+        参数：
+            soft: 触发收尾提示的用量比例（0~1），缺省 0.8。
+        异常：
+            ValueError: soft 不在 (0, 1]。
+        """
+        if not 0.0 < soft <= 1.0:
+            raise ValueError("soft must be in (0, 1]")
+        self._soft = soft
+
+    def check(self, ctx: HookCtx) -> Decision:
+        """任一维度用量/上限 ≥ soft 且未到硬限时，rewrite 注入收尾提示。"""
+        budgets = ctx.budget_left
+        if budgets is None:
+            return Decision.continue_()  # 未注入预算投影：无信息，不误判
+        # 显式六维判断：直接读具名字段（无 getattr 动态读取，满足规则 8；类型安全满足 mypy strict）
+        hit = (
+            (budgets.max_turns > 0 and budgets.used_turns / budgets.max_turns >= self._soft)
+            or (budgets.max_hops > 0 and budgets.used_hops / budgets.max_hops >= self._soft)
+            or (budgets.max_rounds > 0 and budgets.used_rounds / budgets.max_rounds >= self._soft)
+            or (budgets.max_cost_usd > 0 and budgets.used_cost_usd / budgets.max_cost_usd >= self._soft)
+            or (budgets.max_tokens > 0 and budgets.used_tokens / budgets.max_tokens >= self._soft)
+            or (budgets.max_parallel_children > 0
+                and budgets.used_parallel_children / budgets.max_parallel_children >= self._soft)
+        )
+        if hit:
+            ctx.trace.append("budgetguard:soft")
+            return Decision.rewrite(
+                context="预算即将用尽，请收敛并给出最终答案，不要开启新任务。"
+            )
+        return Decision.continue_()
+
+    async def __call__(self, ctx: HookCtx) -> Decision:
+        """TRANSFORM 入口：复用 check 的软阈值判定。"""
         return self.check(ctx)
