@@ -47,12 +47,15 @@ class DecisionAction(str, Enum):
     成员：
         CONTINUE: 放行。REWRITE: 改写。DENY: 拒绝。ASK: 转人工。
         RETRY: 重试。DEGRADE: 降级。FALLBACK: 兜底。ABORT: 终止。
-    分层执行（可达性说明）：
+    执行归属（2026-11-18 实测更正——此前"八种都有归属"的说法不准确）：
         - R1 内核 `_settle` 消费：CONTINUE / DENY / ABORT / FALLBACK（终止型判决）。
         - R2 HookBus `_apply_rewrite` 消费：REWRITE（transform mode 改写 payload/context/state）。
-        - R3 插件（around mode）执行：RETRY / DEGRADE（重试与降级在 R3 已实现）。
-        - R9 HITL 执行：ASK（转人工挂起，待 R9 模块）。
-    八种动作都有执行归属；R1 内核只处理终止型判决是**微内核分层设计**，非能力缺失。
+        - RETRY：由 R3 RetryPolicy 在 around mode **内部循环**实现，不是靠返回 RETRY decision
+          （该 action 值目前无消费者，但重试能力本身可达）。
+        - DEGRADE：**当前无执行路径**——R3 Degradation/CircuitBreaker 产出 DEGRADE decision
+          （含 target），但 R1 `_settle` 不消费、网关不解析，target 到此为止。
+          降级目标→真实后端（base_url/api_key）的切换尚未实现（见 R4 §4 缺口）。
+        - ASK：R9 未实现，暂无执行路径。
     """
 
     CONTINUE = "continue"
