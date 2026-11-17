@@ -124,11 +124,15 @@ class ToolCall(_Strict):
     字段：
         call_id: 调用关联 id（回填结果时据此匹配）。name: 工具名。
         args: 参数字典（键由工具 schema 决定，故动态）。
+        danger: 风险级别（R9 高危路由据此决定是否走沙盒+审批；缺省 SAFE 兼容旧构造）。
+        source: 工具来源（local/mcp/skill，审计用）。
     """
 
     call_id: str = Field(description="调用关联 id")
     name: str = Field(description="工具名")
     args: dict[str, DynamicValue] = Field(default_factory=dict, description="参数字典")
+    danger: str = Field(default=DangerLevel.SAFE, description="风险级别 SAFE/LOW/HIGH/CRITICAL")
+    source: str = Field(default="local", description="工具来源 local/mcp/skill")
 
 
 class ToolSpec(_Strict):
@@ -203,13 +207,21 @@ class LLMResponse(_Strict):
     model: str = Field(default="", description="实际使用的模型")
 
 
-def make_call(name: str, args: dict[str, DynamicValue], call_id: str = "") -> ToolCall:
+def make_call(
+    name: str,
+    args: dict[str, DynamicValue],
+    call_id: str = "",
+    *,
+    danger: str = DangerLevel.SAFE,
+    source: str = "local",
+) -> ToolCall:
     """构造 ToolCall 的便捷函数。
 
     参数：
         name: 工具名。args: 参数字典。
         call_id: 关联 id；留空时用 name 兜底（保证 id 非空）。
+        danger: 风险级别（高危路由用）。source: 工具来源。
     返回：
         新建的 ToolCall。
     """
-    return ToolCall(call_id=call_id or name, name=name, args=args)
+    return ToolCall(call_id=call_id or name, name=name, args=args, danger=danger, source=source)

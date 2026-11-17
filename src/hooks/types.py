@@ -42,14 +42,17 @@ class HookMode(str, Enum):
 
 
 class DecisionAction(str, Enum):
-    """Hook 统一返回的动作；由 R1 内核执行。
+    """Hook 统一返回的动作；按动作分层执行（不是 R1 内核一家消费全部）。
 
     成员：
         CONTINUE: 放行。REWRITE: 改写。DENY: 拒绝。ASK: 转人工。
         RETRY: 重试。DEGRADE: 降级。FALLBACK: 兜底。ABORT: 终止。
-    说明：
-        当前 R1 内核真正消费的是 continue/deny/abort/fallback；
-        rewrite/ask/retry/degrade 属 R3/R4/R9 未实现模块的动作，载体已定义。
+    分层执行（可达性说明）：
+        - R1 内核 `_settle` 消费：CONTINUE / DENY / ABORT / FALLBACK（终止型判决）。
+        - R2 HookBus `_apply_rewrite` 消费：REWRITE（transform mode 改写 payload/context/state）。
+        - R3 插件（around mode）执行：RETRY / DEGRADE（重试与降级在 R3 已实现）。
+        - R9 HITL 执行：ASK（转人工挂起，待 R9 模块）。
+    八种动作都有执行归属；R1 内核只处理终止型判决是**微内核分层设计**，非能力缺失。
     """
 
     CONTINUE = "continue"

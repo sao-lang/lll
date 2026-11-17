@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from .cache import ExactCache, SemanticCache
+from .cache import CachePort, ExactCache, SimilarityCache, SemanticCache
 from .capability import ModelCapability
 from .gateway import ModelGateway
 from .router import ModelRouter, RuleRouter
@@ -27,7 +27,9 @@ __all__ = [
     "CostAttributor",
     "CostGuard",
     "CostRecord",
+    "CachePort",
     "ExactCache",
+    "SimilarityCache",
     "ModelCapability",
     "ModelGateway",
     "ModelRouter",

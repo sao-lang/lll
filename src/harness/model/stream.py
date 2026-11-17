@@ -8,9 +8,9 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
-from hooks import LLMRequest, LLMResponse, PortCtx, StreamEvent, StreamEventKind
+from hooks import LLMRequest, PortCtx, StreamEvent, StreamEventKind
 
-__all__ = ["wrap_text_stream", "has_stream_events"]
+__all__ = ["has_stream_events", "wrap_text_stream"]
 
 
 def has_stream_events(llm: object) -> bool:

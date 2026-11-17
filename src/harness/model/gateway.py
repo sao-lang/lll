@@ -9,11 +9,17 @@ from collections.abc import AsyncIterator
 
 from harness._ctxview import coerce_port_ctx
 from hooks import (
-    LLMPort, LLMRequest, LLMResponse, PortCtx, StreamEvent, StreamEventKind, Usage,
+    LLMPort,
+    LLMRequest,
+    LLMResponse,
+    PortCtx,
+    StreamEvent,
+    StreamEventKind,
+    Usage,
 )
 from runtime import Message
 
-from .cache import ExactCache, SemanticCache
+from .cache import CachePort, ExactCache, SemanticCache
 from .router import ModelRouter, RuleRouter
 from .stream import has_stream_events, wrap_text_stream
 from .structured import StructuredOutputValidator, validate_json_schema
@@ -22,7 +28,6 @@ from .types import (
     CostGuard,
     CostRecord,
     StructuredOutputSpec,
-    build_cache_key,
 )
 
 __all__ = ["ModelGateway"]
@@ -40,7 +45,7 @@ class ModelGateway:
         *,
         llm: LLMPort,
         router: ModelRouter | None = None,
-        cache: SemanticCache | None = None,
+        cache: CachePort | None = None,
         spec: StructuredOutputSpec | None = None,
         prompt_version: str = "v1",
         cost_guard: CostGuard | None = None,
@@ -73,8 +78,7 @@ class ModelGateway:
         异常：
             ValueError: 结构化校验超次且 strict（拒答）。
         """
-        key = build_cache_key(request, prompt_version=self._prompt_version).value
-        cached = self._cache.get(key, version=self._prompt_version)
+        cached = self._cache.get(request, version=self._prompt_version)
         if cached is not None:
             return cached
 
@@ -84,7 +88,7 @@ class ModelGateway:
         if self._validator is not None:
             response = await self._complete_with_repair(response, request, ctx)
 
-        self._cache.put(key, response, version=self._prompt_version)
+        self._cache.put(request, response, version=self._prompt_version)
         return response
 
     async def stream(self, request: LLMRequest, ctx: PortCtx) -> AsyncIterator[str]:
@@ -97,8 +101,7 @@ class ModelGateway:
         说明：
             流式路径禁用结构化校验（无法校验半截流），不经过 R1 Effect 循环。
         """
-        key = build_cache_key(request, prompt_version=self._prompt_version).value
-        cached = self._cache.get(key, version=self._prompt_version)
+        cached = self._cache.get(request, version=self._prompt_version)
         if cached is not None:
             # 流式是 Port 层，ctx 是 PortCtx（无 hook trace）；缓存命中信息随响应走。
             for ch in cached.content or "":
@@ -121,7 +124,7 @@ class ModelGateway:
             )
         full_response = LLMResponse(content="".join(chunks), usage=usage)
         self._record_cost(full_response, ctx)
-        self._cache.put(key, full_response, version=self._prompt_version)
+        self._cache.put(request, full_response, version=self._prompt_version)
 
     def stream_events(
         self, request: LLMRequest, ctx: PortCtx,
@@ -140,8 +143,7 @@ class ModelGateway:
     async def _stream_events_impl(
         self, request: LLMRequest, ctx: PortCtx,
     ) -> AsyncIterator[StreamEvent]:
-        key = build_cache_key(request, prompt_version=self._prompt_version).value
-        cached = self._cache.get(key, version=self._prompt_version)
+        cached = self._cache.get(request, version=self._prompt_version)
         if cached is not None:
             yield StreamEvent(kind=StreamEventKind.TEXT_DELTA, data=cached.content or "")
             yield StreamEvent(kind=StreamEventKind.USAGE, data=cached.usage)
@@ -173,7 +175,7 @@ class ModelGateway:
             )
         full = LLMResponse(content="".join(chunks), usage=usage)
         self._record_cost(full, ctx)
-        self._cache.put(key, full, version=self._prompt_version)
+        self._cache.put(request, full, version=self._prompt_version)
 
     def _record_cost(self, response: LLMResponse, ctx: PortCtx) -> None:
         """从响应的 usage 记录成本（不自行估算），过成本硬闸。

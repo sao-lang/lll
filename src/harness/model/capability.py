@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from hooks import HookBus, LLMPort, Registry
 
-from .cache import ExactCache
+from .cache import CachePort, ExactCache
 from .gateway import ModelGateway
 from .router import RuleRouter
 from .types import StructuredOutputSpec
@@ -32,7 +32,7 @@ class ModelCapability:
         *,
         llm: LLMPort,
         router: RuleRouter | None = None,
-        cache: ExactCache | None = None,
+        cache: CachePort | None = None,
         spec: StructuredOutputSpec | None = None,
     ) -> None:
         """装配能力：llm 必填，其余策略可替换。"""
@@ -58,5 +58,5 @@ class ModelCapability:
         registry = reg or bus.registry
         registry.register("llm", self._llm)  # LLMPort 实现带 name，满足 Provider 契约
         registry.register("model_router", self._router or RuleRouter())
-        registry.register("model_cache", self._cache or ExactCache())
+        registry.register("model_cache", self._cache or ExactCache())  # 默认精确缓存
         return bus

@@ -1526,6 +1526,14 @@ bus.on(MyGuard())
 | R5~R13 剩余能力代码（约 82 项设计充分项） | 设计有、代码无 | R5~R13 | 按模块整块推进，每次完成一个模块 100% 项 |
 | **R4→R1 接线断链**：R1 `call(Effect,ctx)->Result` 与 R4 `ModelGateway.complete(LLMRequest,PortCtx)->LLMResponse` 签名不同，缺 Effect→LLM 适配器 | 两模块各自闭环，无生产接线 | R12 装配层 | composition root 实现时补适配器；这是 R1~R4 间唯一真缺代码的一环 |
 | **R1↔R2 / R3→R2 接线未装配**：函数已就绪（ctx_factory/_bind/ResilienceCapability.install）但无生产代码调用 | 接口就绪、无人串接 | R12 装配层 | composition root（Agent 装配器）统一注册，非模块遗漏 |
+| **SandboxPort.run(fn: Callable) 不可序列化** | 签名只够同进程执行，真进程/容器隔离拿不到可序列化代码 | R9 | 实现前改签名为可序列化 spec（code+entrypoint+args），否则沙盒承诺不可达 |
+| **AuditPort.record 收裸 dict** | 防篡改哈希链字段（prev_hash/hash）无处放 | R9 | 实现时签名改收 `AuditEvent` 具名类型 |
+| **EvalPort.score 只给 case_id** | 评测器拿不到 expected/should_refuse，需自己查库 | R10 | 实现时签名改收 `EvalCase` 具名类型 |
+| **Telemetry 归因维度藏 meta / HumanPort resume 点不显式** | agent_id/user_id 靠 coerce 边界读；ask 无挂起 id | R9/R10 | 实现时显式化到协议字段 |
+
+> **协议可达性纪律**：新增/修改 Port 协议时，必须自问"实现者拿到的输入够不够兑现协议承诺的能力"，
+> 避免再次出现 SemanticCache 那种"协议名承诺语义、参数只给哈希"的名实分离。
+> 详见[《协议可达性审查》](./协议可达性审查-20261118.md)。
 
 **纪律**：本表项在对应模块开发验收时逐项勾销；新增框架能力必须先入本表再动手，避免遗漏。
 
