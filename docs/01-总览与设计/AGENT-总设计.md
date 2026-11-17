@@ -1086,6 +1086,11 @@ Handoff(roles, max_hops=5); Blackboard(agents, rounds=3); Graph()  # 声明式�
 seq(a,b); par([...]); branch(fn, arms); race([...]); retry(n,backoff); map_state(lens); budget(**limits)
 ```
 
+> **落地细化以 R12 v1.1 为准**：上述签名是概要。完整构造签名（§4）、END 等 Effect 真实语法（§4.0）、
+> StaticCheckReport schema + 错误码（R12 §5.1）、10 架构 compile 骨架 + state 契约 + 边界行为 +
+> A5 取消/R3 容错接线（R12 §6.1）均在[《R12 内置架构与组合》](../02-模块详设/Agent/R12-内置架构与组合.md)。
+> Graph 条件边语义：`cond(state) -> 目标节点 id | None`（多路分支），非布尔。
+
 ### R8.5 元数据与核心字段
 
 | 字段 | 说明 |
