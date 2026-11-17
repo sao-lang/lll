@@ -1,5 +1,8 @@
 # R9：安全与 HITL（security）
 
+> **实现状态**：设计定稿，代码待实现（当前仓库仅 R1/R2 已实现）。验证矩阵中的 tests/rN/ 为预留路径。
+
+
 > **权威来源**：[《AGENT 总设计》](../../01-总览与设计/AGENT-总设计.md) §R9。本文为模块级拆分详设。
 > 层：L1（横切）· 依赖：R1+R2 · 源码包：`src/harness/security/`（原 M8）· 门禁 key：无（设计态）
 
@@ -79,7 +82,7 @@ class ApprovalFlow:
 |------|------|------|
 | CL-1 契约自足 | 依赖 R1 types + R2 Hook + 安全协议 | import 扫描 |
 | CL-2 自带 fake | fake SandboxPort/AuditPort/HumanPort | fake 用例 |
-| CL-3 自带测试 | tests/m8/ | 覆盖率报告 |
+| CL-3 自带测试 | tests/r9/ | 覆盖率报告 |
 | CL-4 独立 demo | `make demo-sec` | demo 冒烟 |
 | CL-5 文档自足 | 本文 + AGENT-总设计对应章节 | 文档评审 |
 
@@ -94,12 +97,12 @@ class ApprovalFlow:
 
 | 功能点 | 用例 ID | 验证方式 | 通过标准 |
 |--------|---------|---------|---------|
-| 输入护栏 | R9-T01 | `pytest tests/m8/test_guardrail.py -q` | 注入/敏感串拦截 |
+| 输入护栏 | R9-T01 | `pytest tests/r9/test_guardrail.py -q` | 注入/敏感串拦截 |
 | 注入防御 | R9-T02 | 同上 | 工具/检索结果含指令被拦截 |
-| 沙盒路由 | R9-T03 | `pytest tests/m8/test_sandbox.py -q` | HIGH+ 进沙盒 |
-| 审批流 | R9-T04 | `pytest tests/m8/test_approval.py -q` | 挂起→恢复→续跑 |
-| 审计 | R9-T05 | `pytest tests/m8/test_audit.py -q` | 覆盖 100%+哈希链 |
-| secret 隔离 | R9-T06 | `pytest tests/m8/test_secret.py -q` | 明文不进任何持久化 |
+| 沙盒路由 | R9-T03 | `pytest tests/r9/test_sandbox.py -q` | HIGH+ 进沙盒 |
+| 审批流 | R9-T04 | `pytest tests/r9/test_approval.py -q` | 挂起→恢复→续跑 |
+| 审计 | R9-T05 | `pytest tests/r9/test_audit.py -q` | 覆盖 100%+哈希链 |
+| secret 隔离 | R9-T06 | `pytest tests/r9/test_secret.py -q` | 明文不进任何持久化 |
 | 独立闭环 | R9-D01 | `make demo-sec` | demo 冒烟 |
 
 ## 10. 门禁清单

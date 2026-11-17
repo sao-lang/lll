@@ -2,7 +2,7 @@
 PYTHON ?= .venv/Scripts/python
 PYTEST := $(PYTHON) -m pytest
 
-.PHONY: install test demo demo-r1 demo-r2 gate gate-r1 gate-r2
+.PHONY: install test demo demo-r1 demo-r2 gate gate-r1 gate-r2 contract-check contract-update
 
 install:
 	$(PYTHON) -m pip install -e ".[dev]"
@@ -25,3 +25,10 @@ gate-r1:
 
 gate-r2:
 	$(PYTHON) tests/tools/gate_check.py --module r2
+
+# G5 设计稳定性门禁：契约锁检查 / 评审后更新基线
+contract-check:
+	$(PYTHON) tests/tools/contract_lock.py check
+
+contract-update:
+	$(PYTHON) tests/tools/contract_lock.py update

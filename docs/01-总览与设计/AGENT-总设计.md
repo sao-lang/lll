@@ -4,7 +4,8 @@
 > **公式**：`Agent 应用 = LLM + Harness`。Harness = 一个微内核 + 一组可插拔能力插件 + 内置架构 + 四组对外 API。
 > **主线**：唯一执行循环解释 Program 产出的 Effect；一切能力是挂在 Hook 上的插件；一切架构是插件的装配脚本；一切外部系统经契约接入。
 > **配套**：模块详设 `docs/02-模块详设/Agent/`（由本文按 R1~R13 拆分派生，每模块模块内闭环、含 API/字段/门禁）；能力全集见[《能力域全景》](./能力域全景.md)；自查补齐依据见[《设计自查报告》](./设计自查报告.md)。
-> **状态**：v2.0 设计定稿（提案），落地时按 R1~R11 逐模块过门禁。
+> **状态**：v2.0 设计定稿（提案），落地时按 R1~R13 逐模块过门禁；已实现 R1（src/runtime）与 R2（src/hooks），其余为设计态。
+> **防漂移**：已实现模块的契约受 G5 设计稳定性门禁保护，任何设计改动若触碰其公共 API 必须通过契约变更评审（见[《设计稳定性门禁》](../03-流程与规范/设计稳定性门禁.md)）。
 
 ---
 
@@ -138,7 +139,7 @@ flowchart TD
 | API | 面向 | 内容 |
 |-----|------|------|
 | **A1 集成契约** | 平台/工具集成者 | Port 契约 + Event Stream + Projection 三类契约 |
-| **A2 架构组合** | 选型用户 | 11 内置架构 + 组合算子（seq/par/branch/race/budget） |
+| **A2 架构组合** | 选型用户 | 10 内置架构 + 组合算子（seq/par/branch/race/budget） |
 | **A3 应用开发** | 普通开发者 | `Agent(arch=...).profile(...).capability(...).run()` |
 | **A4 组件开发** | 插件作者 | Hook / Decision / Port / Program / fold 全部低层接口 |
 
@@ -300,7 +301,7 @@ class Budgets:
 @dataclass(frozen=True)
 class AgentState:
     messages: tuple[Message, ...]
-    scratchpad: Mapping[str, DynamicValue]
+    scratch: Mapping[str, DynamicValue]
     budgets: Budgets
     version: str
     output / last_skill / last_child / last_wait_human: DynamicValue
@@ -340,7 +341,7 @@ CallFn = Callable[[Effect, DynamicValue], Awaitable[Result]]            # Port �
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | messages | tuple[Message,...] | 对话历史，只增不减（裁剪是视图层的事，R7） |
-| scratchpad | Mapping | 用户/插件自定义键（phase/cursor/steps…），冻结只读 |
+| scratch | Mapping | 用户/插件自定义键（phase/cursor/steps…），冻结只读 |
 | budgets | Budgets | 多维预算，每 fold 由 Runner 强制扣减 |
 | version | str | program+prompt+架构版本，进 trace 供回放对齐 |
 | output | DynamicValue | END Effect 最终产出（框架托管字段） |
@@ -1018,7 +1019,7 @@ class MemoryItem:
 
 ### R8.1 职责与边界
 
-**做**：认知服务（意图识别/澄清/规划/重规划/执行器/反思/任务追踪）；多 Agent 编排（child 派生/并发上限/join/预算分账/通信/黑板/handoff/supervisor）；11 内置架构与组合算子。
+**做**：认知服务（意图识别/澄清/规划/重规划/执行器/反思/任务追踪）；多 Agent 编排（child 派生/并发上限/join/预算分账/通信/黑板/handoff/supervisor）；10 内置架构与组合算子。
 **不做**：执行循环（R1）——所有架构与编排的终态都是 Program，运行时对其一无所知。
 
 ### R8.2 设计架构
@@ -1074,7 +1075,7 @@ class Arch(Protocol):                              # 架构统一协议
     def static_check(self) -> StaticCheckReport: ...
     def compile(self) -> Program: ...
 
-# 11 内置架构（全部返回 Program）
+# 10 内置架构（全部返回 Program）
 ReAct(tools); ToolUse(tools); PlanExecute(planner, executor, replanner=None)
 Reflection(reflector, max_rounds=3); Router(classifier, arms, default=None)
 RouterSkill(classifier, routes); Supervisor(planner, child_spec, join)

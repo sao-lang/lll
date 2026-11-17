@@ -1,5 +1,8 @@
 # R5：工具·MCP·技能（tools）
 
+> **实现状态**：设计定稿，代码待实现（当前仓库仅 R1/R2 已实现）。验证矩阵中的 tests/rN/ 为预留路径。
+
+
 > **权威来源**：[《AGENT 总设计》](../../01-总览与设计/AGENT-总设计.md) §R5 D+E 域 §3~§6。本文为模块级拆分详设。
 > 层：L1 能力插件 · 依赖：R1+R2 · 源码包：`src/harness/tools/` + skills/ · 门禁 key：`m4`
 
@@ -109,8 +112,8 @@ class ToolRegistry:   # ToolPort 实现
 |------|------|------|
 | CL-1 契约自足 | 依赖 R1 types + R2 Hook + Port | import 扫描 |
 | CL-2 自带 fake | tests/fakes/m4.py + fake transport | fake 用例 |
-| CL-3 自带测试 | tests/m4/ 覆盖门禁 | 覆盖率报告 |
-| CL-4 独立 demo | `make demo-m4` | demo 冒烟 |
+| CL-3 自带测试 | tests/r5/ 覆盖门禁 | 覆盖率报告 |
+| CL-4 独立 demo | `make demo-r5` | demo 冒烟 |
 | CL-5 文档自足 | 本文 + AGENT-总设计对应章节 | 文档评审 |
 
 ## 8. 验收标准
@@ -124,12 +127,12 @@ class ToolRegistry:   # ToolPort 实现
 
 | 功能点 | 用例 ID | 验证方式 | 通过标准 |
 |--------|---------|---------|---------|
-| @tool 定义 | R5-T01 | `pytest tests/m4/test_decorator.py -q` | schema 生成+extra=forbid+danger 必填 |
-| 三级披露 | R5-T02 | `pytest tests/m4/test_index.py -q` | L1 无 schema；超预算报错 |
-| danger 路由 | R5-T03 | `pytest tests/m4/test_routing.py -q` | 四级路由各生效 |
-| MCP 合并 | R5-T04 | `pytest tests/m4/test_mcp.py -q` | 注入同一 Registry 无差别 |
-| 错误折叠 | R5-T05 | `pytest tests/m4/test_errors.py -q` | 异常折叠不抛穿 |
-| 独立闭环 | R5-D01 | `make demo-m4` + gate_check m4 | demo+门禁全绿 |
+| @tool 定义 | R5-T01 | `pytest tests/r5/test_decorator.py -q` | schema 生成+extra=forbid+danger 必填 |
+| 三级披露 | R5-T02 | `pytest tests/r5/test_index.py -q` | L1 无 schema；超预算报错 |
+| danger 路由 | R5-T03 | `pytest tests/r5/test_routing.py -q` | 四级路由各生效 |
+| MCP 合并 | R5-T04 | `pytest tests/r5/test_mcp.py -q` | 注入同一 Registry 无差别 |
+| 错误折叠 | R5-T05 | `pytest tests/r5/test_errors.py -q` | 异常折叠不抛穿 |
+| 独立闭环 | R5-D01 | `make demo-r5` + gate_check r5 | demo+门禁全绿 |
 
 ## 10. 门禁清单
 

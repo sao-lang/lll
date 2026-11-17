@@ -1,7 +1,16 @@
 """R2 Port 协议族：全部外部能力的接口契约，一次定齐。
 
 运行时只认 Protocol 不认实现；替换实现 = registry.register(name, adapter)。
-所有适配器公共契约：无会话状态（ctx 传）、异常折叠为 Result、带 name。
+所有适配器公共契约：无会话状态（ctx 传递）、异常折叠为 Result、带 name。
+
+协议清单（13 个 Port）：
+    LLMPort 模型补全 / ToolPort 工具 / SkillPort 技能 / RAGPort 检索 /
+    MemoryPort 记忆 / StorePort 持久化 / SandboxPort 沙盒 / AuditPort 审计 /
+    EvalPort 评测 / TelemetryPort 可观测 / HumanPort 人工在环 /
+    MCPPort MCP 工具 / EventStreamPort 事件流（L3 接入契约）。
+
+约定：每个 Protocol 方法签名即契约（参数 + 返回值全部标注）；
+方法体统一 `...` 占位，具体实现由注入的适配器提供。
 公共 API 见 docs/02-模块详设/Agent/R2-插件总线与协议.md §4。
 """
 from __future__ import annotations
@@ -15,9 +24,20 @@ from runtime import DynamicValue
 from .dto import LLMRequest, LLMResponse, PortCtx, ToolCall, ToolResult, ToolSpec
 
 __all__ = [
-    "LLMPort", "ToolPort", "SkillPort", "RAGPort", "MemoryPort", "StorePort",
-    "SandboxPort", "AuditPort", "EvalPort", "TelemetryPort", "HumanPort",
-    "MCPPort", "EventStreamPort", "PORT_PROTOCOLS",
+    "PORT_PROTOCOLS",
+    "AuditPort",
+    "EvalPort",
+    "EventStreamPort",
+    "HumanPort",
+    "LLMPort",
+    "MCPPort",
+    "MemoryPort",
+    "RAGPort",
+    "SandboxPort",
+    "SkillPort",
+    "StorePort",
+    "TelemetryPort",
+    "ToolPort",
 ]
 
 
@@ -207,7 +227,10 @@ class EventStreamPort(Protocol):
         ...
 
 
-# port 名 → Protocol 类型；供装配期 isinstance 校验适配器是否履约
+# port 名 → Protocol 类型；供装配期 isinstance 校验适配器是否履约。
+# 键是 R1 EffectKind / 装配约定的 port 名，值是对应的 R2 Protocol 类。
+# 用途：registry.register("llm", adapter) 后，可用本表 isinstance(adapter, PORT_PROTOCOLS["llm"])
+# 判断适配器是否实现了该 port 要求的全部方法（缺一即装配期失败）。
 PORT_PROTOCOLS: dict[str, type] = {
     "llm": LLMPort, "tool": ToolPort, "skill": SkillPort, "rag": RAGPort,
     "memory": MemoryPort, "store": StorePort, "sandbox": SandboxPort,

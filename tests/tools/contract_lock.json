@@ -1,0 +1,748 @@
+{
+  "contract": {
+    "hooks.bus.DispatchResult": {
+      "enum_values": [],
+      "fields": [
+        "aborted",
+        "decision",
+        "event",
+        "trace"
+      ],
+      "methods": []
+    },
+    "hooks.bus.HookBus": {
+      "enum_values": [],
+      "fields": [],
+      "methods": [
+        "ctx_factory",
+        "emit",
+        "freeze",
+        "on"
+      ]
+    },
+    "hooks.dto.DangerLevel": {
+      "enum_values": [
+        "ALL",
+        "CRITICAL",
+        "HIGH",
+        "LOW",
+        "SAFE"
+      ],
+      "fields": [],
+      "methods": []
+    },
+    "hooks.dto.LLMRequest": {
+      "enum_values": [],
+      "fields": [
+        "max_tokens",
+        "messages",
+        "model",
+        "temperature",
+        "tools_catalog"
+      ],
+      "methods": []
+    },
+    "hooks.dto.LLMResponse": {
+      "enum_values": [],
+      "fields": [
+        "content",
+        "model",
+        "tool_calls",
+        "usage"
+      ],
+      "methods": []
+    },
+    "hooks.dto.PortCtx": {
+      "enum_values": [],
+      "fields": [
+        "budget_left",
+        "meta",
+        "run_id",
+        "session_id",
+        "trace_span"
+      ],
+      "methods": []
+    },
+    "hooks.dto.ToolCall": {
+      "enum_values": [],
+      "fields": [
+        "args",
+        "call_id",
+        "name"
+      ],
+      "methods": []
+    },
+    "hooks.dto.ToolResult": {
+      "enum_values": [],
+      "fields": [
+        "call_id",
+        "error",
+        "meta",
+        "ok",
+        "value"
+      ],
+      "methods": []
+    },
+    "hooks.dto.ToolSpec": {
+      "enum_values": [],
+      "fields": [
+        "danger",
+        "description",
+        "name",
+        "parameters_schema",
+        "source"
+      ],
+      "methods": []
+    },
+    "hooks.dto.Usage": {
+      "enum_values": [],
+      "fields": [
+        "completion_tokens",
+        "cost_usd",
+        "prompt_tokens"
+      ],
+      "methods": []
+    },
+    "hooks.protocols.AuditPort": {
+      "enum_values": [],
+      "fields": [
+        "name"
+      ],
+      "methods": [
+        "record"
+      ]
+    },
+    "hooks.protocols.EvalPort": {
+      "enum_values": [],
+      "fields": [
+        "name"
+      ],
+      "methods": [
+        "score"
+      ]
+    },
+    "hooks.protocols.EventStreamPort": {
+      "enum_values": [],
+      "fields": [
+        "name"
+      ],
+      "methods": [
+        "subscribe",
+        "topics"
+      ]
+    },
+    "hooks.protocols.HumanPort": {
+      "enum_values": [],
+      "fields": [
+        "name"
+      ],
+      "methods": [
+        "ask"
+      ]
+    },
+    "hooks.protocols.LLMPort": {
+      "enum_values": [],
+      "fields": [
+        "name"
+      ],
+      "methods": [
+        "complete",
+        "stream"
+      ]
+    },
+    "hooks.protocols.MCPPort": {
+      "enum_values": [],
+      "fields": [
+        "name"
+      ],
+      "methods": [
+        "call_tool",
+        "list_tools"
+      ]
+    },
+    "hooks.protocols.MemoryPort": {
+      "enum_values": [],
+      "fields": [
+        "name"
+      ],
+      "methods": [
+        "forget",
+        "read",
+        "write"
+      ]
+    },
+    "hooks.protocols.RAGPort": {
+      "enum_values": [],
+      "fields": [
+        "name"
+      ],
+      "methods": [
+        "ingest",
+        "retrieve"
+      ]
+    },
+    "hooks.protocols.SandboxPort": {
+      "enum_values": [],
+      "fields": [
+        "name"
+      ],
+      "methods": [
+        "run"
+      ]
+    },
+    "hooks.protocols.SkillPort": {
+      "enum_values": [],
+      "fields": [
+        "name"
+      ],
+      "methods": [
+        "body",
+        "catalog",
+        "discover"
+      ]
+    },
+    "hooks.protocols.StorePort": {
+      "enum_values": [],
+      "fields": [
+        "name"
+      ],
+      "methods": [
+        "load",
+        "save"
+      ]
+    },
+    "hooks.protocols.TelemetryPort": {
+      "enum_values": [],
+      "fields": [
+        "name"
+      ],
+      "methods": [
+        "log",
+        "metric",
+        "span"
+      ]
+    },
+    "hooks.protocols.ToolPort": {
+      "enum_values": [],
+      "fields": [
+        "name"
+      ],
+      "methods": [
+        "call",
+        "catalog",
+        "register"
+      ]
+    },
+    "hooks.types.Capability": {
+      "enum_values": [],
+      "fields": [
+        "name",
+        "requires",
+        "version"
+      ],
+      "methods": [
+        "install"
+      ]
+    },
+    "hooks.types.Decision": {
+      "enum_values": [],
+      "fields": [
+        "action",
+        "context_inject",
+        "payload_patch",
+        "reason",
+        "retry",
+        "state_patch",
+        "target",
+        "value"
+      ],
+      "methods": [
+        "abort",
+        "ask",
+        "continue_",
+        "degrade",
+        "deny",
+        "fallback",
+        "retry_",
+        "rewrite"
+      ]
+    },
+    "hooks.types.DecisionAction": {
+      "enum_values": [
+        "ABORT",
+        "ASK",
+        "CONTINUE",
+        "DEGRADE",
+        "DENY",
+        "FALLBACK",
+        "RETRY",
+        "REWRITE"
+      ],
+      "fields": [],
+      "methods": []
+    },
+    "hooks.types.Hook": {
+      "enum_values": [],
+      "fields": [
+        "events",
+        "mode",
+        "name",
+        "priority",
+        "requires_ports"
+      ],
+      "methods": []
+    },
+    "hooks.types.HookBusError": {
+      "enum_values": [
+        "code"
+      ],
+      "fields": [],
+      "methods": []
+    },
+    "hooks.types.HookCtx": {
+      "enum_values": [],
+      "fields": [
+        "attempt",
+        "budget_left",
+        "effect",
+        "event",
+        "invoke",
+        "meta",
+        "session_id",
+        "state",
+        "trace"
+      ],
+      "methods": [
+        "state_view"
+      ]
+    },
+    "hooks.types.HookMode": {
+      "enum_values": [
+        "AROUND",
+        "GUARD",
+        "OBSERVE",
+        "TRANSFORM"
+      ],
+      "fields": [],
+      "methods": []
+    },
+    "hooks.types.LifecycleEvent": {
+      "enum_values": [
+        "AFTER_COMPACT",
+        "AFTER_INVOKE",
+        "AFTER_MODEL",
+        "AFTER_TOOL",
+        "BEFORE_COMPACT",
+        "BEFORE_INVOKE",
+        "BEFORE_MODEL",
+        "BEFORE_TOOL",
+        "BUDGET_CHECK",
+        "CHILD_DONE",
+        "CHILD_SPAWN",
+        "CONFIG_CHANGE",
+        "FILE_CHANGE",
+        "INVOKE_ERROR",
+        "SESSION_END",
+        "SESSION_START",
+        "STATE_FOLD",
+        "STOP",
+        "STOP_FAILURE",
+        "TOOL_ERROR",
+        "USER_PROMPT"
+      ],
+      "fields": [],
+      "methods": []
+    },
+    "hooks.types.Matcher": {
+      "enum_values": [],
+      "fields": [
+        "kinds",
+        "models",
+        "tools"
+      ],
+      "methods": [
+        "matches"
+      ]
+    },
+    "hooks.types.Provider": {
+      "enum_values": [],
+      "fields": [
+        "name"
+      ],
+      "methods": []
+    },
+    "hooks.types.Registry": {
+      "enum_values": [],
+      "fields": [],
+      "methods": [
+        "freeze",
+        "has",
+        "names",
+        "register",
+        "replace",
+        "resolve"
+      ]
+    },
+    "hooks.types.RetrySpec": {
+      "enum_values": [],
+      "fields": [
+        "base_delay",
+        "idempotency_required",
+        "jitter",
+        "max_attempts",
+        "max_delay",
+        "multiplier",
+        "respect_retry_after"
+      ],
+      "methods": []
+    },
+    "runtime.errors.AgentKitError": {
+      "enum_values": [
+        "code"
+      ],
+      "fields": [],
+      "methods": []
+    },
+    "runtime.errors.BudgetExceeded": {
+      "enum_values": [
+        "code"
+      ],
+      "fields": [],
+      "methods": []
+    },
+    "runtime.errors.ChainAborted": {
+      "enum_values": [
+        "code"
+      ],
+      "fields": [],
+      "methods": []
+    },
+    "runtime.errors.PortMissing": {
+      "enum_values": [
+        "code"
+      ],
+      "fields": [],
+      "methods": []
+    },
+    "runtime.errors.ProgramCrashed": {
+      "enum_values": [
+        "code"
+      ],
+      "fields": [],
+      "methods": []
+    },
+    "runtime.errors.ProgramInvalid": {
+      "enum_values": [
+        "code"
+      ],
+      "fields": [],
+      "methods": []
+    },
+    "runtime.interpreter.EffectBatch": {
+      "enum_values": [],
+      "fields": [
+        "batched",
+        "effects"
+      ],
+      "methods": []
+    },
+    "runtime.interpreter.Interpreter": {
+      "enum_values": [],
+      "fields": [],
+      "methods": [
+        "send"
+      ]
+    },
+    "runtime.interpreter.InterpreterImpl": {
+      "enum_values": [],
+      "fields": [],
+      "methods": [
+        "send",
+        "started"
+      ]
+    },
+    "runtime.runner.InMemoryEventStore": {
+      "enum_values": [],
+      "fields": [],
+      "methods": [
+        "load",
+        "save"
+      ]
+    },
+    "runtime.runner.Runner": {
+      "enum_values": [],
+      "fields": [],
+      "methods": [
+        "load",
+        "replay",
+        "resume",
+        "run",
+        "step"
+      ]
+    },
+    "runtime.types.AgentState": {
+      "enum_values": [],
+      "fields": [
+        "budgets",
+        "last_child",
+        "last_reason",
+        "last_skill",
+        "last_step_kinds",
+        "last_tokens",
+        "last_wait_human",
+        "messages",
+        "output",
+        "scratch",
+        "version"
+      ],
+      "methods": [
+        "get",
+        "set",
+        "with_"
+      ]
+    },
+    "runtime.types.BudgetDelta": {
+      "enum_values": [],
+      "fields": [
+        "cost_usd",
+        "hops",
+        "parallel_children",
+        "rounds",
+        "tokens",
+        "turns"
+      ],
+      "methods": []
+    },
+    "runtime.types.Budgets": {
+      "enum_values": [],
+      "fields": [
+        "max_cost_usd",
+        "max_hops",
+        "max_parallel_children",
+        "max_rounds",
+        "max_tokens",
+        "max_turns",
+        "used_cost_usd",
+        "used_hops",
+        "used_parallel_children",
+        "used_rounds",
+        "used_tokens",
+        "used_turns"
+      ],
+      "methods": [
+        "check_parallel",
+        "consume",
+        "exceeded"
+      ]
+    },
+    "runtime.types.Effect": {
+      "enum_values": [],
+      "fields": [
+        "batch",
+        "kind",
+        "payload",
+        "trace_id"
+      ],
+      "methods": [
+        "with_payload"
+      ]
+    },
+    "runtime.types.EffectKind": {
+      "enum_values": [
+        "CHILD",
+        "END",
+        "LLM",
+        "SKILL",
+        "TOOL",
+        "WAIT_HUMAN"
+      ],
+      "fields": [],
+      "methods": []
+    },
+    "runtime.types.EffectPayload": {
+      "enum_values": [],
+      "fields": [
+        "budget",
+        "call",
+        "call_id",
+        "calls",
+        "max_tokens",
+        "messages",
+        "model",
+        "name",
+        "options",
+        "output",
+        "part",
+        "port",
+        "program",
+        "program_factory",
+        "question",
+        "reason",
+        "state",
+        "temperature",
+        "tools"
+      ],
+      "methods": []
+    },
+    "runtime.types.Event": {
+      "enum_values": [],
+      "fields": [
+        "batched",
+        "cost_usd",
+        "effects",
+        "reason",
+        "results",
+        "seq",
+        "session_id",
+        "state_snapshot",
+        "status",
+        "step",
+        "tokens",
+        "ts"
+      ],
+      "methods": []
+    },
+    "runtime.types.EventStore": {
+      "enum_values": [],
+      "fields": [],
+      "methods": [
+        "load",
+        "save"
+      ]
+    },
+    "runtime.types.JsonSnapshot": {
+      "enum_values": [],
+      "fields": [
+        "events",
+        "fingerprint",
+        "session_id",
+        "state",
+        "version"
+      ],
+      "methods": []
+    },
+    "runtime.types.Message": {
+      "enum_values": [],
+      "fields": [
+        "content",
+        "name",
+        "role",
+        "tool_calls"
+      ],
+      "methods": [
+        "to_dict"
+      ]
+    },
+    "runtime.types.PortError": {
+      "enum_values": [],
+      "fields": [
+        "code",
+        "message",
+        "retryable"
+      ],
+      "methods": []
+    },
+    "runtime.types.Replayed": {
+      "enum_values": [],
+      "fields": [],
+      "methods": []
+    },
+    "runtime.types.Result": {
+      "enum_values": [],
+      "fields": [
+        "data",
+        "error",
+        "ok",
+        "usage"
+      ],
+      "methods": [
+        "failure",
+        "success"
+      ]
+    },
+    "runtime.types.RunResult": {
+      "enum_values": [],
+      "fields": [
+        "error",
+        "events",
+        "output",
+        "reason",
+        "session_id",
+        "state",
+        "status"
+      ],
+      "methods": []
+    },
+    "runtime.types.RuntimeCtx": {
+      "enum_values": [],
+      "fields": [
+        "attempt",
+        "effect",
+        "invoke",
+        "meta",
+        "session_id",
+        "state",
+        "trace"
+      ],
+      "methods": []
+    },
+    "runtime.types.Session": {
+      "enum_values": [],
+      "fields": [
+        "events",
+        "program_factory",
+        "session_id",
+        "state",
+        "version"
+      ],
+      "methods": []
+    },
+    "runtime.types.StateSnapshot": {
+      "enum_values": [],
+      "fields": [
+        "budgets",
+        "last_child",
+        "last_reason",
+        "last_skill",
+        "last_step_kinds",
+        "last_tokens",
+        "last_wait_human",
+        "messages",
+        "output",
+        "scratch",
+        "version"
+      ],
+      "methods": []
+    },
+    "runtime.types.StepReport": {
+      "enum_values": [],
+      "fields": [
+        "effects",
+        "error",
+        "events",
+        "reason",
+        "results",
+        "state",
+        "status",
+        "step"
+      ],
+      "methods": []
+    },
+    "runtime.types.Usage": {
+      "enum_values": [],
+      "fields": [
+        "completion_tokens",
+        "cost_usd",
+        "prompt_tokens"
+      ],
+      "methods": []
+    }
+  },
+  "description": "R1/R2 已实现模块公共契约基线；变更须走设计稳定性门禁评审",
+  "hash": "a1599c8d0a0b17addcc0edf33fe54f18a03c2fee7e9406c9f7aa7dc923cae22a",
+  "locked_packages": [
+    "runtime",
+    "hooks"
+  ],
+  "version": "1.0"
+}
