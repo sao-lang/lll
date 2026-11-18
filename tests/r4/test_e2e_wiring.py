@@ -1,17 +1,19 @@
-"""端到端接线测试（v1.5）：R1 Runner + R2 bus.dispatch + R4 gateway.as_call 全链。
+"""端到端接线测试（ARCH-v5）：Runner → host.dispatch → 插件 → host.call(gw.as_call) → Result。
 
-证明三处断点真修好：DEGRADE 接力切端点 / before_model 真触发 / after_invoke 真 emit。
-这是"R1~R4 串起来"的可运行样板（此前只有测试里手搓 dispatch）。
+保留领域逻辑：降级切端点 / after_invoke 观察 tap / 预算软提示 / 精确缓存。
+宿主是 Host（替代旧 HookBus），降级后端用 ModelCapability.add_backend 注册。
 """
 from __future__ import annotations
 
 import asyncio
 
-from hooks import Decision, DecisionAction, HookBus, HookCtx, HookMode, LLMRequest, LLMResponse, PortCtx, Usage
-from runtime import AgentState, Effect, EffectKind, Session
+from hooks import Decision, Host, LLMRequest, LLMResponse, PortCtx, RequestScope, Signal, Usage
+from runtime import AgentState, Budgets, Effect, EffectKind, Result, Runner, Session
 
-from harness.model import InMemoryModelRegistry, ModelGateway
-from harness.resilience import BudgetGuard
+from harness.model import ModelCapability
+from harness.resilience import (
+    BudgetGuard, DegradeLadder, DegradeMode, DegradeStep, Degradation,
+)
 
 
 class FakeLLM:
@@ -32,35 +34,68 @@ class FakeLLM:
         return gen()
 
 
-class _ForceDegrade:
-    """GUARD hook：强制降级到 backup（模拟熔断打开/预算降级）。"""
-    name = "force_degrade"
-    events = ("before_invoke",)
-    mode = HookMode.GUARD
-    priority = 0
-    requires_ports: tuple[str, ...] = ()
+class _ForceBreaker:
+    """模拟熔断打开：before_invoke 报降级信号；settle 由 Degradation 选 backup。"""
 
-    async def __call__(self, ctx: HookCtx) -> Decision:
-        return Decision.degrade("backup")
+    name = "force_breaker"
+
+    def __init__(self, ladder: DegradeLadder, available: set[str]) -> None:
+        self.degradation = Degradation(ladder, available=available)
+
+    def apply(self, host: Host) -> None:
+        class Guard:
+            name = "guard"
+
+            def apply(self, h: Host) -> None:
+                h.hook("before_invoke").tap(self.name, self.check)
+
+            async def check(self, scope: RequestScope, effect) -> Decision:
+                scope.emit(Signal("degrade", "breaker_open", "primary"))
+                return Decision.degrade("")  # 占位，settle 覆盖
+
+        host.plugin(Guard()).plugin(self.degradation)
 
 
-class _EventRecorder:
-    name = "recorder"
-    events = ("before_model", "after_invoke", "invoke_error")
-    mode = HookMode.OBSERVE
-    priority = 0
-    requires_ports: tuple[str, ...] = ()
+class _AfterInvokeObserver:
+    """观察 tap：记录 host.call 写入 scope.last_result 的结果。"""
+
+    name = "after_invoke_observer"
+
+    def __init__(self) -> None:
+        self.seen: list[object] = []
+
+    def apply(self, host: Host) -> None:
+        host.hook("after_invoke").tap(self.name, self.fn)
+
+    async def fn(self, scope: RequestScope, effect) -> None:
+        self.seen.append(scope.last_result)
+
+
+class _TransformSpy:
+    """观察 transform（WATERFALL）链式改写后的文本值。"""
+
+    name = "transform_spy"
 
     def __init__(self) -> None:
         self.seen: list[str] = []
 
-    async def __call__(self, ctx: HookCtx) -> Decision:
-        self.seen.append(ctx.event)
-        return Decision.continue_()
+    def apply(self, host: Host) -> None:
+        host.hook("transform").tap(self.name, self.fn)
+
+    def fn(self, value: str, effect) -> str:
+        self.seen.append(value)
+        return value
+
+
+def _ladder() -> DegradeLadder:
+    return DegradeLadder(steps=(
+        DegradeStep(target="primary", mode=DegradeMode.REROUTE, quality=1.0),
+        DegradeStep(target="backup", mode=DegradeMode.REROUTE, quality=0.6),
+        DegradeStep(target="", mode=DegradeMode.REFUSE, quality=0.0),
+    ))
 
 
 def _program():
-    # R1 语义：yield 返回值是 Result.data（此处 as_call 回填的 dict），不是 Result 本身
     resp = yield Effect(EffectKind.LLM, {"messages": [{"role": "user", "content": "hi"}]})
     content = resp.get("content", "?") if isinstance(resp, dict) else "?"
     yield Effect(EffectKind.END, {"output": content})
@@ -68,71 +103,69 @@ def _program():
 
 class TestEndToEndWiring:
     def test_degrade_switches_endpoint_in_full_chain(self) -> None:
-        """全链：Runner → bus.dispatch(DEGRADE) → gateway.as_call → backup 实例。"""
+        """全链：Runner → host.dispatch(降级) → as_call → backup 实例，primary 零调用。"""
         primary = FakeLLM("primary")
         backup = FakeLLM("backup")
-        reg = InMemoryModelRegistry()
-        reg.register_llm("primary", primary)
-        reg.register_llm("backup", backup)
-        gw = ModelGateway(llm=primary, registry=reg)
+        cap = ModelCapability(llm=primary)
+        cap.add_backend("backup", backup)
+        gw = cap.gateway()
 
-        bus = HookBus()
-        bus.on(_ForceDegrade())  # type: ignore[arg-type]
-        from runtime import Runner
-        runner = Runner(
-            dispatch=bus.dispatch(),  # type: ignore[arg-type]
-            call=gw.as_call(),        # type: ignore[arg-type]
-            ctx_factory=bus.ctx_factory(),
-        )
-        session = Session(session_id="e2e", program_factory=lambda: _program())
+        host = Host()
+        host.plugin(_ForceBreaker(_ladder(), {"primary", "backup"})).freeze()
+
+        runner = Runner(dispatch=host.dispatch, call=host.call(gw.as_call()))  # type: ignore[arg-type]
+        session = Session(session_id="e2e-degrade", program_factory=_program)
         result = asyncio.run(runner.run(session))
-        assert result.output == "backup", f"降级未切端点，output={result.output}"
+        assert result.output == "backup", f"降级未切端点：{result.output}"
         assert backup.calls == 1 and primary.calls == 0
 
-    def test_events_emitted_in_full_chain(self) -> None:
-        """全链：before_model / after_invoke 被真实 emit（不再零触发）。"""
+    def test_after_invoke_observer_tapped_in_full_chain(self) -> None:
+        """全链：host.call 真实触发 after_invoke，观察 tap 拿到 last_result。"""
         primary = FakeLLM("primary")
-        gw = ModelGateway(llm=primary)
-        bus = HookBus()
-        rec = _EventRecorder()
-        bus.on(rec)  # type: ignore[arg-type]
-        from runtime import Runner
-        runner = Runner(
-            dispatch=bus.dispatch(),          # type: ignore[arg-type]
-            call=bus.call(gw.as_call()),      # type: ignore[arg-type]  wrapper 补 after_invoke emit
-            ctx_factory=bus.ctx_factory(),
-        )
-        session = Session(session_id="e2e-ev", program_factory=lambda: _program())
+        cap = ModelCapability(llm=primary)
+        gw = cap.gateway()
+
+        observer = _AfterInvokeObserver()
+        host = Host()
+        host.plugin(observer).freeze()
+
+        runner = Runner(dispatch=host.dispatch, call=host.call(gw.as_call()))  # type: ignore[arg-type]
+        session = Session(session_id="e2e-events", program_factory=_program)
         asyncio.run(runner.run(session))
-        assert "before_model" in rec.seen, "before_model 未 emit"
-        assert "after_invoke" in rec.seen, "after_invoke 未 emit"
+        assert len(observer.seen) == 1, "after_invoke tap 未触发"
+        last = observer.seen[0]
+        assert isinstance(last, Result) and last.ok, "after_invoke 未观察到成功的 last_result"
 
     def test_budget_guard_triggers_in_full_chain(self) -> None:
-        """BudgetGuard（TRANSFORM/before_model）在全链里真触发（此前事件零 emit 空转）。"""
+        """BudgetGuard 的 transform（WATERFALL）在全链真改写上下文文本。"""
         primary = FakeLLM("primary")
-        gw = ModelGateway(llm=primary)
-        bus = HookBus()
-        from runtime import Budgets, Runner
+        cap = ModelCapability(llm=primary)
+        gw = cap.gateway()
+
         tight = Budgets(max_turns=2, used_turns=1)  # 50% ≥ soft=0.5
-        guard = BudgetGuard(soft=0.5)
+        guard = BudgetGuard(soft=0.5, budgets=tight)
+        spy = _TransformSpy()
+        host = Host()
+        host.plugin(guard).plugin(spy).freeze()
 
-        # spy：观察 BudgetGuard 的 rewrite 是否真注入了收尾上下文
-        rewrites: list[str] = []
-        orig_check = guard.check
-        def spy_check(ctx):
-            d = orig_check(ctx)
-            if d.context_inject:
-                rewrites.append(d.context_inject)
-            return d
-        guard.check = spy_check  # type: ignore[method-assign]
-
-        bus.on(guard)  # type: ignore[arg-type]
-        runner = Runner(
-            dispatch=bus.dispatch(),  # type: ignore[arg-type]
-            call=gw.as_call(),        # type: ignore[arg-type]
-            ctx_factory=bus.ctx_factory(),
-        )
+        runner = Runner(dispatch=host.dispatch, call=host.call(gw.as_call()))  # type: ignore[arg-type]
         state = AgentState(budgets=tight)
-        session = Session(session_id="e2e-bg", program_factory=lambda: _program(), state=state)
+        session = Session(session_id="e2e-budget", program_factory=_program, state=state)
         asyncio.run(runner.run(session))
-        assert rewrites, "BudgetGuard 的 before_model 在全链里从未触发（事件仍空转）"
+        assert any("预算即将用尽" in text for text in spy.seen), \
+            "BudgetGuard 的 transform 在全链里从未注入收尾提示"
+
+    def test_exact_cache_hit_in_full_chain(self) -> None:
+        """同一请求经两个 Runner 复用同一网关：第二次缓存命中，后端只调一次。"""
+        primary = FakeLLM("primary")
+        cap = ModelCapability(llm=primary)
+        gw = cap.gateway()
+        host = Host().freeze()
+
+        runner1 = Runner(dispatch=host.dispatch, call=host.call(gw.as_call()))  # type: ignore[arg-type]
+        res1 = asyncio.run(runner1.run(Session(session_id="e2e-cache-1", program_factory=_program)))
+        runner2 = Runner(dispatch=host.dispatch, call=host.call(gw.as_call()))  # type: ignore[arg-type]
+        res2 = asyncio.run(runner2.run(Session(session_id="e2e-cache-2", program_factory=_program)))
+
+        assert res1.output == "primary" and res2.output == "primary"
+        assert primary.calls == 1, f"精确缓存未命中：后端被调用 {primary.calls} 次"

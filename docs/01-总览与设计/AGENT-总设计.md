@@ -1,10 +1,14 @@
-# Agent 框架总设计（v2.0）
+# Agent 框架总设计（v5.0）
 
 > **地位**：本文件是框架的唯一权威总设计（Single Source of Truth）。所有模块详设、实现、评测都从本文派生，冲突时以本文为准。
 > **公式**：`Agent 应用 = LLM + Harness`。Harness = 一个微内核 + 一组可插拔能力插件 + 内置架构 + 四组对外 API。
 > **主线**：唯一执行循环解释 Program 产出的 Effect；一切能力是挂在 Hook 上的插件；一切架构是插件的装配脚本；一切外部系统经契约接入。
 > **配套**：模块详设 `docs/02-模块详设/Agent/`（由本文按 R1~R13 拆分派生，每模块模块内闭环、含 API/字段/门禁）；能力全集见[《能力域全景》](./能力域全景.md)（含自查补齐内容，见附录 B.1 待办清单）。
-> **状态**：v2.0 设计定稿（提案），落地时按 R1~R13 逐模块过门禁；已实现 R1（src/runtime）、R2（src/hooks）、R3（src/harness/resilience）、R4（src/harness/model）且各有门禁，其余为设计态。
+> **状态**：v5.0 设计定稿——R2 插件宿主已按 tapable 式 Hook 原语重构（架构基线 `.workbuddy/specs/ARCH-v5.md`，唯一真相源）；R1/R2/R3/R4 已落地且各有门禁，其余为设计态。
+> **版本记录**：
+> - v5.0（2026-11-18）：**架构重构**。R2 由「HookMode 四 mode + HookBus.emit + ControlState + DEGRADER」彻底重构为 tapable 式原语——5 种 `HookKind`（`Bail`/`Waterfall`/`Loop`/`Parallel`/`Around`）+ `Host`/`RequestScope` 两层模型 + `Plugin.apply(host)`（跨调用状态由插件实例自身持有，无独立 Policy 层）。旧概念（HookMode 五泳道/四 mode、ControlState、DEGRADER、`bus.emit`、`degrade_target` 构造参数、Signal 冒泡）全部作废、不做兼容。R1 `Runner(dispatch, call, ...)` 签名与 `_settle` 四 action 消费保持不变（四模块命脉）。本次重写 §2、§3、R1、R2 章节，其余章节不变。
+> - v5.1（2026-11-18）：**参数直送回调签名**。`Hook.call(scope, effect, ...)` 把当前 `Effect` 作为请求期输入直送每个 tap（BAIL/LOOP/PARALLEL `fn(scope, effect)`；WATERFALL `fn(value, effect)`；AROUND `fn(next, scope, effect)`），装配期配置走插件构造参数私有注入；`RequestScope` 删除 `meta`，改为 typed 协作字段（`signals/target/last_result/trace/value/releases`）；R4 降级桥接由 `ctx.meta` 裸键改为 `RuntimeCtx.degrade_target` 具名字段，Effect 幂等键改为具名 `idempotency_key`。配套修复 B1（`_sticky_target` 跨 Effect 继承）、B2（`failed_target_of`）、E1~E4。
+> - v2.x：历史版本（架构已作废，不再兼容）。
 
 ---
 
@@ -51,14 +55,15 @@
 | 能力无统一层 | harness 能力散落 M4~M9，各自找挂载点 | 独立 **L1 能力插件层** |
 | API 不分层 | 应用开发者/平台/插件作者用同一套低层 API | **四组 API 面**按使用者投影 |
 
-### 1.2 六条铁律
+### 1.2 七条铁律
 
 1. **依赖只向下**：L0 不 import 任何插件/架构/API；下层永不感知上层。
-2. **唯一扩展点 = Hook**：对外只有 `bus.on()` 一个注册入口，没有 filter/pipe/middleware 三套 API。
+2. **唯一扩展点 = Hook**：宿主 `Host.define(name, kind)` 定义扩展点，插件 `Plugin.apply(host)` 经 `hook.tap()` 注册，没有 filter/pipe/middleware 三套 API。
 3. **最小内核**：能做成插件的绝不进 L0；L0 只保留"要做成插件就无法实现"的机制。
 4. **强制在内核**：预算、终止、挂起、checkpoint 在内核硬强制，不靠插件自觉。
 5. **一切外部输入不可信**：工具/检索/网页/技能正文都必须过注入检测；引用溯源不可关。
 6. **一切可插拔需四要素**：协议定义 + 默认实现 + 替换入口 + 履约校验，缺一是假可插拔。默认实现由对应能力模块提供（R4 给 LLMPort、R5 给 ToolPort……）并由装配层（R12/R13）在用户未注入时注册；内核模块只定协议不内置实现。
+7. **参数直送、公共通道只放协作数据**（v5.1）：请求期输入参数（`Effect`）经回调签名直送每个 tap，装配期配置由插件构造参数私有持有；`RequestScope` 只放框架与各插件产生/消费的协作数据，没有 `meta` 裸键容器。理由：裸键放在公共对象上，任何先执行的插件都能篡改后执行插件的输入，破坏隔离与可追溯性；直送使每个 tap 收到同一份不可变 `Effect`，构造注入使私有配置不进公共通道。
 
 ### 1.3 三层可插拔模型（框架的核心卖点）
 
@@ -99,7 +104,7 @@ flowchart TD
     end
     subgraph L0L["L0 微内核（最小接口合集）"]
         R1["核心运行时<br/>State/Effect/Program/Loop/Budget/Event"]
-        R2["插件总线<br/>Hook/Decision/HookBus/Registry/协议"]
+        R2["插件宿主<br/>HookKind×5 / Hook / Decision / Host / RequestScope / Plugin / Registry"]
     end
     OBS["横切：R10 可观测·评测·持久化<br/>Trace/Eval/Replay/Checkpoint"]
     L3 --> L2 --> L1L --> L0L
@@ -108,30 +113,47 @@ flowchart TD
 ```
 
 > **四层纪律**：L0 最小内核（能做成插件的不进内核）→ L1 能力插件（一切皆插件）→ L2 内置架构（架构即 Program 装配脚本）→ L3 四组 API（面向四类使用者的投影）。R10 观测评测与 R13 可插拔是横切关注点，不占独立层。
+> **R2 新原语（v5）**：宿主 `Host` 用 `define(name, kind)` 定义扩展点（`kind` 取 5 种 `HookKind`），插件 `apply(host)` 只 `tap`、不声明 mode/priority；请求内状态走 `RequestScope`（typed 协作字段，无 `meta`），跨调用状态由插件实例自身持有（无独立 Policy 层）。`Hook.call(scope, effect, ...)` 把 `effect` 直送每个回调，装配期配置走构造注入。R1 只认 `host.dispatch` / `host.call` 两个注入函数，不感知 R2 内部实现。
 
 ### 2.2 一次 Effect 的完整执行流（全局主干）
+
+v5 起执行流由 `Host` 编排，Runner 只保留唯一解释循环与纯函数 fold，所有判决经 `host.dispatch` 回传 R1。
 
 ```mermaid
 flowchart TD
     S["Program.yield Effect"] --> B{"预算预检<br/>内核强制"}
     B -->|超限| E["强制 END<br/>reason=BUDGET_EXCEEDED"]
-    B -->|通过| H1["HookBus.emit before_invoke<br/>guard/transform/around"]
-    H1 --> D{"Decision.action"}
-    D -->|deny/ask| X["拒绝 / 挂起"]
-    D -->|degrade/fallback| Y["换目标 / 兜底"]
-    D -->|retry| RT["重放（attempt+1, backoff, 幂等校验）"]
-    D -->|continue/rewrite| P["Port.call<br/>（唯一 IO 汇聚点）"]
-    RT --> P
-    P --> H2["HookBus.emit after_invoke<br/>observe: trace/熔断计数/成本"]
-    H2 --> F["fold 纯函数回填 State"]
-    F --> EV["append Event（事件溯源）"]
-    EV --> CK{"checkpoint 条件<br/>每N步/挂起/终态"}
+    B -->|通过| DS["host.dispatch(effect, ctx)<br/>新建 RequestScope"]
+    DS --> BI["before_invoke · BAIL<br/>killswitch/幂等/舱壁/限流/熔断拦截"]
+    BI -->|非 continue 短路| SH["Decision 直接回传 R1"]
+    BI -->|放行| TR["transform · WATERFALL<br/>预算/上下文链式改写"]
+    TR --> AR["around_invoke · AROUND<br/>retry 内 / timeout 外 包裹中心调用"]
+    AR --> CORE["中心: ctx.invoke = host.call → ModelGateway.as_call<br/>（唯一 IO 汇聚点）"]
+    CORE --> RES["得到 Result → scope.value"]
+    RES --> AI["after_invoke · PARALLEL<br/>结果记录 / 指标（观察）"]
+    CORE -.失败.-> IE["invoke_error · PARALLEL<br/>失败记录（scope 带 last_result）"]
+    AI --> ST["settle · BAIL<br/>读 scope.signals，降级插件选 target 写 scope.target"]
+    IE --> ST
+    ST --> TGT{"scope.target"}
+    TGT -->|备用后端| SW["gateway 切后端"]
+    TGT -->|refuse| RF["REFUSE 真拒答（不回退默认模型）"]
+    TGT -->|空 / continue| KEEP["保持默认后端"]
+    SW --> F
+    RF --> F
+    KEEP --> F
+    SH --> F
+    F["fold 纯函数回填 State"] --> EV["append Event（事件溯源）"]
+    EV --> CK{"checkpoint 条件<br/>每N步 / 挂起 / 终态"}
     CK -->|是| SV["store.save 快照"]
     CK -->|否| NX
     SV --> NX{"program 状态"}
     NX -->|继续| S
-    NX -->|END/wait_human| T["终态 / 挂起"]
+    NX -->|END / wait_human| T["终态 / 挂起"]
 ```
+
+> **信号与降级（v5.1）**：守卫/重试/超时检测到故障 → `scope.emit(Signal("degrade", reason, failed_target))`；`settle` 扩展点读 `scope.signals`，由降级插件（Degradation）选 target 写入 `scope.target`；Host `_settle` 把它刷新到 `ctx.degrade_target` 具名字段与 `_sticky_target`（跨 Effect 继承）→ R4 `as_call()` 从 `ctx.degrade_target` 读目标并切后端或 REFUSE 拒答；本轮结束 `scope.release_all()` 逆序释放资源。无独立 Signal 层、无 ControlState、无 `scope.meta` / `ctx.meta` 裸键桥接。
+
+---
 
 ### 2.3 四组 API 面（同一内核的四个投影）
 
@@ -153,7 +175,7 @@ flowchart TD
 | 模块 | 层 | 覆盖能力域 | 能力项数 |
 |------|----|-----------|---------|
 | R1 核心运行时 | L0 | A 执行控制（内核部分）、O 持久化（内核部分） | 10 原语 |
-| R2 插件总线与协议 | L0 | P7 插件管理、全部协议契约 | ~30 协议 |
+| R2 插件总线与协议 | L0 | P7 插件管理、全部协议契约 | 5 HookKind + Host/RequestScope + ~30 协议 |
 | R3 可靠性 | L1 | B 可靠性全域 | 11 |
 | R4 模型与推理 | L1 | C 模型推理全域 | 10 |
 | R5 工具·MCP·技能 | L1 | D 工具执行 + E 技能 | 20 |
@@ -169,15 +191,15 @@ flowchart TD
 ### 3.2 模块依赖关系
 
 ```
-R1(核心) ←—— R2(总线) ——→ 所有 L1 插件
+R1(核心) ←—— R2(Host) ——→ 所有 L1 插件（Plugin.apply）
    ↑                           │
    └───────────────────────────┘
                                 ↓
 R8(认知编排) ──→ R10(观测评测持久化) ──→ R11(集成治理)
 ```
 
-- R1 与 R2 是**双向紧耦合的内核**（R1 执行循环调用 R2 分发 Hook，R2 的 `invoke` 回调指回 R1 的 Port 调用）。
-- 所有 L1 插件只依赖 R1+R2；插件之间不直接依赖（协同通过 Hook 事件的 priority 顺序）。
+- R1 与 R2 是**双向紧耦合的内核**：R1 执行循环调用 `host.dispatch` 驱动 Hook 扩展点，`host.call` 指回 R1 注入的 Port 调用（`ctx.invoke`）；签名固定，R1 不感知 R2 内部实现。
+- 所有 L1 插件只依赖 R1+R2；插件经 `Plugin.apply(host)` 在宿主定义的扩展点上 `tap`，彼此不直接依赖——协同经 `RequestScope.signals`，跨调用状态由插件实例自身持有，而非事件优先级。
 - R10/R11 消费全框架事件，不被 L1 依赖。
 
 ---
@@ -228,8 +250,8 @@ R8(认知编排) ──→ R10(观测评测持久化) ──→ R11(集成治理
 ### R1.1 职责与边界
 
 **做**：定义三大原语（State/Effect/Program）；实现唯一解释循环与 Runner；预算硬强制；事件溯源与 checkpoint 挂点。
-**不做**：任何具体 IO（不 import LLM SDK/数据库）；Hook 分发（R2）；Port 实现（R4~R11）。
-**依赖注入**：`dispatch`（R2 的函数）、`call`（Port 函数，由 R4~R11 提供）在构造时注入——测试时注入 fake。
+**不做**：任何具体 IO（不 import LLM SDK/数据库）；Hook 编排（R2）；Port 实现（R4~R11）。
+**依赖注入**：`dispatch`（即 R2 `host.dispatch`）、`call`（Port 函数，由 R4~R11 提供）在构造时注入——测试时注入 fake。R1 只认这两个函数签名，不感知 R2 内部实现（5 种 HookKind、Host/RequestScope 全部封在 R2 内）。
 
 ### R1.2 设计架构
 
@@ -329,9 +351,11 @@ def checkpoint(session) -> JsonSnapshot: ...
 def restore_checkpoint(snapshot, program_factory) -> Session: ...
 def fingerprint(events) -> str: ...
 
-DispatchFn = Callable[[Effect, DynamicValue], Awaitable[DynamicValue]]  # R2 注入
+DispatchFn = Callable[[Effect, DynamicValue], Awaitable[DynamicValue]]  # R2 host.dispatch 注入（签名不变）
 CallFn = Callable[[Effect, DynamicValue], Awaitable[Result]]            # Port 注入
 ```
+
+> **判决消费契约（命脉，不变）**：R1 经 `dispatch` 收到 Decision 后由 `_settle` 消费 4 类终止型 action——CONTINUE 放行 / ABORT、DENY 失败 / FALLBACK 兜底值；DEGRADE 由注入的 `host.dispatch` / `host.call` 适配器消费（`scope.target` → `ctx.degrade_target` → gateway 切后端 / REFUSE 拒答），R1 内核不解释降级目标。`ctx.invoke` 注入保持不变；`_coerce_verdict` 对未知 action 回退 CONTINUE 的边界保留。RETRY 由 R2/R3 的 AROUND 扩展点实现，R1 不感知 R2 内部实现。
 
 ### R1.5 元数据与核心字段
 
@@ -356,13 +380,13 @@ CallFn = Callable[[Effect, DynamicValue], Awaitable[Result]]            # Port �
 | cost_usd / tokens | float/int | 审计与预算扣减依据 |
 | status / reason | str | running/done/suspended/error 与迁移原因 |
 
-**EffectPayload 已知键**（TypedDict total=False）：`messages/tools/model/temperature/max_tokens`（LLM）、`call/calls/call_id`（TOOL）、`budget/port`（通用）、`name/part`（SKILL）、`program_factory/program/state`（CHILD）、`question/options`（HUMAN）、`output/reason`（END）。自定义 `x-*` port 可写未声明键。
+**EffectPayload 已知键**（TypedDict total=False）：`messages/tools/model/temperature/max_tokens`（LLM）、`task_hint`（LLM 任务提示，R4 路由）、`meta`（扩展元数据容器，如 max_cost_per_call）、`call/calls/call_id`（TOOL）、`budget/port`（通用）、`name/part`（SKILL）、`program_factory/program/state`（CHILD）、`question/options`（HUMAN）、`output/reason`（END）。自定义 `x-*` port 可写未声明键。
 
 ### R1.6 可插拔契约
 
 | 注入点 | 协议 | 默认 | 入口 |
 |--------|------|------|------|
-| dispatch | DispatchFn | 无（必注入） | `Runner(dispatch=...)` |
+| dispatch | DispatchFn（R2 `host.dispatch`） | 无（必注入） | `Runner(dispatch=...)` |
 | call | CallFn | 无（必注入） | `Runner(call=...)` |
 | checkpoint 存储 | EventStore | InMemoryEventStore | `Runner(store=...)` |
 | 上下文工厂 | ctx_factory | RuntimeCtx | `Runner(ctx_factory=...)` |
@@ -386,106 +410,129 @@ CallFn = Callable[[Effect, DynamicValue], Awaitable[Result]]            # Port �
 
 ### R2.1 职责与边界
 
-**做**：定义唯一扩展点 Hook 与统一返回 Decision；实现 HookBus 编排（四种 mode、生命周期事件、Decision 合并）；Capability/Provider/Registry 抽象；全部对外协议契约。
+**做**：定义 5 种 HookKind 原语（Bail/Waterfall/Loop/Parallel/Around）与统一返回 Decision；实现 Host（define/plugin/freeze/dispatch/call）+ RequestScope 两层模型；Capability/Provider/Registry 抽象；全部对外协议契约（Port/DTO）。
 **不做**：具体能力实现（R3~R9）；执行循环（R1）。
-**核心变化**：原 middleware/hook/filter/pipe 四泳道 → 一种 Hook（mode 保留四语义）+ 一种 Decision（action 统一返回）。
+**核心变化**：原 HookBus 四 mode + DEGRADER + ControlState → 5 种 HookKind；插件不自声明 mode/priority/events，统一经 `Plugin.apply(host)` 注册；每次调用新建 `RequestScope` 承载 typed 协作字段（无 `meta`），跨调用状态由插件实例自身持有（无独立 Policy 层）。v5.1 起 `Hook.call(scope, effect, ...)` 把 `effect` 直送回调、装配期配置走构造注入（参数不进公共容器）。R1 的 `dispatch`/`call` 签名保持不变。
 
 ### R2.2 设计架构
 
-HookBus 是**单一分发管道**：按 effect.kind 选生命周期事件组 → 匹配 hook（matcher）→ 按 mode 编排执行（observe 并行隔离 / guard 串行短路 / transform 串行改写 / around 包裹）→ 合并 Decision → 交 R1 执行 action。**总线自己不碰 IO**，洋葱中心指回 R1 注入的 `invoke`。
+Host 是**唯一装配与分发入口**：`define(name, kind)` 定义扩展点并选定 kind；插件 `apply(host)` 只用 `hook.tap(name, fn)` 订阅；`freeze()` 做装配期校验；每次调用新建 RequestScope，扩展点按 kind 语义执行并写信号/目标，最终 Decision 交 R1 `_settle`。`Hook.call(scope, effect, ...)` 把 effect 作为参数直送每个 tap（BAIL/LOOP/PARALLEL `fn(scope, effect)`；WATERFALL `fn(value, effect)`；AROUND `fn(next, scope, effect)`），装配期配置由插件构造参数私有持有——公共通道只放协作数据，防止入参被任意插件篡改。总线不碰 IO，AROUND 的中心指回 R1 注入的 `call`。
+
+**5 种 HookKind 语义**：
+- **Bail**：按 tap 序执行，首个非 `None` / 非 continue 返回即停（拦截）。
+- **Waterfall**：上次返回值作下次首参，链式改写。
+- **Loop**：任一 tap 返回非 `None` 则重跑整链（带上限，防死循环）。
+- **Parallel**：`gather` 全执行、异常隔离、返回 `None`（或首个结果）。
+- **Around**：fn 收到 `next` 回调，包裹中心调用（retry 内、timeout 外）。
+
+**两层模型**：`Host` 持有扩展点与每次调用新建的 `RequestScope`（signals/target/last_result/trace/value/releases，无 `meta`）；跨调用状态由插件实例自身持有（熔断三态机在 `CircuitBreaker`、ladder+available 在 `Degradation`）；无独立 Policy 层、无 Signal 层、无 ControlState。Host 内部用 `_scope_bridge[id(ctx)]` 关联 dispatch 与 call 阶段的 scope，`_sticky_target` 承担降级目标的跨 Effect 继承。
 
 ### R2.3 流程图
 
 ```mermaid
 flowchart TD
-    E["Effect 到达 HookBus"] --> SEL["按 kind 选生命周期事件组<br/>llm→before/after_model, tool→before/after_tool"]
-    SEL --> M["matcher 过滤<br/>kind/tool/model/danger"]
-    M --> OBS["observe hooks 并行执行<br/>异常隔离，返回忽略"]
-    OBS --> G{"guard hooks 串行<br/>按 priority"}
-    G -->|deny/ask/abort| SHORT["短路：合并 Decision 返回"]
-    G -->|continue/rewrite| TR["transform hooks 串行<br/>改写 payload/context"]
-    TR --> AR{"around hooks 包裹 invoke"}
-    AR --> CORE["洋葱中心: ctx.invoke = R1.call"]
-    CORE --> RES["得到 Result"]
-    RES --> AH["after_* hooks: observe<br/>trace/熔断计数/成本"]
-    AH --> MERGE["合并 Decision + trace"]
-    SHORT --> MERGE
-    MERGE --> OUT["返回 DispatchResult/Decision 给 R1"]
+    E["host.dispatch(effect, ctx)"] --> NS["scope = host.new_scope()"]
+    NS --> BI["before_invoke · BAIL"]
+    BI -->|非 continue 短路| RET["Decision 直接回传 R1"]
+    BI -->|放行| TR["transform · WATERFALL"]
+    TR --> AR["around_invoke · AROUND<br/>fn(next) 包裹"]
+    AR --> CORE["中心: ctx.invoke = host.call → ModelGateway.as_call"]
+    CORE --> AI["after_invoke · PARALLEL 观察"]
+    CORE -.失败.-> IE["invoke_error · PARALLEL 观察<br/>scope 带 last_result"]
+    AI --> ST["settle · BAIL"]
+    IE --> ST
+    ST --> T["scope.target → gateway 切后端 / REFUSE 拒答"]
+    T --> RET
 ```
 
 ### R2.4 API 接口
 
 ```python
-class HookMode(str, Enum):
-    OBSERVE="observe"; GUARD="guard"; TRANSFORM="transform"; AROUND="around"
+class HookKind(str, Enum):
+    BAIL="bail"; WATERFALL="waterfall"; LOOP="loop"
+    PARALLEL="parallel"; AROUND="around"
 
-class DecisionAction(str, Enum):
-    CONTINUE="continue"; REWRITE="rewrite"; DENY="deny"; ASK="ask"
-    RETRY="retry"; DEGRADE="degrade"; FALLBACK="fallback"; ABORT="abort"
+class Signal:
+    kind: str          # "degrade" / "abort" / "budget" ...
+    reason: str
+    failed_target: str|None = None
 
 @dataclass(frozen=True)
 class Decision:
     action: DecisionAction
-    payload_patch: Mapping|None = None
-    context_inject: str|None = None
-    state_patch: Mapping|None = None
-    target: str|None = None
-    value: DynamicValue = None
-    retry: RetrySpec|None = None
-    reason: str = ""
+    payload_patch: Mapping|None = None; context_inject: str|None = None
+    state_patch: Mapping|None = None; target: str|None = None
+    value: DynamicValue = None; retry: RetrySpec|None = None; reason: str = ""
     @classmethod
     def continue_(cls) -> Decision: ...
     @classmethod
-    def deny(cls, reason: str) -> Decision: ...
+    def deny(cls, reason) -> Decision: ...
     @classmethod
     def rewrite(cls, *, context=None, payload=None) -> Decision: ...
 
-class Hook(Protocol):
-    name: str; events: tuple[str,...]; mode: HookMode
-    matcher: Matcher|None = None; priority: int = 100
-    requires_ports: tuple[str,...] = ()
-    async def __call__(self, ctx: HookCtx) -> Decision: ...
+class RequestScope:                      # 每次 call 新建；替代 ControlState；只放协作数据，无 meta
+    signals: list[Signal] = field(default_factory=list)
+    target: str|None = None              # settle 写入，供 R4 经 ctx.degrade_target 读取
+    last_result: Any = None              # host.call 写入本次 Result，观察插件只读
+    trace: list[str] = field(default_factory=list)
+    value: Any = None                    # settle 最终判决载体
+    releases: list[Any] = field(default_factory=list)   # 资源释放回调，Host 每轮结束逆序执行
+    def emit(self, signal: Signal) -> None: ...
+    def release_all(self) -> None: ...   # LIFO、幂等
 
-class HookBus:
-    def on(self, hook: Hook) -> Self: ...
-    def freeze(self, required_ports=()) -> Self: ...     # 装配期校验：留名/依赖/优先级
-    async def emit(self, event: str, ctx: HookCtx) -> Decision: ...
-    def ctx_factory(self) -> Callable: ...               # 注入 R1 的 ctx_factory
+class Hook:                              # 宿主定义时选定 kind；插件只 tap
+    name: str; kind: HookKind
+    def tap(self, plugin_name: str, fn: Callable[..., Awaitable[Any]|Any]) -> Hook: ...
+    async def call(self, scope: RequestScope, effect: Any = None, *args, **kwargs) -> Any: ...
+    # effect 直送回调，不进任何共享容器：
+    #   BAIL/LOOP/PARALLEL → fn(scope, effect)
+    #   WATERFALL          → fn(value, effect)
+    #   AROUND             → fn(next, scope, effect)
+
+class Plugin(Protocol):                  # 唯一扩展点：apply(host)，不自声明 mode/priority/events
+    name: str
+    def apply(self, host: Host) -> None: ...
+class Host:                              # 替代 HookBus（无 Policy 注册表）
+    hooks: dict[str, Hook]
+    def define(self, name: str, kind: HookKind) -> Hook: ...
+    def plugin(self, plugin: Plugin) -> Host: ...       # 调 plugin.apply(self)
+    def freeze(self) -> Host: ...
+    def new_scope(self) -> RequestScope: ...
+    async def dispatch(self, effect, ctx) -> Decision: ...   # R1 注入点，签名不变
+    def call(self) -> Callable: ...                          # R1 注入点，签名不变
 
 class Capability(Protocol):                              # 能力级开关
     name: str; version: str = "1.0.0"; requires: tuple[str,...] = ()
-    def install(self, bus: HookBus, reg: Registry) -> None: ...
-
+    def install(self, host: Host, reg: Registry) -> None: ...
 class Provider(Protocol):                                # 策略级契约（基）
     name: str
-
 class Registry:                                          # 注册表
     def register(self, name: str, provider: Provider) -> None: ...
-    def resolve(self, name: str) -> Provider: ...        # 缺失→HookBusError
+    def resolve(self, name: str) -> Provider: ...        # 缺失→HostError
     def replace(self, name: str, provider: Provider) -> None: ...
 ```
 
-### R2.5 生命周期事件表（元数据）
+### R2.5 扩展点清单与元数据
 
-| cadence | 事件 | 典型插件 |
-|---------|------|---------|
-| session | session_start / session_end | 记忆提炼、审计落盘、优雅关闭 |
-| turn | user_prompt / before_model / after_model / stop / stop_failure | 输入护栏、RAG 注入、结构化输出、输出护栏 |
-| context | before_compact / after_compact | 压缩策略、规则重注入 |
-| invoke | before_invoke / after_invoke / invoke_error | 重试、熔断、降级、成本、trace |
-| tool | before_tool / after_tool / tool_error | 危险路由、沙盒、审批、格式化 |
-| state | state_fold / budget_check | 软阈值收尾、状态观测 |
-| subagent | child_spawn / child_done | 并发上限、join、预算分账 |
-| external | config_change / file_change | 热更新、响应式环境 |
+宿主定义、四模块共用的 6 个扩展点：
 
-**HookCtx 核心字段**：`effect, state_view(只读), session_id, event, mount, attempt, budget_left, trace(list), meta(dict), invoke(回调)`。
-**Decision.action → R1 行为映射**：continue→继续；rewrite→改写后继续；deny→拒绝；ask→挂起；retry→重放；degrade→换目标；fallback→兜底；abort→终止。
+| 名称 | kind | 作用 |
+|------|------|------|
+| `before_invoke` | BAIL | killswitch/幂等/舱壁/限流/熔断 拦截 |
+| `transform` | WATERFALL | 预算/上下文改写 |
+| `around_invoke` | AROUND | retry/timeout 包裹真实 Port 调用（内 retry、外 timeout） |
+| `after_invoke` | PARALLEL | 观察类：结果记录、指标 |
+| `invoke_error` | PARALLEL | 观察类：失败记录（scope 带 last_result） |
+| `settle` | BAIL | 降级裁决：读 scope.signals，降级插件选 target 写 scope.target |
+
+**Decision.action → R1 行为**：continue→继续；rewrite→改写；deny→拒绝；ask→挂起；retry→重放；degrade→换目标；fallback→兜底；abort→终止。
+**Signal → 降级链**：守卫/重试/超时 → `scope.emit(Signal("degrade", reason, failed_target))`；`settle` 读 signals 由降级插件（Degradation.select）选 target 写 `scope.target` → Host `_settle` 刷新 `ctx.degrade_target` 具名字段与 `_sticky_target` → R4 `as_call()` 从 `ctx.degrade_target` 切后端或 REFUSE 真拒答；本轮结束 `scope.release_all()` 逆序释放资源。
 
 ### R2.6 可插拔契约
 
 | 注入点 | 协议 | 默认 | 入口 | 校验 |
 |--------|------|------|------|------|
-| 横切行为 | Hook | 无（按需） | `bus.on()` | 缺 name/非法 mode/缺依赖 → 拒绝 |
+| 横切行为 | Plugin.apply(host) → hook.tap | 无（按需） | `host.plugin(p)` | 缺 name/非法 kind/缺依赖 → 拒绝 |
 | 能力组件 | Capability | 各内置能力 | `.capability()` | requires 未装 → 拒绝 |
 | 策略/端口 | Provider/Port | 内置默认 | `registry.register()` | 缺方法/缺 name → 拒绝 |
 | 返回 | Decision | — | hook 返回 | retry 无幂等键 → 运行期拒绝 |
@@ -494,12 +541,12 @@ class Registry:                                          # 注册表
 
 | 门禁 | 条目 | 达标标准 | 级别 |
 |------|------|---------|------|
-| R2-G1 | 覆盖 | 四 mode × 事件组合矩阵用例全过，≥90% | G1 |
-| R2-G2 | action 语义 | 8 种 action 定义齐全；R1 当前消费 4 种（continue/deny/abort/fallback），另 4 种待 R3/R4/R9 接线 | G2 |
+| R2-G1 | 覆盖 | 5 种 HookKind × 扩展点矩阵用例全过，≥90% | G1 |
+| R2-G2 | 原语语义 | HookKind/Host/RequestScope/Signal 齐全；R1 消费 4 类终止 action，未知回退 CONTINUE | G2 |
 | R2-G2 | 隔离 | hook 抛异常不影响主流程且记 trace | G2 |
-| R2-G2 | 顺序 | 同配置 emit 顺序确定（快照测试） | G2 |
-| R2-G3 | 留名 | 一次 emit 后 trace 含全部 hook name | G3 |
-| R2-红线 | 唯一扩展点 | 代码中出现 middleware/filter/pipe 独立 API → 拒绝 | 红线 |
+| R2-G2 | 顺序 | 扩展点 tap 序确定（快照测试） | G2 |
+| R2-G3 | 留名 | 一次 dispatch 后 trace 含全部 plugin name | G3 |
+| R2-红线 | 唯一扩展点 | 出现 middleware/filter/pipe/HookMode/ControlState/DEGRADER/bus.on 独立 API → 拒绝 | 红线 |
 
 ## R3 可靠性
 
@@ -515,7 +562,7 @@ class Registry:                                          # 注册表
 
 可靠性是**五道防线叠加**，每道防不同的故障，由不同插件实现，通过事件联动：
 - 重试防瞬态错误（429/超时），熔断防持续宕机，降级给兜底出口，watchdog 防空转循环，预算+killswitch 兜住成本失控。
-- 插件顺序由 priority 保证确定性：`before_invoke`: killswitch→bulkhead→ratelimit→breaker→degrade；`invoke_error`: retry 判定→breaker 计数。
+- 插件经 `Plugin.apply(host)` 在宿主扩展点上 `tap`，执行顺序由宿主定义与 tap 注册序保证确定性：`before_invoke`(BAIL): killswitch→bulkhead→ratelimit→breaker→degrade；`invoke_error`(PARALLEL): retry 判定→breaker 计数。
 
 ### R3.3 流程图
 
@@ -584,7 +631,7 @@ class BudgetGuard(Hook):  # 软阈值 rewrite 收尾
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | DimensionKey | tuple[str,str] | (维度类型, 目标名)，如 ("provider","openai") |
-| attempt | int | 当前重试次数，HookCtx 携带 |
+| attempt | int | 当前重试次数，由 HookCtx 携带（RequestScope 不持有该字段） |
 | BreakerState.status | closed/open/half_open | 熔断三态 |
 | failure_rate | float | 滑窗内失败率，达阈值触发 open |
 | DegradeStep.quality | float | 质量分（1.0 最优 → 0.0 拒答），进 trace |
@@ -599,7 +646,7 @@ class BudgetGuard(Hook):  # 软阈值 rewrite 收尾
 | 失败分类 | FailureClassifier | 默认分类表 | code 覆盖完整 |
 | 退避策略 | RetrySpec.jitter | full | base_delay=0 且 none 拒绝 |
 | 降级阶梯 | DegradeLadder | LLM 默认阶梯 | 无拒答兜底/成环 → 拒绝 |
-| 熔断器存储 | —（共享 store） | 进程内 | 多实例部署必须共享存储 |
+| 熔断器存储 | BreakerStore（异步 load/save，R3 导出） | InMemoryBreakerStore | 缺省进程内；多实例部署注入 Redis/DB 实现 |
 
 ### R3.7 验收门禁
 
@@ -609,7 +656,7 @@ class BudgetGuard(Hook):  # 软阈值 rewrite 收尾
 | R3-G2 | 重试 | 退避区间/上限/幂等拦截/预算拦截各有用例 | G2 |
 | R3-G2 | 熔断 | 三态迁移/半开探测/样本不足不 open 各有用例 | G2 |
 | R3-G2 | 降级 | 全不可用→明确拒答；降级链成环装配期报错 | G2 |
-| R3-G3 | 协同 | 五插件按 priority 顺序执行，trace 可见 | G3 |
+| R3-G3 | 协同 | 五插件按 tap 注册顺序执行，trace 可见 | G3 |
 | R3-红线 | 幂等 | 无幂等键的副作用重试 → 拒绝 | 红线 |
 
 ---
@@ -671,6 +718,12 @@ class CacheStore(Protocol):                        # 存储工具（可换 Redis
 class CacheEmbedder(Protocol):                     # embedding（可换向量模型）
     async def embed(self, text: str) -> tuple[float, ...]: ...
 
+@runtime_checkable
+class SchemaValidator(Protocol):               # 结构化校验器协议（可注入，R4 v1.6）
+    name: str                                  # 履约校验/进 trace
+    def validate(self, value: object, schema: dict) -> list[str]: ...   # 错误列表；空=合法
+class MinimalSchemaValidator: ...              # 默认：现有最小 JSON Schema（type/required/properties/enum/minimum）
+
 @dataclass(frozen=True)
 class StructuredOutputSpec:
     schema: dict                                   # JSON Schema
@@ -699,6 +752,7 @@ class StructuredOutputSpec:
 | 路由 | ModelRouter | 规则路由 | 返回目标已注册 |
 | 缓存 | CachePort | ExactCache + SimilarityCache | 异步；收 request；可换 store/embedder |
 | 结构化输出 | StructuredOutputSpec | repair 模式 | schema 合法 |
+| 结构化校验器 | SchemaValidator | MinimalSchemaValidator | 实现 validate(value,schema)→错误列表；换实现后修复循环同步生效 |
 
 ### R4.7 验收门禁
 
@@ -1168,7 +1222,7 @@ flowchart TD
 ```python
 class Guardrail(Protocol):
     name: str; direction: Literal["input","output"]
-    def check(self, data: DynamicValue, ctx: HookCtx) -> Verdict: ...   # allow/redact/deny/ask
+    def check(self, data: DynamicValue, ctx: RequestScope) -> Verdict: ...   # allow/redact/deny/ask
 
 class InjectionDetector(Protocol):
     name: str
@@ -1371,10 +1425,12 @@ class PortRegistry:
 agent2 = Agent(arch=budget(max_cost_usd=2)(branch(intent_fn, {"qa": rag, "act": ReAct(tools)})))
 
 # A4 组件开发
-class MyGuard:
-    name="my-guard"; events=("before_model",); mode=HookMode.GUARD
-    async def __call__(self, ctx: HookCtx) -> Decision: ...
-bus.on(MyGuard())
+class MyGuard(Plugin):                       # v5：Plugin.apply(host)
+    name="my-guard"
+    def apply(self, host: Host) -> None:
+        host.hook("before_invoke").tap(self.name, self.fn)   # BAIL 扩展点
+    async def fn(self, scope: RequestScope, effect: Effect) -> Decision: ...   # effect 直送，不读 meta
+host.plugin(MyGuard())
 ```
 
 ### R11.5 元数据与核心字段
@@ -1462,8 +1518,8 @@ bus.on(MyGuard())
 
 | 组 | 协议 | 默认实现 | 用户接入 |
 |----|------|---------|---------|
-| 内核 | Hook / Decision / Capability / Provider | 内置插件 | `bus.on()` / `.capability()` |
-| 认知 | IntentStrategy / ReflectStrategy / Planner / RePlanner / Executor / Judge / ModelRouter | LLM 默认 | 构造参数 `strategy=` |
+| 内核 | HookKind / Hook / Host / Plugin / Decision / Capability / Provider | 内置插件 | `host.plugin()` / `.capability()` |
+| 认知 | IntentStrategy / ReflectStrategy / Planner / RePlanner / Executor / Judge / ModelRouter / SchemaValidator | LLM 默认 / MinimalSchemaValidator | 构造参数 `strategy=` / `validator=` |
 | RAG | Splitter / Embedder / VectorStore / Retriever / Reranker / QueryRewriter / PostProcessor | 见 R6 | `RAGPipeline(...=)` |
 | 工具 | ToolPort/@tool / MCPTransport / SkillPort / DisclosureIndex | 见 R5 | `register()` / 构造参数 |
 | Port | LLMPort / MemoryPort / StorePort / SandboxPort / TelemetryPort / HumanPort / AuditPort / EvalPort | 见各模块 | `registry.register()` |
@@ -1489,6 +1545,7 @@ bus.on(MyGuard())
 | ModelRouter | RuleRouter | `src/harness/model/router.py` | ✅ 已实现 |
 | CachePort | ExactCache + SimilarityCache | `src/harness/model/cache.py` | ✅ 已实现（异步+可换 store/embedder） |
 | StructuredOutputSpec | repair 模式 | `src/harness/model/structured.py` | ✅ 已实现 |
+| SchemaValidator | MinimalSchemaValidator | `src/harness/model/structured.py` | ✅ 已实现（v1.6，可注入） |
 | LLMPort | OpenAICompatLLM | `src/ports/adapters/llm.py` | ✅ 已实现（R4 §6.1） |
 
 ### B.1.2 待实现模块：回头实现清单 ⏳
@@ -1566,13 +1623,13 @@ bus.on(MyGuard())
 
 | 阶段 | 动作 | 兼容策略 |
 |------|------|---------|
-| P0 | R1/R2 引入 Hook/HookBus/Decision，与现有 Chains 并存 | 四泳道适配成 Hook（薄封装），老代码零改 |
+| P0 | R1/R2 引入 HookKind/Host/Decision，与现有 Chains 并存 | 旧扩展点适配成 Host 扩展点（薄封装），老代码零改 |
 | P1 | R3~R9 能力逐个改写为插件，影子双跑 + 快照对比 | 差异告警，行为一致才切换 |
 | P2 | R8 十架构迁移到"组件装配"写法 | 旧 Arch 接口保留为别名 |
 | P3 | R11 切出四组 API，装配器加 profile | 旧 Agent 门面保留为 A3 子集 |
-| P4 | 下线四泳道 API | 给足 deprecation 周期，仅移除适配层 |
+| P4 | 下线旧扩展 API | 给足 deprecation 周期，仅移除适配层 |
 
-**风险**：① Hook mode 编排顺序确定性（否则破坏 R1-G2）；② around/retry 重跑受预算与幂等约束；③ 插件不得持有会话态。
+**风险**：① Hook kind 编排顺序确定性（否则破坏 R1-G2）；② around/retry 重跑受预算与幂等约束；③ 插件不得持有会话态。
 
 ## 附录 E 全局验收总表
 
@@ -1596,7 +1653,7 @@ bus.on(MyGuard())
 |------|------|
 | Harness | 围绕模型的控制与反馈系统 = 微内核 + 能力插件 + 架构 + API |
 | Effect | Program 对外部世界的声明，只声明不执行 |
-| Hook | 唯一扩展点，带 mode 与 Decision 返回 |
+| Hook | 唯一扩展点，kind 定义调用语义，返回 Decision |
 | Decision | Hook 统一返回，action 驱动内核行为 |
 | Capability | 能力级开关（用不用） |
 | Provider | 策略级契约（用什么算法/模型） |
@@ -1607,4 +1664,4 @@ bus.on(MyGuard())
 
 ---
 
-*AGENT 总设计 v2.0 · 2026-11-17 · 唯一权威设计文档 · 配套模块详见 docs/02-模块详设/Agent/*
+*AGENT 总设计 v5.0 · 2026-11-18 · 唯一权威设计文档 · 架构基线 .workbuddy/specs/ARCH-v5.md · 配套模块详见 docs/02-模块详设/Agent/*

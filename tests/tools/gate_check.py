@@ -38,9 +38,10 @@ MODULES = {
     "r2": {
         "title": "R2 插件总线与协议", "pkg": "hooks", "path": "hooks",
         "doc": "docs/02-模块详设/Agent/R2-插件总线与协议.md", "demo": "tests/demos/demo_r2.py", "coverage": 85,
-        "symbols": ["HookBus", "Hook", "HookCtx", "HookMode", "Decision", "DecisionAction",
-                    "Registry", "Capability", "PORT_PROTOCOLS", "LLMRequest", "ToolSpec", "make_call"],
-        "behavior": ["test_verdict.py", "test_trace.py", "test_hooks.py"],
+        "symbols": ["HookKind", "Host", "RequestScope", "Signal", "HookCtx",
+                    "Decision", "DecisionAction", "Registry", "Capability", "PORT_PROTOCOLS",
+                    "LLMRequest", "ToolSpec", "make_call"],
+        "behavior": ["test_v5_primitives.py", "test_v5_wiring.py", "test_v5_call.py"],
         "integration": ["test_ports.py", "test_registry.py", "test_errors.py"],
     },
     "r3": {
@@ -49,9 +50,10 @@ MODULES = {
         "symbols": ["FailureClass", "FailureClassifier", "DimensionKey", "DEFAULT_FAILURE_TABLE",
                     "backoff_delay", "classify_failure", "normalize_code", "validate_ladder",
                     "RetryPolicy", "CircuitBreaker", "Degradation", "RateLimit", "Bulkhead",
-                    "Idempotency", "Watchdog", "KillSwitch", "BudgetGuard", "ResilienceCapability"],
+                    "Idempotency", "Watchdog", "KillSwitch", "BudgetGuard", "ResilienceCapability",
+                    "Timeout", "BreakerStore", "InMemoryBreakerStore"],
         "behavior": ["test_types.py", "test_breaker.py", "test_retry.py"],
-        "integration": ["test_degrade.py", "test_capability.py"],
+        "integration": ["test_degrade.py", "test_degrade_pipeline.py", "test_capability.py"],
     },
     "r4": {
         "title": "R4 模型与推理", "pkg": "harness.model", "path": "harness/model",
@@ -60,9 +62,11 @@ MODULES = {
                     "UsageLedger", "CostAttributor", "CostGuard", "build_cache_key",
                     "ModelRouter", "RuleRouter", "CachePort", "ExactCache",
                     "validate_json_schema", "StructuredOutputValidator",
+                    "SchemaValidator", "MinimalSchemaValidator",
                     "ModelGateway", "ModelCapability"],
         "behavior": ["test_types.py", "test_router.py", "test_structured.py", "test_cache.py"],
-        "integration": ["test_adapter.py", "test_cost.py", "test_gateway.py"],
+        "integration": ["test_adapter.py", "test_cost.py", "test_gateway.py",
+                        "test_e2e_wiring.py", "test_v5_e2e.py", "test_production_chain.py"],
     },
 }
 

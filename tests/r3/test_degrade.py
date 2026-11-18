@@ -1,7 +1,13 @@
-"""R3-T4 其余防线测试：降级 / 限流 / 舱壁 / 幂等 / watchdog / killswitch。"""
+"""R3 其余防线测试（ARCH-v5）：降级选级 / 限流令牌桶 / 舱壁池 / 幂等 / watchdog / killswitch。
+
+守卫统一返回 Decision 并可通过 RequestScope.emit(Signal) 报降级意图；
+降级选级由 Degradation.select(signals) 直接裁决（available 收缩，末级 REFUSE）。
+不再依赖 ControlState / ctx.meta / HookBus.emit / HookMode.DEGRADER。
+"""
 from __future__ import annotations
 
-from hooks import Decision, DecisionAction
+from hooks import DecisionAction, RequestScope, Signal
+from runtime import Effect, EffectKind
 
 from harness.resilience import (
     Bulkhead,
@@ -14,8 +20,9 @@ from harness.resilience import (
     RateLimit,
     Watchdog,
 )
-from runtime import Result
-from tests.r3.conftest import make_ctx, ok_result
+
+EFFECT = Effect(EffectKind.LLM, {})
+TOOL_EFFECT = Effect(EffectKind.TOOL, {})
 
 
 def _ladder() -> DegradeLadder:
@@ -27,19 +34,32 @@ def _ladder() -> DegradeLadder:
     ))
 
 
-class TestDegradation:
-    def test_all_unavailable_refuse(self) -> None:
-        """所有目标不可用→返回拒答级（FALLBACK 带 quality=0 的拒答值）。"""
-        d = Degradation(_ladder())
-        ctx = make_ctx()
-        choice = d.pick(set())
-        assert choice.mode is DegradeMode.REFUSE
-
+class TestDegradationSelection:
     def test_pick_best_available(self) -> None:
-        """选可用的最高质量级。"""
-        d = Degradation(_ladder())
-        assert d.pick({"primary", "backup"}).target == "primary"
-        assert d.pick({"backup"}).target == "backup"
+        """从可用目标集选 quality 最高的一级；无可用落 REFUSE。"""
+        plugin = Degradation(_ladder(), available={"primary", "backup"})
+        assert plugin.pick({"primary", "backup"}).target == "primary"
+        assert plugin.pick({"backup"}).target == "backup"
+        refuse = plugin.pick(set())
+        assert refuse.mode is DegradeMode.REFUSE and refuse.target == ""
+
+    def test_select_shrinks_available_step_by_step(self) -> None:
+        """按失败信号剔除 failed_target：逐级选下一级，全剔除落 REFUSE。"""
+        plugin = Degradation(_ladder(), available={"primary", "backup"})
+        # 无信号：选最优目标
+        assert plugin.select([]) == "primary"
+        # primary 失败 → 剔除 primary → 选 backup
+        one_fail = [Signal("degrade", "primary_down", "primary")]
+        assert plugin.select(one_fail) == "backup"
+        # primary + backup 都失败 → 全部剔除 → REFUSE
+        two_fail = one_fail + [Signal("degrade", "backup_down", "backup")]
+        assert plugin.select(two_fail) == DegradeMode.REFUSE.value
+
+    def test_select_ignores_non_degrade_and_unknown_failed_target(self) -> None:
+        """非 degrade 信号 / 不在 available 的 failed_target 不影响选级。"""
+        plugin = Degradation(_ladder(), available={"primary", "backup"})
+        assert plugin.select([Signal("abort", "manual")]) == "primary"
+        assert plugin.select([Signal("degrade", "ghost_down", "ghost")]) == "primary"
 
     def test_cycle_rejected_on_init(self) -> None:
         """成环阶梯装配期拒绝。"""
@@ -58,33 +78,78 @@ class TestDegradation:
 
 class TestRateLimit:
     def test_token_bucket_exhaust(self) -> None:
-        """令牌耗尽后拒绝（on_exceed=reject → DENY）。"""
+        """令牌耗尽后拒绝（on_exceed=reject → DENY，无降级信号）。"""
         rl = RateLimit(rate=60, burst=2, on_exceed="reject", clock=lambda: 0.0)
-        ctx = make_ctx()
-        assert rl.check(ctx).action is DecisionAction.CONTINUE
-        assert rl.check(ctx).action is DecisionAction.CONTINUE
-        assert rl.check(ctx).action is DecisionAction.DENY
+        scope = RequestScope()
+        assert rl.check(scope, EFFECT).action is DecisionAction.CONTINUE
+        assert rl.check(scope, EFFECT).action is DecisionAction.CONTINUE
+        assert rl.check(scope, EFFECT).action is DecisionAction.DENY
+        assert scope.signals == []
 
     def test_refill_over_time(self) -> None:
         """随时间补充令牌。"""
         now = [0.0]
         rl = RateLimit(rate=60, burst=1, on_exceed="reject", clock=lambda: now[0])
-        ctx = make_ctx()
-        assert rl.check(ctx).action is DecisionAction.CONTINUE
-        assert rl.check(ctx).action is DecisionAction.DENY
+        scope = RequestScope()
+        assert rl.check(scope, EFFECT).action is DecisionAction.CONTINUE
+        assert rl.check(scope, EFFECT).action is DecisionAction.DENY
         now[0] = 2.0  # 60/s → 2 秒补满
-        assert rl.check(ctx).action is DecisionAction.CONTINUE
+        assert rl.check(scope, EFFECT).action is DecisionAction.CONTINUE
+
+    def test_degrade_reports_intent(self) -> None:
+        """超限降级：scope 报 degrade 信号 + 占位 DEGRADE（target 由 settle 选）。"""
+        rl = RateLimit(rate=60, burst=1, on_exceed="degrade", clock=lambda: 0.0)
+        scope = RequestScope()
+        assert rl.check(scope, EFFECT).action is DecisionAction.CONTINUE  # 耗尽令牌
+        d = rl.check(scope, EFFECT)  # 超限 → DEGRADE
+        assert d.action is DecisionAction.DEGRADE
+        assert d.target == ""  # 占位，真实目标由 settle 覆盖
+        assert any(
+            s.kind == "degrade" and s.reason == "rate_limited" for s in scope.signals
+        )
+
+    def test_reject_does_not_request_degrade(self) -> None:
+        """reject 策略：DENY，不产生降级信号。"""
+        rl = RateLimit(rate=60, burst=1, on_exceed="reject", clock=lambda: 0.0)
+        scope = RequestScope()
+        rl.check(scope, EFFECT)
+        assert rl.check(scope, EFFECT).action is DecisionAction.DENY
+        assert scope.signals == []
 
 
 class TestBulkhead:
     def test_pool_limit(self) -> None:
-        """舱壁池满：拒绝新占用。"""
+        """舱壁池满：check 拒绝新占用，一轮结束统一释放后可再占。"""
+        bh = Bulkhead(pools={"default": 1}, pool="default", on_full="reject")
+        scope = RequestScope()
+        assert bh.check(scope, EFFECT).action is DecisionAction.CONTINUE  # 占槽
+        assert len(scope.releases) == 1, "check 应登记释放回调"
+        assert bh.check(scope, EFFECT).action is DecisionAction.DENY      # 池满
+        # 生产由 Host 在每轮结束统一 release_all（成功/失败/守卫短路都兜底），
+        # 测试走同一路径，不手调 release。
+        scope.release_all()
+        assert scope.releases == []
+        assert bh.check(scope, EFFECT).action is DecisionAction.CONTINUE
+
+    def test_degrade_reports_intent(self) -> None:
+        """池满降级：scope 报 degrade 信号 + 占位 DEGRADE。"""
+        bh = Bulkhead(pools={"default": 1}, on_full="degrade")
+        scope = RequestScope()
+        assert bh.check(scope, EFFECT).action is DecisionAction.CONTINUE  # 占满
+        d = bh.check(scope, EFFECT)  # 池满 → DEGRADE
+        assert d.action is DecisionAction.DEGRADE
+        assert d.target == ""
+        assert any(
+            s.kind == "degrade" and s.reason == "bulkhead_full" for s in scope.signals
+        )
+
+    def test_reject_does_not_request_degrade(self) -> None:
+        """reject 策略：DENY，不产生降级信号。"""
         bh = Bulkhead(pools={"default": 1}, on_full="reject")
-        ctx = make_ctx()
-        assert bh.acquire("default", ctx) is True
-        assert bh.acquire("default", ctx) is False
-        bh.release("default")
-        assert bh.acquire("default", ctx) is True
+        bh.check(RequestScope(), EFFECT)
+        scope = RequestScope()
+        assert bh.check(scope, EFFECT).action is DecisionAction.DENY
+        assert scope.signals == []
 
 
 class TestIdempotency:
@@ -93,6 +158,14 @@ class TestIdempotency:
         idem = Idempotency()
         assert idem.check_and_mark("k1") is False  # 首次未见过
         assert idem.check_and_mark("k1") is True   # 第二次命中
+
+    def test_check_reads_effect_idempotency_key(self) -> None:
+        """before_invoke 回调从 effect.idempotency_key 读键，重复副作用 DENY。"""
+        idem = Idempotency()
+        eff = Effect(EffectKind.TOOL, {}, idempotency_key="k1")
+        assert idem.check(RequestScope(), eff).action is DecisionAction.CONTINUE
+        d = idem.check(RequestScope(), eff)
+        assert d.action is DecisionAction.DENY
 
 
 class _DictStore:
@@ -110,40 +183,39 @@ class _DictStore:
 
 class TestWatchdog:
     def test_abab_detect(self) -> None:
-        """A-B-A-B 交替 k 次→abort。"""
-        wd = Watchdog(window=6, repeat_k=2, detect_abab=True)
-        ctx = make_ctx()
-        for kind in ("A", "B", "A", "B"):
-            d = wd.observe(kind, ctx)
-        assert d.action is DecisionAction.ABORT
+        """A-B-A-B 交替 → abort（观测 kind 由直送 effect 派生，不手填）。"""
+        wd = Watchdog(window=6, repeat_k=2, detect_abab=True, kinds={"tool", "llm"})
+        verdict = None
+        for eff in (TOOL_EFFECT, EFFECT, TOOL_EFFECT, EFFECT):
+            verdict = wd.check(RequestScope(), eff)
+        assert verdict is not None and verdict.action is DecisionAction.ABORT
 
     def test_repeat_detect(self) -> None:
-        """同一 kind 连续重复 k 次→abort。"""
-        wd = Watchdog(window=10, repeat_k=3, detect_abab=True)
-        ctx = make_ctx()
+        """同一 kind 连续重复 k 次 → abort。"""
+        wd = Watchdog(window=10, repeat_k=3, detect_abab=True, kinds={"tool"})
+        verdict = None
         for _ in range(3):
-            d = wd.observe("A", ctx)
-        assert d.action is DecisionAction.ABORT
+            verdict = wd.check(RequestScope(), TOOL_EFFECT)
+        assert verdict is not None and verdict.action is DecisionAction.ABORT
 
 
 class TestKillSwitch:
     def test_flag_set_aborts(self) -> None:
-        """标志置位→abort。"""
+        """标志置位 → abort。"""
         store = _DictStore()
         store.set("kill:session", True)
         ks = KillSwitch(flag_store=store, scope="session")
-        d = ks.check(make_ctx())
-        assert d.action is DecisionAction.ABORT
+        assert ks.check(RequestScope(), EFFECT).action is DecisionAction.ABORT
 
     def test_flag_unset_continues(self) -> None:
         store = _DictStore()
         ks = KillSwitch(flag_store=store, scope="session")
-        assert ks.check(make_ctx()).action is DecisionAction.CONTINUE
+        assert ks.check(RequestScope(), EFFECT).action is DecisionAction.CONTINUE
 
 
 class TestIdempotencyTTL:
     def test_ttl_evicts_expired_key(self) -> None:
-        """TTL 真淘汰：过期后同键视为首次（此前 ttl 只是不生效的元数据）。"""
+        """TTL 真淘汰：过期后同键视为首次。"""
         now = [1000.0]
         idem = Idempotency(ttl=60, clock=lambda: now[0])
         assert idem.check_and_mark("k") is False   # 首次

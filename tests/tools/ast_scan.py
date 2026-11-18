@@ -1,7 +1,7 @@
 """红线静态扫描（AST），按模块：python tests/tools/ast_scan.py --module r1|r2|r3|r4
 
 R1：Program 内不得有时间/随机/网络调用（破坏确定性）；纯运行时不 import random/datetime。
-R2：hook 强制留名；对外只有 bus.on() 一个注册入口，无 middleware/filter/pipe 独立 API。
+R2：hook/plugin 强制留名；对外只有 host.define()/plugin() 扩展点，无 middleware/filter/pipe 独立 API。
 R3：降级阶梯装配期强校验（无环/末级拒答）+ 副作用重试幂等键检查；能力插件不 import IO SDK。
 R4：网关必须做结构化校验（未过 schema 不进业务）+ 成本闸（路由/重试不得绕过 Budgets）。
 
@@ -97,14 +97,14 @@ def _declares_name(cls_node: ast.ClassDef) -> bool:
 
 
 def scan_r2(files: list[Path]) -> list[str]:
-    """R2 红线：hook 留名 + 唯一扩展点（无 middleware/filter/pipe 注册 API）。"""
+    """R2 红线：hook/plugin 留名 + 唯一扩展点（host.define/plugin，无 middleware/filter/pipe 注册 API）。"""
     violations: list[str] = []
-    # 检查 bus.py 强制留名
-    bus = SRC / "hooks" / "bus.py"
-    if bus.exists():
-        source = bus.read_text(encoding="utf-8")
-        if "hook must have a non-empty name" not in source:
-            violations.append("bus.on() 未强制 hook 留名")
+    # 检查 v5.py 强制 plugin 留名（Host.plugin 校验 plugin.name）
+    v5 = SRC / "hooks" / "v5.py"
+    if v5.exists():
+        source = v5.read_text(encoding="utf-8")
+        if "plugin must have a name" not in source:
+            violations.append("Host.plugin() 未强制 plugin 留名")
     # 检查对外 API 里没有 middleware/filter/pipe 的注册方法
     init = SRC / "hooks" / "__init__.py"
     if init.exists():
@@ -140,6 +140,9 @@ def _scan_coding_rules(files: list[Path], pkg: Path) -> list[str]:
     规则 6：ctx.meta / effect.payload 的动态读取只允许在 _ctxview.py 边界模块；
             插件内出现 .meta.get/.payload.get/getattr 即违规（除非上一行有
             "规则 6 例外" 注释，用于鸭子插件装配期容错）。
+    v5.1 补充：RequestScope 已无 meta 容器（请求期参数经回调直送 effect、装配期配置走
+            构造注入），插件内 .meta.get 一律视为旧裸键残留；effect 具名字段
+            （如 idempotency_key）不在此列。判定逻辑不变，仍按上述 AST 特征扫描。
     """
     violations: list[str] = []
     for path in files:
@@ -242,7 +245,10 @@ def scan_r4(files: list[Path]) -> list[str]:
     gateway = pkg / "gateway.py"
     if gateway.exists():
         text = gateway.read_text(encoding="utf-8")
-        if "validate_json_schema" not in text or "repair exhausted" not in text:
+        # v1.6：校验入口可为模块级 validate_json_schema（旧）或注入校验器的 .check()
+        # （SchemaValidator 可插拔）；两者任一 + 超次拒答即满足红线。
+        has_validation = "validate_json_schema" in text or "_validator.check(" in text
+        if not has_validation or "repair exhausted" not in text:
             violations.append("ModelGateway 未做结构化校验/超次拒答（非法输出可能进业务）")
         if "_record_cost" not in text or "CostGuard" not in text:
             violations.append("ModelGateway 未做成本归因/成本闸（可能绕过 Budgets）")

@@ -55,8 +55,8 @@ __all__ = [
     "SandboxPort",
     "SkillPort",
     "StorePort",
-    "TelemetryPort",
     "TelemetryExporter",
+    "TelemetryPort",
     "ToolPort",
 ]
 

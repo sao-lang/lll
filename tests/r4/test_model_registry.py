@@ -1,15 +1,19 @@
-"""R4 降级/路由链测试（v1.5）：端点注册表 + router 真调用 + DEGRADE 切端点。
+"""R4 降级/路由链测试（ARCH-v5）：端点注册表 + router 真调用 + 降级切端点。
 
-修复三处断点：DEGRADE 无消费者 / _router 空转 / 无模型名→端点注册。
-用 fake LLMPort 验证按端点实例切换（不发真 HTTP）。
+v5 契约：gateway.as_call() 从 ctx.degrade_target（具名桥接字段，Host 从 scope.target
+写入）读降级目标；REFUSE 直接产出 Result.failure("REFUSED")，零后端调用；
+未注册目标抛错，绝不静默回退。
 """
 from __future__ import annotations
 
 import asyncio
 
-from hooks import LLMPort, LLMRequest, LLMResponse, PortCtx, Usage
+import pytest
 
-from harness.model import InMemoryModelRegistry, ModelGateway, ModelRegistry
+from hooks import HookCtx, LLMPort, LLMRequest, LLMResponse, PortCtx, Usage
+from runtime import AgentState, Effect, EffectKind
+
+from harness.model import InMemoryModelRegistry, ModelGateway, ModelRegistry, RouteDecision
 from tests.r4.conftest import pctx, req
 
 
@@ -35,15 +39,30 @@ class FakeLLM:
 class SpyRouter:
     """记录 route 是否真被调用（验证 _router 不再空转）。"""
     name = "spy_router"
-    calls = 0
 
     def __init__(self, target: str) -> None:
         self.target = target
+        self.calls = 0
 
     def route(self, effect: object, ctx: object) -> object:
-        from harness.model import RouteDecision
         self.calls += 1
         return RouteDecision(model=self.target, reason="spy")
+
+
+def _ctx(*, target: str | None = None) -> HookCtx:
+    """构造上下文；target 为 None 时不写降级桥接字段。"""
+    ctx = HookCtx(
+        effect=Effect(EffectKind.LLM, {"messages": [{"role": "user", "content": "hi"}]}),
+        state=AgentState(), session_id="s-r4", event="before_invoke",
+    )
+    if target is not None:
+        # Host 在 settle 阶段把 scope.target 写入 ctx.degrade_target；测试直接置位模拟
+        ctx.degrade_target = target
+    return ctx
+
+
+def _effect() -> Effect:
+    return Effect(EffectKind.LLM, {"messages": [{"role": "user", "content": "hi"}]})
 
 
 class TestModelRegistry:
@@ -57,6 +76,13 @@ class TestModelRegistry:
     def test_resolve_missing_returns_none(self) -> None:
         assert InMemoryModelRegistry().resolve("nope") is None
 
+    def test_register_llm_resolves_instance(self) -> None:
+        llm = FakeLLM("primary")
+        reg = InMemoryModelRegistry()
+        reg.register_llm("primary", llm)
+        assert reg.resolve_llm("primary") is llm
+        assert reg.resolve_llm("nope") is None
+
     def test_implements_protocol(self) -> None:
         assert isinstance(InMemoryModelRegistry(), ModelRegistry)
 
@@ -68,8 +94,8 @@ class TestRouterActuallyCalled:
         asyncio.run(gw.complete(req(), pctx()))
         assert spy.calls >= 1, "router.route 从未被调用（_router 空转未修复）"
 
-    def test_gateway_without_registry_keeps_behavior(self) -> None:
-        """兼容：无注册表时仍用默认 llm，行为与旧版一致。"""
+    def test_gateway_without_registry_uses_default(self) -> None:
+        """无降级目标时仍用默认 llm（未传 registry 的兼容行为）。"""
         llm = FakeLLM("default")
         gw = ModelGateway(llm=llm)
         r = asyncio.run(gw.complete(req(), pctx()))
@@ -84,27 +110,24 @@ class TestDegradeTargetSwitchesEndpoint:
         reg.register_llm("primary", primary)
         reg.register_llm("backup", backup)
         gw = ModelGateway(llm=primary, registry=reg)
-        # 降级目标为 backup：gateway 应切到 backup 实例
         r = asyncio.run(gw.complete(req(), pctx(), degrade_target="backup"))
-        assert r.content == "backup", "DEGRADE target 未切到备用端点"
+        assert r.content == "backup", "降级 target 未切到备用端点"
         assert backup.calls == 1 and primary.calls == 0
 
-    def test_unknown_target_falls_back(self) -> None:
-        """端点未注册时回退默认后端（不崩、进 trace）。"""
+    def test_unknown_target_raises_no_silent_fallback(self) -> None:
+        """未注册降级目标抛错，绝不静默回退默认模型（ARCH-v5 红线）。"""
         primary = FakeLLM("primary")
         reg = InMemoryModelRegistry()
         reg.register_llm("primary", primary)
         gw = ModelGateway(llm=primary, registry=reg)
-        r = asyncio.run(gw.complete(req(), pctx(), degrade_target="ghost"))
-        assert r.content == "primary" and primary.calls == 1
+        with pytest.raises(ValueError, match="not registered"):
+            asyncio.run(gw.complete(req(), pctx(), degrade_target="ghost"))
+        assert primary.calls == 0
 
 
 class TestGatewayAsCallAdapter:
-    def test_as_call_reads_degrade_target_from_ctx(self) -> None:
-        """gateway.as_call() 从 ctx.meta 读 bus.dispatch 写入的 degrade_target 并切端点。"""
-        from hooks import HookCtx
-        from runtime import AgentState, Effect, EffectKind
-
+    def test_as_call_reads_target_from_scope_bridge(self) -> None:
+        """as_call 从 ctx.degrade_target 读降级目标并切到注册后端。"""
         primary = FakeLLM("primary")
         backup = FakeLLM("backup")
         reg = InMemoryModelRegistry()
@@ -112,13 +135,31 @@ class TestGatewayAsCallAdapter:
         reg.register_llm("backup", backup)
         gw = ModelGateway(llm=primary, registry=reg)
 
-        ctx = HookCtx(
-            effect=Effect(EffectKind.LLM, {"messages": [{"role": "user", "content": "hi"}]}),
-            state=AgentState(), session_id="s", event="before_invoke",
-        )
-        ctx.meta["degrade_target"] = "backup"  # bus.dispatch() 写入的接力字段
-        result = asyncio.run(gw.as_call()(
-            Effect(EffectKind.LLM, {"messages": [{"role": "user", "content": "hi"}]}), ctx
-        ))
+        result = asyncio.run(gw.as_call()(_effect(), _ctx(target="backup")))
         assert result.ok and result.data["content"] == "backup"
         assert backup.calls == 1 and primary.calls == 0
+
+    def test_as_call_refuse_fails_without_backend_call(self) -> None:
+        """scope.target='refuse' → Result.failure('REFUSED')，零后端调用、零回退。"""
+        primary = FakeLLM("primary")
+        backup = FakeLLM("backup")
+        reg = InMemoryModelRegistry()
+        reg.register_llm("primary", primary)
+        reg.register_llm("backup", backup)
+        gw = ModelGateway(llm=primary, registry=reg)
+
+        result = asyncio.run(gw.as_call()(_effect(), _ctx(target="refuse")))
+        assert not result.ok
+        assert result.error is not None and result.error.code == "REFUSED"
+        assert primary.calls == 0 and backup.calls == 0
+
+    def test_as_call_without_bridge_uses_default(self) -> None:
+        """未桥接 scope 时无降级目标：走默认后端。"""
+        primary = FakeLLM("primary")
+        reg = InMemoryModelRegistry()
+        reg.register_llm("primary", primary)
+        gw = ModelGateway(llm=primary, registry=reg)
+
+        result = asyncio.run(gw.as_call()(_effect(), _ctx()))
+        assert result.ok and result.data["content"] == "primary"
+        assert primary.calls == 1

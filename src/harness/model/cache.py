@@ -18,15 +18,19 @@ from __future__ import annotations
 import json
 import math
 from difflib import SequenceMatcher
-from typing import Protocol, runtime_checkable
+from typing import Protocol, TypedDict, cast, runtime_checkable
 
 from hooks import LLMRequest, LLMResponse
 
 from .types import build_cache_key
 
 __all__ = [
-    "CachePort", "ExactCache", "SimilarityCache",
-    "CacheStore", "InMemoryCacheStore", "CacheEmbedder",
+    "CacheEmbedder",
+    "CachePort",
+    "CacheStore",
+    "ExactCache",
+    "InMemoryCacheStore",
+    "SimilarityCache",
 ]
 
 
@@ -163,6 +167,26 @@ def _cosine(a: tuple[float, ...], b: tuple[float, ...]) -> float:
 _ROLE_KEY, _CONTENT_KEY, _USER_ROLE = "role", "content", "user"
 
 
+class _SemanticCacheEntry(TypedDict):
+    """语义缓存条目的持久化结构（规则 4：明确字段显式声明）。
+
+    text: 归一化后的查询原文。vec: 可选 embedding 向量（无 embedder 时为 None）。
+    resp: LLMResponse 的 JSON 字符串（跨存储工具只认字符串，序列化在缓存层完成）。
+    """
+
+    text: str
+    vec: list[float] | None
+    resp: str
+
+
+def _parse_entry(raw: str) -> _SemanticCacheEntry | None:
+    """把存储工具的 JSON 字符串解析为条目视图；非法 JSON 返回 None。"""
+    try:
+        return cast(_SemanticCacheEntry, json.loads(raw))
+    except json.JSONDecodeError:
+        return None
+
+
 def _query_text(request: LLMRequest) -> str:
     """提取用于相似度匹配的文本（最后一条 user 消息，无则拼全部 content）。"""
     user_texts = [
@@ -276,20 +300,18 @@ class SimilarityCache:
         """按相似度找最匹配条目；≥ threshold 才命中。"""
         query = _query_text(request)
         q_vec = await self._vector_of(query)
-        # 有向量时按向量匹配；否则按文本。
-        # 条目格式：JSON {text, vec, resp_json}
+        # 条目结构见 _SemanticCacheEntry（text/vec/resp 明确字段）。
         prefix = _store_key("semantic", version, "")
         best: LLMResponse | None = None
         best_score = 0.0
         for _key, raw in await self._store.scan(prefix):
-            try:
-                entry = json.loads(raw)
-            except json.JSONDecodeError:
+            entry = _parse_entry(raw)
+            if entry is None:
                 continue
-            if q_vec is not None and entry.get("vec") is not None:
+            if q_vec is not None and entry["vec"] is not None:
                 score = _cosine(q_vec, tuple(entry["vec"]))
             else:
-                score = SequenceMatcher(None, query, entry.get("text", "")).ratio()
+                score = SequenceMatcher(None, query, entry["text"]).ratio()
             if score > best_score:
                 best_score = score
                 best = LLMResponse.model_validate_json(entry["resp"])
@@ -303,7 +325,7 @@ class SimilarityCache:
         """写入条目（原文 + 可选向量 + 响应 JSON）到存储工具。"""
         query = _query_text(request)
         vec = await self._vector_of(query)
-        entry = {
+        entry: _SemanticCacheEntry = {
             "text": query,
             "vec": list(vec) if vec is not None else None,
             "resp": resp.model_dump_json(),
@@ -322,13 +344,12 @@ class SimilarityCache:
         q_vec = await self._vector_of(query)
         prefix = _store_key("semantic", version, "")
         for key, raw in await self._store.scan(prefix):
-            try:
-                entry = json.loads(raw)
-            except json.JSONDecodeError:
+            entry = _parse_entry(raw)
+            if entry is None:
                 continue
-            if q_vec is not None and entry.get("vec") is not None:
+            if q_vec is not None and entry["vec"] is not None:
                 score = _cosine(q_vec, tuple(entry["vec"]))
             else:
-                score = SequenceMatcher(None, query, entry.get("text", "")).ratio()
+                score = SequenceMatcher(None, query, entry["text"]).ratio()
             if score >= self._threshold:
                 await self._store.delete(key)

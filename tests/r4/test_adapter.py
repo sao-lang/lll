@@ -73,15 +73,16 @@ async def _collect(it) -> list[str]:
 class TestModelCapability:
     """能力装配：llm/router/cache 注册进 Registry，gateway() 构造网关。"""
 
-    def test_install_registers_providers(self) -> None:
-        from hooks import HookBus
-
+    def test_add_backend_registers_degrade_target(self) -> None:
+        """v5：降级目标后端通过 add_backend 注册到 ModelRegistry。"""
         cap = ModelCapability(llm=RecordingLLM([resp("x")]))
-        bus = HookBus()
-        cap.install(bus)
-        assert bus.registry.has("llm")
-        assert bus.registry.has("model_router")
-        assert bus.registry.has("model_cache")
+        backup = RecordingLLM([resp("backup")])
+        cap.add_backend("backup", backup)
+        gw = cap.gateway()
+        out = asyncio.run(gw.complete(
+            LLMRequest(), pctx(), degrade_target="backup"
+        ))
+        assert out.content == "backup"
 
     def test_gateway_factory(self) -> None:
         cap = ModelCapability(llm=RecordingLLM([resp("x")]))
@@ -89,3 +90,23 @@ class TestModelCapability:
         assert isinstance(gw, ModelGateway)
         out = asyncio.run(gw.complete(LLMRequest(), pctx()))
         assert out.content == "x"
+
+    def test_gateway_factory_passes_validator(self) -> None:
+        """能力装配路径也要透传注入校验器（注入点打通 ModelCapability → ModelGateway）。"""
+        from harness.model import StructuredOutputSpec
+        from tests.r4.conftest import req, sample_schema
+
+        class AlwaysOkValidator:
+            name = "always-ok"
+
+            def validate(self, value: object, schema: dict) -> list[str]:
+                return []  # 放行一切；内置校验器会拒（缺 name）
+
+        llm = RecordingLLM([resp('{"age": -1}')])
+        spec = StructuredOutputSpec(schema=sample_schema(), mode="repair", max_repair=2)
+        cap = ModelCapability(llm=llm, spec=spec, validator=AlwaysOkValidator())
+        gw = cap.gateway()
+        out = asyncio.run(gw.complete(req(), pctx()))
+        assert out.content == '{"age": -1}'
+        assert gw._validator.schema_validator.name == "always-ok"  # 注入的校验器确实装配上
+        assert llm.call_count == 1  # 若未透传（用内置校验器）会触发修复 → 2 次

@@ -19,7 +19,7 @@ from enum import Enum
 from random import Random
 from typing import Protocol, runtime_checkable
 
-from hooks import HookCtx, RetrySpec
+from hooks import RetrySpec
 from runtime import Result
 
 __all__ = [
@@ -128,6 +128,7 @@ _CODE_ALIASES: Mapping[str, str] = {
     "DEADLINE_EXCEEDED": "TIMEOUT",
     "CONN_RESET": "CONN_RESET",
     "CONNECTION_RESET": "CONN_RESET",
+    "NETWORK_ERROR": "CONN_RESET",
     "400": "BAD_REQUEST",
     "401": "UNAUTHORIZED",
     "403": "FORBIDDEN",
@@ -182,11 +183,11 @@ class FailureClassifier(Protocol):
 
     name: str
 
-    def classify(self, result: Result, ctx: HookCtx) -> FailureClass:
+    def classify(self, result: Result, ctx: object) -> FailureClass:
         """对一次 Port 结果分类；异常由调用方折叠，不抛穿。
 
-        ctx 用 HookCtx（对齐 R3 设计 §4）：分类器可选读取 effect/state/trace 做上下文相关分类。
-        R3 本就依赖 R2（分层纪律允许），无需放宽为 object。
+        ctx 是可选上下文（ARCH-v5 里传 RequestScope）；
+        分类器可鸭子读取，但默认表只依赖 result.error。
         """
         ...
 
@@ -196,7 +197,7 @@ class _DefaultClassifier:
 
     name = "default_failure"
 
-    def classify(self, result: Result, ctx: HookCtx) -> FailureClass:
+    def classify(self, result: Result, ctx: object) -> FailureClass:
         """成功→终态；失败→查表；未知码按确定性错误（不重试、不计熔断）。"""
         if result.ok:
             return _SUCCESS_CLASS
@@ -212,12 +213,12 @@ class _DefaultClassifier:
 
 
 def classify_failure(
-    result: Result, ctx: HookCtx, *, classifier: FailureClassifier | None = None
+    result: Result, ctx: object, *, classifier: FailureClassifier | None = None
 ) -> FailureClass:
     """统一分类入口：注入自定义分类器则委托，否则用默认表。
 
     参数：
-        result: 待分类的 Port 结果。ctx: HookCtx（分类器可选读取）。
+        result: 待分类的 Port 结果。ctx: 可选上下文（鸭子读取）。
         classifier: 自定义分类器；None 用内置默认。
     返回：
         FailureClass 分类结论。

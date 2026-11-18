@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
 
-from harness._ctxview import as_port_ctx, coerce_port_ctx, read_meta
+from harness._ctxview import as_port_ctx, coerce_port_ctx
 from hooks import (
     LLMPort,
     LLMRequest,
@@ -23,7 +23,7 @@ from .cache import CachePort, ExactCache
 from .registry import ModelRegistry
 from .router import NO_DEFAULT, ModelRouter, RuleRouter
 from .stream import has_stream_events, wrap_text_stream
-from .structured import StructuredOutputValidator, validate_json_schema
+from .structured import SchemaValidator, StructuredOutputValidator
 from .types import (
     CostAttributor,
     CostGuard,
@@ -33,6 +33,9 @@ from .types import (
 
 __all__ = ["ModelGateway"]
 
+# R4 本地拒绝目标常量（规则 5）：值与 R3 DegradeMode.REFUSE 对齐，
+# 但网关不依赖 R3，故在本层用具名常量替代魔法串，比较时右侧是常量名而非字符串字面量。
+REFUSE_TARGET = "refuse"
 
 
 class ModelGateway:
@@ -49,6 +52,7 @@ class ModelGateway:
         router: ModelRouter | None = None,
         cache: CachePort | None = None,
         spec: StructuredOutputSpec | None = None,
+        validator: SchemaValidator | None = None,
         prompt_version: str = "v1",
         cost_guard: CostGuard | None = None,
         registry: ModelRegistry | None = None,
@@ -60,6 +64,8 @@ class ModelGateway:
             router: 路由策略（缺省规则路由）——complete 时真调用，不再空转。
             cache: 缓存（缺省精确缓存）。
             spec: 结构化输出规格（None 表示不校验）。
+            validator: 注入的结构化校验器（None 用 MinimalSchemaValidator）；
+                仅在 spec 非空时生效，替换后校验与修复循环用同一实现。
             prompt_version: prompt 版本（进缓存键）。cost_guard: 成本硬闸。
             registry: 模型端点注册表（缺省 None=仅默认后端，兼容旧行为）。
         """
@@ -68,7 +74,7 @@ class ModelGateway:
         self._cache = cache if cache is not None else ExactCache()
         self._registry = registry
         self._spec = spec
-        self._validator = StructuredOutputValidator(spec) if spec else None
+        self._validator = StructuredOutputValidator(spec, validator=validator) if spec else None
         self._prompt_version = prompt_version
         self._cost_guard = cost_guard
         self.ledger = CostAttributor()
@@ -88,10 +94,14 @@ class ModelGateway:
             - router 总是被调用（修复 _router 空转），路由理由进 ctx.meta 供 trace。
             - 注册表缺省（None）时 router 仍调用但不切实例——兼容旧行为。
         """
-        # 构造 router 需要的最小 Effect（R4 内部适配，task_hint 来自请求 model 覆盖）
+        # 构造 router 需要的 Effect：task_hint 来自请求（E4 修复，原来恒空导致路由空转）
         effect = Effect(
             kind=EffectKind.LLM,
-            payload={"messages": [dict(m) for m in request.messages], "model": request.model or ""},
+            payload={
+                "messages": [dict(m) for m in request.messages],
+                "model": request.model or "",
+                "task_hint": request.task_hint or "",
+            },
         )
         decision = self._router.route(effect, ctx)
         target = degrade_target or (decision.model if decision.model and decision.model != NO_DEFAULT else None)
@@ -102,28 +112,36 @@ class ModelGateway:
             return self._llm
         resolved = self._registry.resolve_llm(target)
         if resolved is None:
-            return self._llm  # 未注册：回退默认，不崩
+            # 降级目标必须可解析；静默回退默认模型会让熔断/降级形同虚设（ARCH-v5 红线）。
+            raise ValueError(f"degrade target not registered: {target!r}")
         return resolved
 
     def as_call(self) -> Callable[[Effect, object], object]:
-        """给 R1 Runner 的 call 适配器：Effect→LLMRequest→complete→Result（v1.5 降级接力）。
+        """给 R1 Runner 的 call 适配器：Effect→LLMRequest→complete→Result。
 
-        返回：
-            (effect, ctx) → Result 的异步回调（注入 Runner(call=...)）。
-        降级接力：
-            从 ctx.meta 读 bus.dispatch() 写入的 degrade_target，传给 complete 切端点；
-            无该字段时走正常路由。ctx 用鸭子读取（gateway 不依赖 R2 的 HookCtx 类型）。
+        ARCH-v5 降级接力：从 ctx.degrade_target（typed 具名桥接字段，Host 写入）读目标，
+        REFUSE → 真拒答 Result.failure("REFUSED")，绝不调后端、绝不回退默认模型。
         """
         async def adapter(effect: Effect, ctx: object) -> Result:
+            # 规则 6 例外：degrade_target 是 RuntimeCtx 的声明字段（具名桥接，非裸 meta key），
+            # 鸭子读取兼容测试用简单 ctx。
+            target = getattr(ctx, "degrade_target", None)
+
+            if target == REFUSE_TARGET:
+                # 拒答优先于一切：不解析、不缓存、不调用后端。
+                return Result.failure("REFUSED", "degraded to refusal; no backend invoked")
+
             payload = effect.payload
             request = LLMRequest(
                 messages=list(payload.get("messages", [])),
                 model=str(payload.get("model") or "") or None,
+                task_hint=str(payload.get("task_hint") or "") or None,
             )
             port_ctx = as_port_ctx(ctx)
-            degrade_target = read_meta(ctx, "degrade_target")
-            response = await self.complete(request, port_ctx, degrade_target=degrade_target)
-            # usage 已由 complete() 内部 _record_cost 记账；此处只回填到 data 供上层读取
+            response = await self.complete(request, port_ctx, degrade_target=target)
+            # 后端错误（E3）：折叠为失败 Result，让 R3 的重试/熔断/降级能看到。
+            if response.error:
+                return Result.failure(response.error.split(":")[0], response.error)
             return Result.success({
                 "content": response.content,
                 "tool_calls": response.tool_calls,
@@ -154,10 +172,18 @@ class ModelGateway:
 
         llm = self._resolve_llm(request, ctx, degrade_target=degrade_target)
         response = await llm.complete(request, ctx)
+        if response.error:
+            return response  # 失败响应不校验、不缓存、照实记账（usage 为零）
         self._record_cost(response, ctx)
 
         if self._validator is not None:
-            response = await self._complete_with_repair(response, request, ctx, llm=llm)
+            # E6：按 spec.mode 决定是否修复；constrained/prompt 模式只校验不修复。
+            if self._validator.should_repair:
+                response = await self._complete_with_repair(response, request, ctx, llm=llm)
+            elif self._spec is not None and self._spec.strict:
+                errors = self._validator.check(response.content or "")
+                if errors:
+                    raise ValueError(f"structured output invalid (strict): {errors}")
 
         await self._cache.put(request, response, version=self._prompt_version)
         return response
@@ -230,7 +256,7 @@ class ModelGateway:
         # 后端有 stream_events 直接用；旧后端用帮助函数把文本流包成事件流。
         # 规则 6 例外：stream_events 是可选能力探测（具名固定字符串），不在 LLMPort 强制协议内。
         if has_stream_events(llm):
-            stream_events_fn = getattr(llm, "stream_events")
+            stream_events_fn = getattr(llm, "stream_events")  # noqa: B009
             source = stream_events_fn(request, ctx)
         else:
             source = wrap_text_stream(llm, request, ctx)
@@ -290,7 +316,8 @@ class ModelGateway:
         spec = self._spec
         current = response
         for _ in range(self._validator.max_repair + 1):
-            errors = validate_json_schema(current.content or "", spec.json_schema)
+            # 走 validator 持有的校验器（默认或注入），保证"校验"与"修复"同一口径。
+            errors = self._validator.check(current.content or "")
             if not errors:
                 return current
             repair_prompt = self._validator.build_repair_prompt(current.content or "", errors)

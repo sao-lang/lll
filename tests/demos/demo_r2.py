@@ -1,84 +1,168 @@
-"""R2 独立 demo：四 mode 编排 / 8 action / 留名 / 异常隔离 / 与 R1 集成。"""
+"""R2 独立 demo：5 种 HookKind + Host.define/plugin/freeze + RequestScope。
+
+插件只实现 apply(host) 把回调挂到宿主定义的扩展点上；宿主选定 Bail /
+Waterfall / Loop / Parallel / Around 语义；每次调用各用一个独立 RequestScope。
+"""
+from __future__ import annotations
+
 import asyncio
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from runtime import (
-    AgentState, Effect, EffectKind, Result, Runner, Session,
+from hooks import (  # noqa: E402
+    Decision, DecisionAction, HookCtx, HookKind, Host, RequestScope, Signal,
 )
-from hooks import (
-    Decision, DecisionAction, HookBus, HookMode, HookCtx, Registry,
-    LLMRequest, LLMResponse, Usage,
-)
+from runtime import AgentState, Effect, EffectKind  # noqa: E402
 
 
-class AuditHook:
-    """observe：审计留痕。"""
-    name = "audit"; events = ("before_invoke", "after_invoke"); mode = HookMode.OBSERVE
-    priority = 1; requires_ports = ()
-    def __init__(self): self.seen = []
-    async def __call__(self, ctx):
-        self.seen.append(ctx.event); return Decision.continue_()
+class DemoPlugin:
+    """一个插件在 apply 中把回调挂到五类扩展点。"""
 
+    name = "r2_demo"
 
-class GuardHook:
-    """guard：拦截危险调用。"""
-    name = "guard"; events = ("before_invoke",); mode = HookMode.GUARD
-    priority = 10; requires_ports = ()
-    async def __call__(self, ctx):
-        if "danger" in str(ctx.effect.payload.get("call")):
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+        self.attempt_n = 0
+
+    def apply(self, host: Host) -> None:
+        host.hook("guard").tap(self.name, self.guard)
+        host.hook("guard").tap(self.name + "_late", self.never)
+        host.hook("rewrite").tap(self.name, self.append_a)
+        host.hook("rewrite").tap(self.name + "_2", self.append_b)
+        host.hook("looper").tap(self.name, self.attempt)
+        host.hook("observe").tap(self.name, self.observe_a)
+        host.hook("observe").tap(self.name + "_2", self.observe_b)
+        host.hook("wrap").tap(self.name, self.outer)
+        host.hook("wrap").tap(self.name + "_2", self.inner)
+
+    async def guard(self, scope: RequestScope, effect: Effect) -> Decision | None:
+        self.calls.append("guard")
+        if effect.payload.get("block"):
             return Decision.deny("blocked")
+        return None
+
+    async def never(self, scope: RequestScope, effect: Effect) -> Decision | None:
+        self.calls.append("never")
+        return None
+
+    def append_a(self, value: str, effect: Effect) -> str:
+        self.calls.append("a")
+        return value + "A"
+
+    def append_b(self, value: str, effect: Effect) -> str:
+        self.calls.append("b")
+        return value + "B"
+
+    def attempt(self, scope: RequestScope, effect: Effect) -> str | None:
+        self.attempt_n += 1
+        self.calls.append(f"attempt{self.attempt_n}")
+        return "again" if self.attempt_n < 3 else None
+
+    async def observe_a(self, scope: RequestScope, effect: Effect) -> None:
+        self.calls.append("observe_a")
+        if effect.payload.get("raise"):
+            raise RuntimeError("observe failure isolated")
+
+    async def observe_b(self, scope: RequestScope, effect: Effect) -> None:
+        self.calls.append("observe_b")
+
+    async def outer(self, nxt: object, scope: RequestScope, effect: Effect) -> object:
+        self.calls.append("outer-in")
+        result = await nxt()  # type: ignore[operator]
+        self.calls.append("outer-out")
+        return result
+
+    async def inner(self, nxt: object, scope: RequestScope, effect: Effect) -> object:
+        self.calls.append("inner-in")
+        result = await nxt()  # type: ignore[operator]
+        self.calls.append("inner-out")
+        return result
+
+
+class DispatchGuard:
+    """挂载标准 before_invoke（BAIL），演示 R1 注入点。"""
+
+    name = "r2_dispatch_guard"
+
+    def apply(self, host: Host) -> None:
+        host.hook("before_invoke").tap(self.name, self.check)
+
+    async def check(self, scope: RequestScope, effect: Effect) -> Decision:
+        return Decision.deny("dispatch_blocked")
+
+
+async def main() -> None:
+    host = Host()
+    host.define("guard", HookKind.BAIL)
+    host.define("rewrite", HookKind.WATERFALL)
+    host.define("looper", HookKind.LOOP, max_loops=5)
+    host.define("observe", HookKind.PARALLEL)
+    host.define("wrap", HookKind.AROUND)
+    demo = DemoPlugin()
+    host.plugin(demo).plugin(DispatchGuard()).freeze()
+    eff = Effect(EffectKind.LLM, {})
+
+    # 1) Bail：首个非 CONTINUE 判决短路，后续 tap 不执行
+    guard_scope = host.new_scope()
+    blocked = Effect(EffectKind.LLM, {"block": True})
+    verdict = await host.hook("guard").call(guard_scope, blocked)
+    assert verdict is not None and verdict.action is DecisionAction.DENY
+    assert "never" not in demo.calls
+
+    # 2) Waterfall：上次返回值作下次首参（WATERFALL 签名为 call(scope, effect, value)）
+    rewritten = await host.hook("rewrite").call(host.new_scope(), eff, "")
+    assert rewritten == "AB"
+
+    # 3) Loop：非 None 返回则重跑整链，None 收尾
+    loop_scope = host.new_scope()
+    assert await host.hook("looper").call(loop_scope, eff) is None
+    assert demo.attempt_n == 3
+
+    # 4) Parallel：全部执行且异常隔离，返回 None
+    demo.calls.clear()
+    parallel_scope = host.new_scope()
+    raise_eff = Effect(EffectKind.LLM, {"raise": True})
+    assert await host.hook("observe").call(parallel_scope, raise_eff) is None
+    assert "observe_a" in demo.calls and "observe_b" in demo.calls
+
+    # 5) Around：tap 收到 next 回调，中心只执行一次（洋葱顺序）
+    demo.calls.clear()
+
+    async def core(scope: RequestScope) -> Decision:
+        demo.calls.append("core")
         return Decision.continue_()
 
+    around = await host.hook("wrap").call(host.new_scope(), eff, core=core)
+    assert around is not None and around.action is DecisionAction.CONTINUE
+    assert demo.calls == [
+        "outer-in", "inner-in", "core", "inner-out", "outer-out",
+    ]
 
-class ContextHook:
-    """transform：注入上下文。"""
-    name = "context"; events = ("before_model",); mode = HookMode.TRANSFORM
-    priority = 20; requires_ports = ()
-    async def __call__(self, ctx):
-        return Decision.rewrite(context="injected")
+    # 6) RequestScope：每次 new_scope 独立，信号不串联
+    s1 = host.new_scope()
+    s2 = host.new_scope()
+    s1.emit(Signal("degrade", "boom"))
+    assert s1.signals == [Signal("degrade", "boom")] and s2.signals == []
 
+    # 7) R1 注入点：dispatch 判决 + scope 桥接供 call 阶段读取
+    effect = Effect(EffectKind.LLM, {"messages": []})
+    ctx = HookCtx(
+        effect=effect, state=AgentState(), session_id="r2", event="before_invoke"
+    )
+    dispatched = await host.dispatch(effect, ctx)
+    assert dispatched.action is DecisionAction.DENY
 
-async def main():
-    bus = HookBus()
-    audit = AuditHook()
-    bus.on(audit).on(GuardHook()).on(ContextHook())
-    bus.registry.register("tool", type("T", (), {"name": "tool"})())
-    bus.registry.register("llm", type("L", (), {"name": "llm"})())
-    bus.freeze()
+    # 健康 dispatch 保留 scope 桥接，供 call 阶段读取（R3→R4 接力）
+    healthy = Host().freeze()
+    healthy_ctx = HookCtx(
+        effect=effect, state=AgentState(), session_id="r2-ok", event="before_invoke"
+    )
+    await healthy.dispatch(effect, healthy_ctx)
+    assert isinstance(healthy.scope_of(healthy_ctx), RequestScope)
 
-    # guard deny
-    ctx = HookCtx(effect=Effect(EffectKind.TOOL, {"call": "danger_x"}),
-                  state=AgentState(), session_id="s", event="before_invoke")
-    d = await bus.emit("before_invoke", ctx)
-    assert d.action is DecisionAction.DENY
-
-    # transform
-    ctx2 = HookCtx(effect=Effect(EffectKind.LLM, {"messages": []}),
-                   state=AgentState(), session_id="s", event="before_model")
-    d2 = await bus.emit("before_model", ctx2)
-    assert d2.action is DecisionAction.REWRITE
-    assert ctx2.meta["injected_context"] == ["injected"]
-
-    # 与 R1 集成
-    async def dispatch(effect, c: HookCtx):
-        await bus.emit("before_invoke", c)
-        return None
-    async def call(effect, c):
-        if effect.kind is EffectKind.LLM:
-            return Result.success({"content": "ok", "tool_calls": []})
-        return Result.success(None)
-    def program(state):
-        resp = yield Effect(EffectKind.LLM, {"messages": []})
-        yield Effect(EffectKind.END, {"output": resp["content"]})
-    runner = Runner(dispatch=dispatch, call=call, ctx_factory=bus.ctx_factory())
-    session = Session(session_id="int", program_factory=lambda: program(AgentState()))
-    result = await runner.run(session)
-    assert result.status == "done"
-
-    print("[R2] PASS: 四 mode 编排 / 8 action / 留名 / 异常隔离 / 与 R1 集成")
+    print("[R2] PASS: 5 种 HookKind 语义 / define+plugin+freeze / RequestScope 隔离 / R1 注入")
 
 
 asyncio.run(main())

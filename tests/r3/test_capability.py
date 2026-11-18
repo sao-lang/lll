@@ -1,138 +1,147 @@
-"""R3-T5 能力装配与 R1 集成测试：五道防线按 priority 装车 + 全栈 dispatch。
+"""R3 能力装配测试（ARCH-v5）：ResilienceCapability.install(host) 把插件 tap 到宿主扩展点。
 
-关键集成断言：around 中心 invoke 拿到 Result 后，bus 不得再次调用真实 Port
-（否则副作用执行两次）——这处 RED 会驱动 bus.py 的短路修复。
+v5 契约：插件只实现 apply(host)，不自声明 mode/priority/events；装配顺序即
+宿主扩展点内的 tap 顺序。断言对象是 host 的 hook().names，
+不再检查旧的 hooks() 排序 / HookMode / priority。
 """
 from __future__ import annotations
 
 import asyncio
 
-from hooks import Decision, DecisionAction, HookBus, HookCtx, HookMode
+import pytest
 
-from harness.resilience import DegradeLadder, DegradeMode, DegradeStep, Degradation, ResilienceCapability, RetryPolicy
-from runtime import AgentState, Effect, EffectKind, Result, Session
-from tests.r3.conftest import err_result, make_ctx, ok_result
+from hooks import DecisionAction, Host, RequestScope
+
+from harness.resilience import (
+    BudgetGuard,
+    Bulkhead,
+    CircuitBreaker,
+    DegradeLadder,
+    DegradeMode,
+    DegradeStep,
+    Degradation,
+    Idempotency,
+    KillSwitch,
+    RateLimit,
+    ResilienceCapability,
+    RetryPolicy,
+    Timeout,
+    Watchdog,
+)
+
+
+def _ladder() -> DegradeLadder:
+    return DegradeLadder(steps=(
+        DegradeStep(target="primary", mode=DegradeMode.REROUTE, quality=1.0),
+        DegradeStep(target="backup", mode=DegradeMode.REROUTE, quality=0.6),
+        DegradeStep(target="", mode=DegradeMode.REFUSE, quality=0.0),
+    ))
 
 
 class TestCapabilityAssembly:
-    def test_hooks_sorted_by_priority(self) -> None:
-        """装配后的 hook 列表按 priority 升序（确定性 trace）。"""
+    def test_no_args_installs_nothing(self) -> None:
+        """opt-in 装配：不传任何插件 → 所有扩展点零 tap。"""
         cap = ResilienceCapability()
-        hooks = cap.hooks()
-        priorities = [getattr(h, "priority", 100) for h in hooks]
-        assert priorities == sorted(priorities)
-        names = [h.name for h in hooks]
-        assert "r3_retry" in names
-        assert "r3_breaker" in names
+        assert cap.plugins() == ()
+        host = cap.install(Host())
+        for name in ("before_invoke", "transform", "around_invoke",
+                     "after_invoke", "invoke_error", "settle"):
+            assert host.hook(name).names == ()
 
-    def test_install_to_bus(self) -> None:
-        """install(bus) 把全部插件挂到总线，freeze 不报缺 port。"""
-        bus = HookBus()
-        cap = ResilienceCapability()
-        cap.install(bus)
-        bus.freeze()  # 不抛异常即通过
-        assert len(bus._hooks["before_invoke"]) > 0
+    def test_explicit_builtin_instances_tapped_by_name(self) -> None:
+        """只装传入的插件，host 对应扩展点 tap 对应插件名。"""
+        cap = ResilienceCapability(killswitch=KillSwitch(flag_store={}), retry=RetryPolicy())
+        host = cap.install(Host())
+        assert "r3_killswitch" in host.hook("before_invoke").names
+        assert "r3_retry" in host.hook("around_invoke").names
+        assert "r3_breaker" not in host.hook("before_invoke").names  # 没传就不装
+        assert "r3_degrade" not in host.hook("settle").names
+
+    def test_all_extension_points_tapped(self) -> None:
+        """全插件装配：每个扩展点 tap 到预期插件名，顺序即装配顺序。"""
+        cap = ResilienceCapability(
+            killswitch=KillSwitch(flag_store={}),
+            watchdog=Watchdog(),
+            idempotency=Idempotency(),
+            bulkhead=Bulkhead(),
+            rate_limit=RateLimit(),
+            breaker=CircuitBreaker(),
+            retry=RetryPolicy(),
+            timeout=Timeout(),
+            degradation=Degradation(_ladder()),
+            budget_guard=BudgetGuard(),
+        )
+        host = Host()
+        assert cap.install(host) is host  # 链式返回同一 host
+        assert set(host.hook("before_invoke").names) == {
+            "r3_killswitch", "r3_watchdog", "r3_idempotency",
+            "r3_bulkhead", "r3_ratelimit", "r3_breaker",
+        }
+        assert host.hook("around_invoke").names == ("r3_retry", "r3_timeout")
+        assert host.hook("settle").names == ("r3_degrade",)
+        assert host.hook("transform").names == ("r3_budgetguard",)
+        assert "r3_breaker" in host.hook("after_invoke").names
+        assert "r3_breaker" in host.hook("invoke_error").names
+        host.freeze()  # 装配完整，冻结不抛异常
 
     def test_guard_chain_short_circuit_trace(self) -> None:
-        """GUARD 短路：killswitch 置位时 trace 记录留名。"""
-        cap = ResilienceCapability()
-        hooks = cap.hooks()
-        kill = next(h for h in hooks if h.name == "r3_killswitch")
+        """killswitch 置位时 before_invoke 的 BAIL tap 直接 ABORT。"""
+        kill = KillSwitch(flag_store={})
+        host = ResilienceCapability(killswitch=kill).install(Host()).freeze()
+        scope = host.new_scope()
+        assert asyncio.run(host.hook("before_invoke").call(scope)) is None  # 健康放行
         kill.flag_store["kill:session"] = True
-        ctx = make_ctx()
-        d = kill.check(ctx)
-        assert d.action is DecisionAction.ABORT
-        assert any("killswitch" in t for t in ctx.trace) or True  # trace 细节由插件自记
+        d = asyncio.run(host.hook("before_invoke").call(scope))
+        assert d is not None and d.action is DecisionAction.ABORT
 
 
-class TestAroundSingleInvoke:
-    """回归：around 插件内部调用 next 拿到 Result 后，bus 不得二次调用真实 Port。"""
-
-    def test_around_value_short_circuits(self) -> None:
-        """retry 插件在洋葱内重试后回填 Result，core chain 只应调用 invoke 一次最终结果。"""
-        real_calls = [0]
-
-        async def fake_invoke(effect: Effect, ctx: HookCtx) -> Result:
-            real_calls[0] += 1
-            return ok_result({"n": real_calls[0]})
-
-        bus = HookBus()
-
-        # 一个 AROUND hook：内部调 next 一次，把 Result 装进 continue+value 返回。
-        class InnerHook:
-            name = "inner"
-            events = ("before_invoke",)
-            mode = HookMode.AROUND
-            priority = 50
-            requires_ports: tuple[str, ...] = ()
-
-            async def __call__(self, ctx: HookCtx) -> Decision:
-                verdict = await ctx.meta["next"]()  # 调一次中心
-                return Decision(action=DecisionAction.CONTINUE, value=verdict.value)
-
-        bus.on(InnerHook())
-        ctx = make_ctx()
-        ctx.invoke = fake_invoke
-        verdict = asyncio.run(bus.emit("before_invoke", ctx))
-        # 中心只被调一次；若 bus 在 continue+value 后又调 nxt()，real_calls 会变 2。
-        assert real_calls[0] == 1, f"Port invoked {real_calls[0]} times (expected 1)"
-        assert isinstance(verdict.value, Result)
-
-
-class TestR1Integration:
-    """全栈：Runner + bus + ResilienceCapability 端到端 dispatch。"""
-
-    def test_full_stack_dispatch(self) -> None:
-        """Runner 跑一个 LLM program，经 bus 放行，拿到 output。"""
-        bus = HookBus()
-        ResilienceCapability().install(bus)
-        bus.freeze()
-
-        calls = [0]
-
-        async def fake_invoke(effect: Effect, ctx: HookCtx) -> Result:
-            calls[0] += 1
-            return ok_result("answer")
-
-        async def dispatch(effect: Effect, ctx: HookCtx) -> Decision:
-            return await bus.emit("before_invoke", ctx)
-
-        from runtime import Runner
-
-        def program():
-            resp = yield Effect(EffectKind.LLM, {"messages": []})
-            yield Effect(EffectKind.END, {"output": resp.get("data") if isinstance(resp, dict) else resp})
-
-        # Runner 需要 call（Port 调用）——用 fake_invoke；ctx_factory 用 bus 的。
-        runner = Runner(dispatch=dispatch, call=fake_invoke, ctx_factory=bus.ctx_factory())
-        session = Session(session_id="s-full", program_factory=lambda: program())
-        result = asyncio.run(runner.run(session))
-        assert result.output == "answer"
-
-
-class TestCustomDegradationAndBudgetGuard:
-    """Degradation / BudgetGuard 可注入（补齐与其余 7 插件的对称性）。"""
-
+class TestCustomPlugins:
     def test_custom_degradation_injected(self) -> None:
-        """注入自定义 Degradation 实例，hooks() 应原样返回该实例。"""
-        ladder = DegradeLadder(steps=(
-            DegradeStep(target="custom", mode=DegradeMode.REROUTE, quality=1.0),
-            DegradeStep(target="", mode=DegradeMode.REFUSE, quality=0.0),
-        ))
-        custom = Degradation(ladder)
-        cap = ResilienceCapability(degradation=custom)
-        hooks = cap.hooks()
-        assert any(h is custom for h in hooks), "自定义 Degradation 未被装配"
+        """注入自定义 Degradation 实例：tap 用其插件名。"""
+        class CustomDegradation(Degradation):
+            name = "custom_degrade"
+
+        custom = CustomDegradation(_ladder())
+        host = ResilienceCapability(degradation=custom).install(Host())
+        assert host.hook("settle").names == ("custom_degrade",)
 
     def test_custom_budget_guard_injected(self) -> None:
-        """注入自定义 BudgetGuard（如改 soft 阈值），hooks() 应原样返回。"""
-        from harness.resilience import BudgetGuard
+        """注入自定义 BudgetGuard（如改 soft 阈值）：tap 到 transform。"""
         custom = BudgetGuard(soft=0.5)
-        cap = ResilienceCapability(budget_guard=custom)
-        hooks = cap.hooks()
-        assert any(h is custom for h in hooks), "自定义 BudgetGuard 未被装配"
+        host = ResilienceCapability(budget_guard=custom).install(Host())
+        assert host.hook("transform").names == ("r3_budgetguard",)
+        assert custom in ResilienceCapability(budget_guard=custom).plugins()
 
-    def test_defaults_still_present(self) -> None:
-        """不注入时仍有默认 Degradation / BudgetGuard（行为不变）。"""
-        names = [h.name for h in ResilienceCapability().hooks()]
-        assert "r3_degrade" in names and "r3_budgetguard" in names
+    def test_no_args_installs_no_defaults(self) -> None:
+        """不传即空：不隐式装默认插件。"""
+        assert ResilienceCapability().plugins() == ()
+
+
+class TestExtraPlugins:
+    class _CustomPlugin:
+        name = "custom_audit"
+
+        def apply(self, host: Host) -> None:
+            host.hook("before_invoke").tap(self.name, self.fn)
+
+        async def fn(self, scope: RequestScope) -> None:
+            return None
+
+    def test_extra_plugin_reaches_host(self) -> None:
+        """extra_plugins 注入任意插件：install 后 tap 到对应扩展点。"""
+        host = ResilienceCapability(extra_plugins=(self._CustomPlugin(),)).install(Host())
+        assert "custom_audit" in host.hook("before_invoke").names
+
+    def test_extra_plugin_in_plugins(self) -> None:
+        """extra_plugins 原样进 plugins()。"""
+        custom = self._CustomPlugin()
+        assert custom in ResilienceCapability(extra_plugins=(custom,)).plugins()
+
+    def test_extra_plugin_without_name_rejected(self) -> None:
+        """履约校验：无 name 的插件在装配期被拒绝。"""
+        class NoName:
+            def apply(self, host: Host) -> None:
+                return None
+
+        with pytest.raises(ValueError, match="name"):
+            ResilienceCapability(extra_plugins=(NoName(),))

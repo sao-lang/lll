@@ -217,10 +217,10 @@ class Runner:
         """装配 Runner：dispatch（上层判决）与 call（Port 调用）为必注入函数。
 
         参数：
-            dispatch: 链路判决函数（R2 HookBus.emit），返回 Decision 或 None。
+            dispatch: 链路判决函数（R2 Host.dispatch），返回 Decision 或 None。
             call: Port 调用函数；dispatch 放行时真正执行外部副作用。
             store: checkpoint 存储；缺省用 InMemoryEventStore。
-            ctx_factory: 上下文工厂；缺省构造 RuntimeCtx。上层可换成 HookCtx。
+            ctx_factory: 上下文工厂；缺省构造 RuntimeCtx。上层可换成带 meta 的上下文（R2 桥接 RequestScope）。
             checkpoint_every: 每 N 步落一次快照（终态总是落），最小强制为 1。
             max_steps: 单 run 的步数硬上限，防止死循环。
             cancellation: 取消令牌；缺省不取消。子 Agent 派生时继承同一令牌（A5 递归传播）。
@@ -295,7 +295,7 @@ class Runner:
         """给上下文注入 invoke 回调，让链路洋葱中心能调用 Port call。
 
         参数：
-            ctx: 上下文对象（RuntimeCtx 或 HookCtx），其 invoke 字段被覆写。
+            ctx: 上下文对象（RuntimeCtx 或带 meta 的超集），其 invoke 字段被覆写。
             runner: 提供 call 的 Runner 实例（用闭包绑定）。
         返回：
             注入 invoke 后的同一上下文对象（原地设置字段）。

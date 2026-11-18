@@ -80,6 +80,43 @@ class TestGatewayStructured:
         r = asyncio.run(gw.complete(req(), pctx()))
         assert r.content == '{"age": -1}'
 
+    def test_repair_loop_uses_injected_validator(self) -> None:
+        """注入校验器在修复循环里也生效——校验与修复同一口径（v1.6 关键点）。"""
+        class AlwaysOkValidator:
+            name = "always-ok"
+            calls = 0
+
+            def validate(self, value: object, schema: dict) -> list[str]:
+                type(self).calls += 1
+                return []  # 放行一切，包括内置规则会拒的输出
+
+        # 第一次输出内置会拒（缺 name + age<0），但注入校验器放行 → 不应触发修复
+        llm = RecordingLLM([resp('{"age": -1}')])
+        spec = StructuredOutputSpec(schema=sample_schema(), mode="repair", max_repair=2)
+        gw = ModelGateway(llm=llm, spec=spec, validator=AlwaysOkValidator())
+        r = asyncio.run(gw.complete(req(), pctx()))
+        assert r.content == '{"age": -1}'
+        assert llm.call_count == 1  # 若修复循环仍用全局校验器，这里会是 2（触发修复）
+        assert AlwaysOkValidator.calls >= 1  # 注入校验器确实被调用
+
+    def test_repair_loop_injected_validator_rejects(self) -> None:
+        """注入校验器拒绝合法输出时，修复循环据此重试（判定权在注入方）。"""
+        class AlwaysRejectValidator:
+            name = "always-reject"
+
+            def validate(self, value: object, schema: dict) -> list[str]:
+                return ["injected: reject"]
+
+        llm = RecordingLLM([
+            resp('{"name": "Alice"}'),  # 内置会判合法，但注入校验器拒绝
+            resp('{"name": "Bob"}'),
+        ])
+        spec = StructuredOutputSpec(schema=sample_schema(), mode="repair", max_repair=1, strict=False)
+        gw = ModelGateway(llm=llm, spec=spec, validator=AlwaysRejectValidator())
+        asyncio.run(gw.complete(req(), pctx()))
+        # 注入校验器两次都拒 → 触发修复重试；若修复循环误用全局校验器（会判合法）则只调 1 次
+        assert llm.call_count > 1
+
 
 class TestGatewayCostGuard:
     def test_cost_guard_blocks(self) -> None:

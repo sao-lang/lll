@@ -1,50 +1,43 @@
-"""R3 BudgetGuard 测试：软预算阈值 rewrite 收尾提示（设计 §4 声明，v2.1 落地）。"""
+"""R3 BudgetGuard 测试（ARCH-v5）：WATERFALL 回调 rewrite(value, effect) 直接返回改写文本。
+
+领域逻辑：任一预算维度达软阈值时，在上下文文本尾部注入收尾提示；
+未达阈值（含未注入预算投影）原样返回。预算投影经构造参数 budgets 注入。
+"""
 from __future__ import annotations
 
-from hooks import Decision, DecisionAction, HookCtx, HookMode
-from runtime import Budgets
+from runtime import Budgets, Effect, EffectKind
 
 from harness.resilience import BudgetGuard
-from tests.r3.conftest import make_ctx
 
-
-def _ctx_with_budget(used: int, maximum: int) -> HookCtx:
-    ctx = make_ctx()
-    ctx.budget_left = Budgets(max_turns=maximum, used_turns=used)
-    return ctx
+HINT = "预算即将用尽，请收敛并给出最终答案，不要开启新任务。"
+EFFECT = Effect(EffectKind.LLM, {})
 
 
 class TestBudgetGuard:
-    def test_below_threshold_continues(self) -> None:
-        guard = BudgetGuard(soft=0.8)
-        d = guard.check(_ctx_with_budget(used=2, maximum=10))  # 20% < 80%
-        assert d.action is DecisionAction.CONTINUE
+    def test_below_threshold_no_rewrite(self) -> None:
+        """20% < 80%：不改写，原样返回文本。"""
+        guard = BudgetGuard(soft=0.8, budgets=Budgets(max_turns=10, used_turns=2))
+        assert guard.rewrite("上下文正文", EFFECT) == "上下文正文"
 
     def test_at_soft_threshold_rewrites(self) -> None:
-        guard = BudgetGuard(soft=0.8)
-        d = guard.check(_ctx_with_budget(used=8, maximum=10))  # 80% ≥ 80%
-        assert d.action is DecisionAction.REWRITE
-        assert d.context_inject and "预算" in d.context_inject
+        """80% ≥ 80%：在文本尾部追加收尾提示。"""
+        guard = BudgetGuard(soft=0.8, budgets=Budgets(max_turns=10, used_turns=8))
+        out = guard.rewrite("上下文正文", EFFECT)
+        assert out.startswith("上下文正文\n")
+        assert HINT in out
 
-    def test_no_budget_projection_continues(self) -> None:
-        """budget_left 缺省 None（未注入预算投影）→ 放行，不误触发。"""
-        guard = BudgetGuard()
-        d = guard.check(make_ctx())
-        assert d.action is DecisionAction.CONTINUE
+    def test_no_budget_projection_no_rewrite(self) -> None:
+        """budgets 未注入（None）：无信息，不误触发改写。"""
+        assert BudgetGuard().rewrite("上下文正文", EFFECT) == "上下文正文"
 
     def test_cost_dimension_considered(self) -> None:
-        """成本维度达软阈值也触发（多维预算任一达线即收尾）。"""
-        ctx = make_ctx()
-        ctx.budget_left = Budgets(max_cost_usd=10.0, used_cost_usd=9.0)  # 90%
-        d = BudgetGuard(soft=0.8).check(ctx)
-        assert d.action is DecisionAction.REWRITE
+        """成本维度达软阈值也触发（六维任一达线即收尾）。"""
+        guard = BudgetGuard(
+            soft=0.8, budgets=Budgets(max_cost_usd=10.0, used_cost_usd=9.0),
+        )
+        assert HINT in guard.rewrite("上下文正文", EFFECT)
 
-    def test_hook_contract(self) -> None:
-        """符合 Hook 契约：name/events/mode 齐备，TRANSFORM（rewrite 生效需 transform mode）。"""
-        guard = BudgetGuard()
-        assert guard.name and "before_model" in guard.events
-        assert guard.mode is HookMode.TRANSFORM
-
-    def test_is_hook(self) -> None:
-        from hooks import Hook
-        assert isinstance(BudgetGuard(), Hook)
+    def test_empty_value_yields_hint_only(self) -> None:
+        """空文本达阈值：直接返回收尾提示，不产生多余换行。"""
+        guard = BudgetGuard(soft=0.8, budgets=Budgets(max_turns=10, used_turns=8))
+        assert guard.rewrite("", EFFECT) == HINT

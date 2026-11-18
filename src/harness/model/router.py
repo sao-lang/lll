@@ -2,14 +2,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import Protocol, TypedDict, cast, runtime_checkable
 
 from hooks import PortCtx
-from runtime import DynamicValue, Effect
+from runtime import Effect
 
 from .types import RouteDecision
 
-__all__ = ["ModelRouter", "RuleRouter", "NO_DEFAULT"]
+__all__ = ["NO_DEFAULT", "ModelRouter", "RuleRouter"]
 
 NO_DEFAULT = "default"
 _NO_DEFAULT = NO_DEFAULT  # 内部兼容别名
@@ -32,9 +32,19 @@ class ModelRouter(Protocol):
         ...
 
 
+class _RouteMeta(TypedDict, total=False):
+    """LLM Effect 的 payload.meta 里 R4 路由消费的明确字段（规则 4）。
+
+    meta 容器本身已在 R1 的 EffectPayload 声明为 dict[str, DynamicValue]；
+    其中被本模块读取的键在此具名声明，避免裸字符串动态取值。
+    """
+
+    max_cost_per_call: float
+
+
 @dataclass(frozen=True, slots=True)
 class _RouteInput:
-    """路由输入的具名视图（规则 6：payload 动态字段一次读取成具名视图）。
+    """路由输入的具名视图（规则 6：payload 字段读取成具名视图）。
 
     字段：
         task_hint: 任务类型提示（如 code/chat）。
@@ -46,22 +56,23 @@ class _RouteInput:
 
 
 def _coerce_route(effect: Effect) -> _RouteInput:
-    """唯一的 payload 动态读取边界：task_hint 与 meta.max_cost_per_call。
+    """从已声明字段读取路由输入，归名为具名视图（规则 4/6）。
 
-    effect.payload 的 task_hint/meta 是 R4 约定的扩展键（不在 R1 EffectPayload
-    已知键全集内），形态由装配层决定，故在此一次读取并归名为具名视图（规则 6）。
+    task_hint 与 meta 已在 R1 EffectPayload 声明；max_cost_per_call 在本文件
+    _RouteMeta 声明。形态不合法时显式回退空提示/无成本约束（规则 5 显式回退）。
 
     参数：
         effect: 待路由的 LLM Effect。
     返回：
-        _RouteInput 具名视图；未知形态显式回退空提示/无成本约束。
+        _RouteInput 具名视图。
     """
-    payload: DynamicValue = effect.payload
-    hint = str(payload.get("task_hint") or "")
-    raw_meta: DynamicValue = payload.get("meta")
+    # 规则 6 例外：task_hint/meta 已在 R1 EffectPayload 声明为明确字段，
+    # 此处是类型化读取（.get 安全取可选键），非未声明动态键；形态回退见下方。
+    hint = str(effect.payload.get("task_hint") or "")
+    raw_meta = cast(_RouteMeta | None, effect.payload.get("meta"))
     max_cost: float | None = None
-    if isinstance(raw_meta, dict):
-        raw_budget: DynamicValue = raw_meta.get("max_cost_per_call")
+    if raw_meta is not None:
+        raw_budget = raw_meta.get("max_cost_per_call")
         if isinstance(raw_budget, (int, float)) and not isinstance(raw_budget, bool):
             max_cost = float(raw_budget)
     return _RouteInput(task_hint=hint, max_cost=max_cost)

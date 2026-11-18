@@ -136,10 +136,18 @@ class OpenAICompatLLM:
                 usage=usage,
                 model=str(data.get("model", self._model)) if isinstance(data, dict) else self._model,
             )
-        except Exception:
-            # 错误折叠：不抛裸异常（Port 契约），usage 如实为零（不造假账单）。
+        except httpx.HTTPStatusError as exc:
+            # HTTP 错误：折叠为带 error 的 LLMResponse（不抛裸异常），R3 据此重试/熔断。
+            # code 用纯 HTTP 状态码（如 "500"），与 R3 normalize_code(^5\d\d$) 对齐。
+            code = str(exc.response.status_code)
             self.last_usage = Usage()
-            return LLMResponse(content="", tool_calls=[], usage=Usage(), model=self._model)
+            return LLMResponse(content="", tool_calls=[], usage=Usage(),
+                               model=self._model, error=f"{code}: {exc}")
+        except Exception as exc:
+            # 网络/解析错误：归一到 "NETWORK_ERROR" 语义族（可重试、可熔断）。
+            self.last_usage = Usage()
+            return LLMResponse(content="", tool_calls=[], usage=Usage(),
+                               model=self._model, error=f"NETWORK_ERROR: {exc}")
 
     def stream(self, req: LLMRequest, ctx: PortCtx) -> AsyncIterator[str]:
         """流式补全：逐块解析 SSE data 行的 delta.content；末块 usage 写 last_usage。

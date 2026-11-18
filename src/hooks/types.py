@@ -1,9 +1,7 @@
-"""R2 插件总线核心类型：唯一扩展点 Hook + 统一返回 Decision + 注册表抽象。
+"""R2 核心类型：统一返回 Decision + 上下文载体 + 注册表抽象（ARCH-v5）。
 
-契约（R2 §4）：
-- 一种 Hook（mode 保留 observe/guard/transform/around 四语义），一种 Decision（action 统一返回）。
-- 对外只有 bus.on() 一个注册入口——没有 middleware/filter/pipe 三套 API。
-- 一切可插拔物强制留名（name），装配期校验。
+Hook 调用语义（Bail/Waterfall/Loop/Parallel/Around）与 Host/RequestScope/Policy
+定义在 hooks/v5.py；本模块只保留四模块共用的数据契约。
 """
 from __future__ import annotations
 
@@ -14,17 +12,15 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from runtime import AgentState, Budgets, DynamicValue, Effect, Result
 
-if TYPE_CHECKING:  # 避免运行期循环 import（bus 反向依赖本模块）
-    from .bus import HookBus
+if TYPE_CHECKING:  # 避免循环 import（v5 反向依赖本模块的 Decision）
+    from .v5 import Host
 
 __all__ = [
     "Capability",
     "Decision",
     "DecisionAction",
-    "Hook",
-    "HookBusError",
     "HookCtx",
-    "HookMode",
+    "HookBusError",
     "LifecycleEvent",
     "Matcher",
     "Provider",
@@ -32,29 +28,18 @@ __all__ = [
 ]
 
 
-class HookMode(str, Enum):
-    """Hook 执行语义：四泳道收敛为四种 mode。"""
-
-    OBSERVE = "observe"  # 并行、异常隔离、返回忽略（原 hook）：只观察，不改流程
-    GUARD = "guard"  # 串行、按优先级、首个非 continue 短路（原 filter）：把关拦截
-    TRANSFORM = "transform"  # 串行、链式改写 payload/context（原 pipe）：改写上下文
-    AROUND = "around"  # 包裹一次 invoke，拿到 next 回调（原 middleware）：洋葱包裹
-
-
 class DecisionAction(str, Enum):
-    """Hook 统一返回的动作；按动作分层执行（不是 R1 内核一家消费全部）。
+    """统一返回动作；由 R1 内核与 R2 扩展点分层执行（ARCH-v5）。
 
     成员：
         CONTINUE: 放行。REWRITE: 改写。DENY: 拒绝。ASK: 转人工。
         RETRY: 重试。DEGRADE: 降级。FALLBACK: 兜底。ABORT: 终止。
-    执行归属（2026-11-18 实测更正——此前"八种都有归属"的说法不准确）：
-        - R1 内核 `_settle` 消费：CONTINUE / DENY / ABORT / FALLBACK（终止型判决）。
-        - R2 HookBus `_apply_rewrite` 消费：REWRITE（transform mode 改写 payload/context/state）。
-        - RETRY：由 R3 RetryPolicy 在 around mode **内部循环**实现，不是靠返回 RETRY decision
-          （该 action 值目前无消费者，但重试能力本身可达）。
-        - DEGRADE：**当前无执行路径**——R3 Degradation/CircuitBreaker 产出 DEGRADE decision
-          （含 target），但 R1 `_settle` 不消费、网关不解析，target 到此为止。
-          降级目标→真实后端（base_url/api_key）的切换尚未实现（见 R4 §4 缺口）。
+    执行归属：
+        - R1 `_settle` 消费：CONTINUE / DENY / ABORT / FALLBACK（终止型判决）。
+        - R2 `transform`（WATERFALL）消费：REWRITE 语义（链式改写上下文）。
+        - RETRY：由 R3 RetryPolicy 在 around_invoke（AROUND）内部循环实现。
+        - DEGRADE：守卫产出占位 DEGRADE + degrade 信号；settle 扩展点由
+          降级插件（Degradation）选级写 scope.target，R4 网关据此切后端或 REFUSE 真拒答。
         - ASK：R9 未实现，暂无执行路径。
     """
 
@@ -231,9 +216,9 @@ class HookCtx:
 
     字段：
         effect: 当前 Effect（transform 可改）。state: 只读状态（State 本身 frozen）。
-        session_id: 会话标识。event: 当前事件名（由 bus.emit 注入）。
+        session_id: 会话标识。event: 当前事件名。
         attempt: 尝试次数。budget_left: 预算余量投影。
-        trace: hook 执行轨迹。meta: 临时元数据（around 的 next 回调存这里）。
+        trace: hook 执行轨迹。meta: 临时元数据。
         invoke: 由 R1 注入的 Port 调用回调（洋葱中心使用）。
     """
 
@@ -251,31 +236,6 @@ class HookCtx:
     def state_view(self) -> AgentState:
         """只读状态视图（State 本身 frozen，故直接返回即可）。"""
         return self.state
-
-
-NextFn = Callable[[], Awaitable[Decision]]
-"""around 洋葱的"下一层"回调类型；供 hook 通过 ctx.meta['next'] 取得。"""
-
-
-@runtime_checkable
-class Hook(Protocol):
-    """唯一扩展点：订阅事件 + mode + 返回 Decision。
-
-    属性：
-        name: 唯一名称（强制留名）。events: 订阅的事件名元组。
-        mode: 执行语义。priority: 优先级（小者先）。
-        requires_ports: 依赖的 port 名（装配期校验）。
-    """
-
-    name: str
-    events: tuple[str, ...]
-    mode: HookMode
-    priority: int
-    requires_ports: tuple[str, ...]
-
-    async def __call__(self, ctx: HookCtx) -> Decision:
-        """执行插件逻辑并返回 Decision（异常由总线折叠为 continue）。"""
-        ...
 
 
 @dataclass(frozen=True)
@@ -332,11 +292,11 @@ class Capability(Protocol):
     version: str
     requires: tuple[str, ...]
 
-    def install(self, bus: HookBus, reg: Registry) -> None:
-        """把本能力的所有 hook 装到总线、provider 装到注册表。
+    def install(self, host: Host, reg: Registry) -> None:
+        """把本能力的插件装到 host、provider 装到注册表。
 
         参数：
-            bus: 钩子总线。reg: Provider 注册表。
+            host: R2 Host（ARCH-v5）。reg: Provider 注册表。
         """
         ...
 

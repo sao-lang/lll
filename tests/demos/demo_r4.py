@@ -1,123 +1,129 @@
-"""R4 独立 demo：模型路由 / 缓存 / 结构化修复 / 成本归因 / 换后端。
+"""R4 独立 demo：ModelCapability + add_backend + gateway + REFUSE 真拒答。
 
-不联网（内联最小 fake LLM），全程确定性可回放。
-fake 只在 tests/ 中存在，不污染框架公共 API。
+用内联 fake LLMPort（不联网、确定性）跑三条链路：健康走 primary、守卫降级切
+backup、可用目标全剔除则 REFUSE 真拒答（零后端调用，绝不回退默认模型）。
+降级由 host + guard 插件 emit 信号触发，settle 选级后写入 scope.target 供网关读取。
 """
 from __future__ import annotations
 
 import asyncio
 import sys
-from collections.abc import AsyncIterator
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from hooks import HookBus, LLMPort, LLMRequest, LLMResponse, PortCtx, Usage  # noqa: E402
+from hooks import Decision, Host, LLMRequest, LLMResponse, Signal, Usage  # noqa: E402
 
-from harness.model import (  # noqa: E402
-    CostGuard,
-    ModelCapability,
-    ModelGateway,
-    RuleRouter,
-    StructuredOutputSpec,
-    build_cache_key,
-    validate_json_schema,
+from harness.model import ModelCapability  # noqa: E402
+from harness.resilience import (  # noqa: E402
+    DegradeLadder, DegradeMode, DegradeStep, Degradation,
 )
+from runtime import Effect, EffectKind, Runner, Session  # noqa: E402
 
 
-def _req() -> LLMRequest:
-    """最小请求。"""
-    return LLMRequest(messages=[{"role": "user", "content": "hi"}])
+class _FakeLLM:
+    """内联最小 LLMPort fake：只记录调用次数，返回自身名字作为响应。"""
+
+    name: str
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.calls = 0
+
+    async def complete(self, request: LLMRequest, ctx: object) -> LLMResponse:
+        self.calls += 1
+        return LLMResponse(
+            content=self.name,
+            usage=Usage(prompt_tokens=1, completion_tokens=1),
+        )
+
+    async def stream(self, request: LLMRequest, ctx: object):  # type: ignore[no-untyped-def]
+        yield self.name
+
+    @property
+    def last_usage(self) -> Usage:
+        return Usage(prompt_tokens=1, completion_tokens=1)
 
 
-def _resp(content: str, cost: float = 0.01) -> LLMResponse:
-    """最小响应（带成本）。"""
-    return LLMResponse(content=content, usage=Usage(prompt_tokens=10, completion_tokens=5, cost_usd=cost))
+class _Guard:
+    """降级守卫插件：before_invoke 上 emit 故障信号并返回占位 DEGRADE。"""
+
+    name = "r4_guard"
+
+    def apply(self, host: Host) -> None:
+        host.hook("before_invoke").tap(self.name, self.check)
+
+    async def check(self, scope: object, effect: object) -> Decision:
+        scope.emit(Signal("degrade", "breaker_open", "primary"))  # type: ignore[attr-defined]
+        return Decision.degrade("")
 
 
-def _ctx() -> PortCtx:
-    """最小 PortCtx。"""
-    return PortCtx(session_id="s4", run_id="r1", meta={"user_id": "u1"})
+def _ladder() -> DegradeLadder:
+    """降级阶梯：primary → backup → 拒答。"""
+    return DegradeLadder(steps=(
+        DegradeStep(target="primary", mode=DegradeMode.REROUTE, quality=1.0),
+        DegradeStep(target="backup", mode=DegradeMode.REROUTE, quality=0.6),
+        DegradeStep(target="", mode=DegradeMode.REFUSE, quality=0.0),
+    ))
 
 
-class _ScriptedLLM:
-    """demo 内联最小 LLMPort fake：按队列返回预置响应（真实 fake 在 tests/r4/fakes.py）。"""
-
-    name = "scripted_llm"
-
-    def __init__(self, responses: list[LLMResponse]) -> None:
-        """装配预置响应。"""
-        self._responses = list(responses)
-        self._idx = 0
-        self.call_count = 0
-
-    async def complete(self, req: LLMRequest, ctx: PortCtx) -> LLMResponse:
-        """返回下一响应；用尽时重复最后一个，空队列返回空响应。"""
-        self.call_count += 1
-        if not self._responses:
-            return LLMResponse(content="")
-        resp = self._responses[min(self._idx, len(self._responses) - 1)]
-        self._idx += 1
-        return resp
-
-    async def stream(self, req: LLMRequest, ctx: PortCtx) -> AsyncIterator[str]:
-        """逐字符产出最后响应正文（本 demo 不使用，仅满足协议）。"""
-        content = self._responses[-1].content if self._responses else ""
-        for ch in content or "":
-            yield ch
+def _program():  # type: ignore[no-untyped-def]
+    """最小 R1 程序：一次 LLM Effect + 一个 END。"""
+    resp = yield Effect(EffectKind.LLM, {
+        "messages": [{"role": "user", "content": "hi"}],
+    })
+    yield Effect(EffectKind.END, {
+        "output": resp.get("content", "?") if isinstance(resp, dict) else "?",
+    })
 
 
-SCHEMA = {
-    "type": "object",
-    "required": ["name"],
-    "properties": {"name": {"type": "string"}, "age": {"type": "integer", "minimum": 0}},
-}
+async def _run(host: Host, gateway: object, name: str) -> object:
+    """把 host 与 gateway 接到 Runner 上跑一遍 _program。"""
+    runner = Runner(
+        dispatch=host.dispatch,
+        call=host.call(gateway.as_call()),  # type: ignore[attr-defined,arg-type]
+    )
+    return await runner.run(Session(session_id=name, program_factory=_program))
 
 
 async def main() -> None:
-    """跑通 R4 全流程并打印摘要。"""
-    # 1) 缓存键含版本
-    r = _req()
-    assert build_cache_key(_req(), prompt_version="v1").value != build_cache_key(_req(), prompt_version="v2").value
+    # 1) 健康链路：capability 构造 gateway，默认后端 primary 被调用
+    primary = _FakeLLM("primary")
+    cap = ModelCapability(llm=primary)
+    healthy = Host().freeze()
+    healthy_result = await _run(healthy, cap.gateway(), "r4-healthy")
+    assert healthy_result.output == "primary"  # type: ignore[union-attr]
+    assert primary.calls == 1
 
-    # 2) 缓存命中省调用
-    llm = _ScriptedLLM([_resp("cached")])
-    gw = ModelGateway(llm=llm)
-    await gw.complete(r, _ctx())
-    await gw.complete(r, _ctx())
-    assert llm.call_count == 1
+    # 2) 降级链路：add_backend 注册 backup，guard 触发降级 → gateway 切 backup
+    primary2 = _FakeLLM("primary")
+    backup2 = _FakeLLM("backup")
+    cap2 = ModelCapability(llm=primary2)
+    cap2.add_backend("backup", backup2)
+    degraded = Host()
+    degraded.plugin(_Guard()).plugin(
+        Degradation(_ladder(), available={"primary", "backup"})
+    ).freeze()
+    degraded_result = await _run(degraded, cap2.gateway(), "r4-degrade")
+    assert degraded_result.output == "backup"  # type: ignore[union-attr]
+    assert backup2.calls == 1 and primary2.calls == 0
 
-    # 3) 结构化修复：非法 → 合法
-    llm2 = _ScriptedLLM([_resp('{"age": -1}'), _resp('{"name": "Zoe", "age": 20}')])
-    gw2 = ModelGateway(llm=llm2, spec=StructuredOutputSpec(schema=SCHEMA))
-    out = await gw2.complete(r, _ctx())
-    assert "Zoe" in (out.content or "") and llm2.call_count == 2
+    # 3) REFUSE 链路：available 全剔除 → target=refuse → 真拒答，零后端调用
+    primary3 = _FakeLLM("primary")
+    backup3 = _FakeLLM("backup")
+    cap3 = ModelCapability(llm=primary3)
+    cap3.add_backend("backup", backup3)
+    refused = Host()
+    refused.plugin(_Guard()).plugin(
+        Degradation(_ladder(), available=set())
+    ).freeze()
+    refused_result = await _run(refused, cap3.gateway(), "r4-refuse")
+    assert primary3.calls == 0 and backup3.calls == 0
+    first_results = refused_result.events[0].results  # type: ignore[union-attr]
+    assert any(r.error is not None and r.error.code == "REFUSED" for r in first_results)
+    assert any("[REFUSED]" in m.content for m in refused_result.state.messages)  # type: ignore[union-attr]
 
-    # 4) 成本归因
-    assert gw2.ledger.total() > 0
-
-    # 5) 成本闸
-    guard = CostGuard(max_cost_usd=0.001)
-    gw3 = ModelGateway(llm=_ScriptedLLM([_resp("x", cost=0.5)]), cost_guard=guard)
-    try:
-        await gw3.complete(r, _ctx())
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("cost guard should block")
-
-    # 6) 路由 + 能力装配
-    router = RuleRouter(routes={"code": "gpt-4"}, registered={"gpt-4", "default"})
-    cap = ModelCapability(llm=_ScriptedLLM([]), router=router)
-    bus = HookBus()
-    cap.install(bus)
-    assert bus.registry.has("llm")
-
-    # 7) schema 校验独立
-    assert validate_json_schema('{"name": "A"}', SCHEMA) == []
-
-    print("[R4] PASS: 缓存键/命中 / 结构化修复 / 成本归因+硬闸 / 路由 / 能力装配 / schema 校验")
+    print("[R4] PASS: capability+add_backend / gateway 切后端 / guard 降级信号链 / REFUSE 真拒答")
 
 
-if __name__ == "__main__":
-    asyncio.run(main())
+asyncio.run(main())

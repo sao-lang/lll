@@ -393,6 +393,8 @@ class EffectPayload(TypedDict, total=False):
 
     字段（按 Effect kind 选用）：
         messages/tools/model/temperature/max_tokens: LLM 请求参数。
+        task_hint: LLM 任务类型提示（如 code/chat，供 R4 路由选模型）。
+        meta: 扩展元数据透传容器（如 max_cost_per_call；键语义由消费模块声明）。
         call/calls/call_id: 工具调用（单值/批量/关联 id）。
         budget: 本步预算声明。port: 目标 port 名。
         output/reason: END 的输出与原因。name/part/question/options: 技能/HITL 参数。
@@ -403,6 +405,8 @@ class EffectPayload(TypedDict, total=False):
     model: str
     temperature: float
     max_tokens: int
+    task_hint: str
+    meta: dict[str, DynamicValue]
     call: DynamicValue
     calls: list[DynamicValue]
     call_id: str
@@ -433,11 +437,14 @@ class Effect:
         payload: 参数负载（已知键在 EffectPayload 声明，x-* 扩展键动态）。
         batch: 是否批量（payload['calls'] 会被解释器展开）。
         trace_id: 链路标识，由 Runner 按 step/index 注入。
+        idempotency_key: 副作用幂等键（具名字段，非 payload 动态键）；
+            R3 幂等去重与副作用重试红线读此字段。
     """
     kind: EffectKind
     payload: EffectPayload = field(default_factory=_empty_payload)
     batch: bool = False
     trace_id: str | None = None
+    idempotency_key: str | None = None
 
     def __post_init__(self) -> None:
         """归一 kind 为枚举、payload 冻结为只读视图（frozen 下用 object.__setattr__）。"""
@@ -517,12 +524,14 @@ class CancellationToken:
 
 @dataclass
 class RuntimeCtx:
-    """Runner 默认构造的上下文；上层可换成字段超集（R2 的 HookCtx）。
+    """Runner 默认构造的上下文；上层可换成字段超集（R2 桥接用的上下文）。
 
     字段：
         effect: 当前 Effect。state: 当前状态。session_id: 会话标识。
         attempt: 尝试次数。meta: 临时元数据。trace: hook/执行轨迹。
         invoke: 由 Runner 注入的 Port 调用回调（洋葱中心使用）。
+        degrade_target: 降级目标（具名桥接字段，由 Host 从 scope.target 写入，
+            R4 as_call 读取切后端/REFUSE）；不用裸 meta key。
     """
     effect: Effect
     state: AgentState
@@ -531,6 +540,7 @@ class RuntimeCtx:
     meta: dict[str, DynamicValue] = field(default_factory=dict)
     trace: list[str] = field(default_factory=list)
     invoke: Callable[[Effect, DynamicValue], Awaitable[Result]] | None = None
+    degrade_target: str | None = None
 
 
 @dataclass

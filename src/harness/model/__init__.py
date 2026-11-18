@@ -13,7 +13,10 @@ from .capability import ModelCapability
 from .gateway import ModelGateway
 from .registry import InMemoryModelRegistry, ModelEndpoint, ModelRegistry
 from .router import ModelRouter, RuleRouter
-from .structured import StructuredOutputValidator, validate_json_schema
+from .structured import (
+    MinimalSchemaValidator, SchemaValidator,
+    StructuredOutputValidator, validate_json_schema,
+)
 from .types import (
     CacheKey,
     CostAttributor,
@@ -47,6 +50,8 @@ __all__ = [
     "RouteDecision",
     "RuleRouter",
     "StructuredOutputSpec",
+    "SchemaValidator",
+    "MinimalSchemaValidator",
     "StructuredOutputValidator",
     "UsageLedger",
     "build_cache_key",

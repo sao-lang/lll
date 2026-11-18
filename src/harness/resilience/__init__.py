@@ -5,10 +5,14 @@
 """
 from __future__ import annotations
 
-from .breaker import CircuitBreaker
+from .breaker import BreakerStore, CircuitBreaker, InMemoryBreakerStore
 from .capability import ResilienceCapability
-from .defenses import BudgetGuard, Bulkhead, Degradation, Idempotency, KillSwitch, RateLimit, Watchdog
+from .defenses import (
+    BudgetGuard, Bulkhead, Degradation, Idempotency,
+    KillSwitch, RateLimit, Watchdog,
+)
 from .retry import RetryPolicy
+from .timeout import Timeout
 from .types import (
     DEFAULT_FAILURE_TABLE,
     BreakerState,
@@ -33,8 +37,9 @@ __all__ = [
     "backoff_delay", "classify_failure", "normalize_code",
     "validate_retry_spec", "validate_ladder",
     "DegradeMode", "DegradeStep", "DegradeLadder", "Jitter",
-    "BreakerStatus", "BreakerState",
-    # 插件
+    "BreakerStatus", "BreakerState", "BreakerStore", "InMemoryBreakerStore",
+    # 插件（RetryPolicy 是重试策略配置，非状态 Policy）
     "RetryPolicy", "CircuitBreaker", "Degradation", "RateLimit", "Bulkhead",
     "Idempotency", "Watchdog", "KillSwitch", "BudgetGuard", "ResilienceCapability",
+    "Timeout",
 ]

@@ -9,12 +9,18 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from enum import Enum
+from typing import Protocol, runtime_checkable
 
 from runtime import DynamicValue
 
 from .types import StructuredOutputSpec
 
-__all__ = ["StructuredOutputValidator", "validate_json_schema"]
+__all__ = [
+    "MinimalSchemaValidator",
+    "SchemaValidator",
+    "StructuredOutputValidator",
+    "validate_json_schema",
+]
 
 
 class _JsonType(str, Enum):
@@ -59,6 +65,38 @@ class _OutputMode(str, Enum):
             return cls(raw)
         except ValueError:
             return cls.REPAIR
+
+
+@runtime_checkable
+class SchemaValidator(Protocol):
+    """结构化校验器协议（可插拔，R4 v1.6；可插拔四要素①）。
+
+    成员：
+        name: 具名标识，装配期履约校验非空、进 trace。
+        validate: 收原始值（str 先试 json.loads）与 schema，返回错误列表；空表示合法。
+
+    复杂 schema（anyOf/pattern/items 等）由注入方基于 jsonschema 实现，框架不内置大依赖。
+    """
+
+    name: str
+
+    def validate(self, value: object, schema: dict[str, DynamicValue]) -> list[str]:
+        """返回错误描述列表；空列表表示合法。"""
+        ...
+
+
+class MinimalSchemaValidator:
+    """默认校验器（可插拔四要素②）：委托模块级 validate_json_schema。
+
+    保持零外部依赖（不引入 jsonschema），覆盖设计文档的 type/required/properties/enum/minimum
+    最小校验场景；用户需要更强 schema 时注入自定义 SchemaValidator 替换。
+    """
+
+    name: str = "minimal-json-schema"
+
+    def validate(self, value: object, schema: dict[str, DynamicValue]) -> list[str]:
+        """调用最小 JSON Schema 校验，返回错误列表。"""
+        return validate_json_schema(value, schema)
 
 
 def validate_json_schema(value: object, schema: dict[str, DynamicValue]) -> list[str]:
@@ -136,10 +174,32 @@ class StructuredOutputValidator:
         should_repair: 是否允许修复重试（repair 模式为真；constrained/prompt 为假）。
     """
 
-    def __init__(self, spec: StructuredOutputSpec) -> None:
-        """装配规格。"""
+    def __init__(
+        self, spec: StructuredOutputSpec, *, validator: SchemaValidator | None = None
+    ) -> None:
+        """装配规格 + 校验器（可插拔四要素③替换入口）。
+
+        参数：
+            spec: 结构化输出规格。
+            validator: 注入的校验器；None 用 MinimalSchemaValidator（四要素②默认）。
+        异常：
+            TypeError: validator 不满足 SchemaValidator 协议。
+            ValueError: validator.name 为空（可插拔物须带 name）。
+        """
         self._spec = spec
         self._mode = _OutputMode.coerce(spec.mode)
+        chosen = validator if validator is not None else MinimalSchemaValidator()
+        # 履约校验（四要素④）：协议成员齐备 + 具名非空，不满足显式拒绝。
+        if not isinstance(chosen, SchemaValidator):
+            raise TypeError("validator must implement SchemaValidator protocol")
+        if not chosen.name:
+            raise ValueError("validator.name must be non-empty")
+        self._validator = chosen
+
+    @property
+    def schema_validator(self) -> SchemaValidator:
+        """当前生效的校验器（默认或注入），供外部读取。"""
+        return self._validator
 
     @property
     def should_repair(self) -> bool:
@@ -160,7 +220,8 @@ class StructuredOutputValidator:
             (解析值, 是否合法)；解析值形态由模型/JSON 决定，故用 DynamicValue（规则 3）。
             strict 模式下非法输出 ok 必为 False。
         """
-        errors = validate_json_schema(text, self._spec.json_schema)
+        # 走注入校验器（默认 MinimalSchemaValidator），判定口径可替换。
+        errors = self._validator.validate(text, self._spec.json_schema)
         if errors:
             return None, False
         try:
@@ -169,6 +230,10 @@ class StructuredOutputValidator:
             # schema 无 type 约束且文本非 JSON：按纯文本成功（合法但无法结构化解析）。
             return text, True
         return parsed, True
+
+    def check(self, text: str) -> list[str]:
+        """用当前校验器校验输出文本，返回错误列表（供网关修复循环共用同一口径）。"""
+        return self._validator.validate(text, self._spec.json_schema)
 
     def build_repair_prompt(self, bad_output: str, errors: list[str]) -> str:
         """生成修复提示：附上原输出与校验错误，让模型纠偏。"""

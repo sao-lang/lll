@@ -80,13 +80,17 @@ class TestStream:
 
 
 class TestErrors:
-    def test_http_error_folded_not_raised(self) -> None:
+    def test_http_error_folded_with_error_marker(self) -> None:
+        """HTTP 错误折叠为带 error 的响应（不抛裸异常），R3 据此重试/熔断。
+
+        E3 修复：不能再返回"空内容但看起来成功"的响应——那会让 R3 全线失明。
+        """
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(500, json={"error": {"message": "boom"}})
 
-        llm = OpenAICompatLLM(base_url="x", api_key="k", model="m", client=_client(handler))
+        llm = OpenAICompatLLM(base_url="https://api.test/v1", api_key="k", model="m", client=_client(handler))
         resp = asyncio.run(llm.complete(_req(), _ctx()))
-        assert resp.content == "" or resp.content is None
+        assert resp.error is not None and "500" in resp.error
         assert resp.usage.prompt_tokens == 0  # 错误不产生 usage，非假数据
 
     def test_api_key_never_in_response_or_usage(self) -> None:

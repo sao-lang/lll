@@ -191,6 +191,7 @@ class LLMRequest(_Strict):
     model: str | None = Field(default=None, description="模型名覆盖")
     temperature: float | None = Field(default=None, description="采样温度")
     max_tokens: int | None = Field(default=None, description="最大输出 token")
+    task_hint: str | None = Field(default=None, description="任务类型提示（如 code/chat），供 R4 路由选模型")
 
 
 class LLMResponse(_Strict):
@@ -205,6 +206,7 @@ class LLMResponse(_Strict):
     tool_calls: list[ToolCall] = Field(default_factory=list, description="工具调用列表")
     usage: Usage = Field(default_factory=Usage, description="token 与成本")
     model: str = Field(default="", description="实际使用的模型")
+    error: str | None = Field(default=None, description="后端错误码/消息；非 None 表示该次调用失败（R3 据此重试/熔断）")
 
 
 def make_call(

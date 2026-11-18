@@ -1,16 +1,16 @@
-"""R4 能力装配：ModelCapability 把 LLM 后端/路由/缓存注册到 HookBus.registry。
+"""R4 能力装配（ARCH-v5）：ModelCapability 构造网关并持有 ModelRegistry。
 
-三层插拔模型（R13）的能力级开关：装了经 ModelGateway 生效，不装缺席。
-网关本身不在 bus 上挂 hook（模型调用由 Effect(LLM) 经 R1→LLMPort 触发），
-本能力负责把可替换策略注册进 Registry，供装配层解析替换。
+降级目标后端通过 add_backend 注册到同一 ModelRegistry，供网关按 target 切换。
 """
 from __future__ import annotations
 
-from hooks import HookBus, LLMPort, Registry
+from hooks import LLMPort
 
-from .cache import CachePort, ExactCache
+from .cache import CachePort
 from .gateway import ModelGateway
+from .registry import InMemoryModelRegistry, ModelRegistry
 from .router import RuleRouter
+from .structured import SchemaValidator
 from .types import StructuredOutputSpec
 
 __all__ = ["ModelCapability"]
@@ -24,7 +24,7 @@ class ModelCapability:
     """
 
     name = "model"
-    version = "1.0.0"
+    version = "5.0.0"
     requires: tuple[str, ...] = ()
 
     def __init__(
@@ -34,29 +34,27 @@ class ModelCapability:
         router: RuleRouter | None = None,
         cache: CachePort | None = None,
         spec: StructuredOutputSpec | None = None,
+        validator: SchemaValidator | None = None,
+        registry: ModelRegistry | None = None,
     ) -> None:
         """装配能力：llm 必填，其余策略可替换。"""
         self._llm = llm
         self._router = router
         self._cache = cache
         self._spec = spec
+        self._validator = validator
+        # ARCH-v5 修复：默认建 ModelRegistry 并注册 "primary"，让降级目标可解析。
+        self._model_registry = registry or InMemoryModelRegistry()
+        self._model_registry.register_llm("primary", llm)
 
     def gateway(self) -> ModelGateway:
-        """构造模型网关（上层调用入口）。"""
+        """构造模型网关（传入 registry，修复降级目标无法解析断点）。"""
         return ModelGateway(
-            llm=self._llm, router=self._router, cache=self._cache, spec=self._spec
+            llm=self._llm, router=self._router, cache=self._cache,
+            spec=self._spec, validator=self._validator,
+            registry=self._model_registry,
         )
 
-    def install(self, bus: HookBus, reg: Registry | None = None) -> HookBus:
-        """把 llm/router/cache 注册到总线的 Provider 注册表。
-
-        参数：
-            bus: 目标 HookBus。reg: 目标注册表（缺省用 bus.registry）。
-        返回：
-            同一 bus（链式调用）。
-        """
-        registry = reg or bus.registry
-        registry.register("llm", self._llm)  # LLMPort 实现带 name，满足 Provider 契约
-        registry.register("model_router", self._router or RuleRouter())
-        registry.register("model_cache", self._cache or ExactCache())  # 默认精确缓存
-        return bus
+    def add_backend(self, name: str, llm: LLMPort) -> None:
+        """注册降级目标后端（如 "backup"），供网关按 target 切换。"""
+        self._model_registry.register_llm(name, llm)

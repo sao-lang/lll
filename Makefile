@@ -22,7 +22,7 @@ demo-r4:
 	$(PYTHON) tests/demos/demo_r4.py
 
 test:
-	$(PYTEST) tests/r1 tests/r2 tests/r3 tests/r4 -q
+	$(PYTEST) tests/r1 tests/r2 tests/r3 tests/r4 tests/ports -q
 
 gate: gate-r1 gate-r2 gate-r3 gate-r4
 
