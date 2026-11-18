@@ -78,6 +78,24 @@ class TestHookKinds:
 
         asyncio.run(run())
 
+    def test_parallel_isolates_tap_exception(self) -> None:
+        """R2-7：观察点 tap 抛异常须隔离，不影响其余 tap 与主流程。"""
+        async def run() -> None:
+            calls: list[str] = []
+
+            def boom(scope, effect) -> None:
+                calls.append("boom")
+                raise RuntimeError("observer crashed")
+
+            hook = ParallelHook("observe")
+            hook.tap("bad", boom)
+            hook.tap("good", lambda s, e: calls.append("good"))
+            # 异常被隔离，call 不抛、返回 None，其余 tap 照常执行
+            assert await hook.call(RequestScope()) is None
+            assert set(calls) == {"boom", "good"}
+
+        asyncio.run(run())
+
     def test_around_wraps_next(self) -> None:
         """Around：tap 收 next 回调，前后介入，中心只调一次。"""
         async def run() -> None:

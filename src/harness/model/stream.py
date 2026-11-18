@@ -8,19 +8,19 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
-from hooks import LLMRequest, PortCtx, StreamEvent, StreamEventKind
+from hooks import LLMPort, LLMRequest, PortCtx, StreamEvent, StreamEventKind
 
 __all__ = ["has_stream_events", "wrap_text_stream"]
 
 
-def has_stream_events(llm: object) -> bool:
+def has_stream_events(llm: LLMPort) -> bool:
     """后端是否已实现 stream_events()（具名能力探测，非动态 getattr 链）。"""
     # 规则 6 例外：可选能力探测，具名固定字符串，非 ctx.meta/effect.payload 动态键。
     return callable(getattr(llm, "stream_events", None))
 
 
 def wrap_text_stream(
-    llm: object, req: LLMRequest, ctx: PortCtx,
+    llm: LLMPort, req: LLMRequest, ctx: PortCtx,
 ) -> AsyncIterator[StreamEvent]:
     """把文本流后端包成事件流：每块 TEXT_DELTA，末了 USAGE/DONE。
 
@@ -32,7 +32,7 @@ def wrap_text_stream(
 
 
 async def _wrap(
-    llm: object, req: LLMRequest, ctx: PortCtx,
+    llm: LLMPort, req: LLMRequest, ctx: PortCtx,
 ) -> AsyncIterator[StreamEvent]:
     # 规则 6 例外：包装具名固定能力的旧后端（stream/last_usage），非动态键读取。
     stream = getattr(llm, "stream")

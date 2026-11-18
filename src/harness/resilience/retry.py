@@ -9,7 +9,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from random import Random
 
-from hooks import Decision, Host, RequestScope, Signal
+from hooks import Decision, Host, RequestScope, Signal, SignalKind
 from runtime import Effect, EffectKind, Result
 
 from .types import Jitter, backoff_delay, classify_failure, validate_retry_spec
@@ -17,6 +17,15 @@ from .types import Jitter, backoff_delay, classify_failure, validate_retry_spec
 __all__ = ["RetryPolicy"]
 
 NextFn = Callable[[], Awaitable[Decision]]
+
+
+def _default_failed_target(effect: Effect) -> str | None:
+    """默认失败目标：后端注册名（payload.model）优先，缺省 "primary"。
+
+    规则 6 例外：model 是 EffectPayload 的具名键，此处在边界外读取注册名，
+    与 breaker 的默认派生保持同一口径。
+    """
+    return effect.payload.get("model") or "primary"
 
 
 class RetryPolicy:
@@ -36,9 +45,17 @@ class RetryPolicy:
         idempotency_required: bool = True,
         rng: Random | None = None,
         sleeper: Callable[[float], Awaitable[None]] | None = None,
+        failed_target_of: Callable[[Effect], str | None] | None = None,
     ) -> None:
+        """构造重试策略。
+
+        参数：
+            failed_target_of: 从 Effect 派生失败目标注册名的纯函数（R3-7：耗尽信号带
+                failed_target 供 settle 剔除）；缺省取 payload.model 或 "primary"。
+        """
         from hooks import RetrySpec
 
+        self._failed_target_of = failed_target_of or _default_failed_target
         self._spec = RetrySpec(
             max_attempts=max_attempts, base_delay=base_delay, multiplier=multiplier,
             max_delay=max_delay, jitter=Jitter.coerce(jitter).value,
@@ -50,6 +67,7 @@ class RetryPolicy:
         self._sleep = sleeper
 
     def apply(self, host: Host) -> None:
+        """挂载 around_invoke（AROUND）：包裹真实调用做退避重试。"""
         host.hook("around_invoke").tap(self.name, self.call)
 
     async def call(
@@ -75,7 +93,8 @@ class RetryPolicy:
             scope.trace.append(f"retry:classified:{fc.code}")
             if attempt >= self._spec.max_attempts:
                 scope.trace.append("retry:exhausted")
-                scope.emit(Signal("degrade", "retry_exhausted"))
+                # R3-7：带上失败目标注册名，settle 才能从 available 剔除它（否则选回自身）。
+                scope.emit(Signal(SignalKind.DEGRADE, "retry_exhausted", self._failed_target_of(effect)))
                 return verdict
             if self._is_retryable_side_effect(scope, effect):
                 return Decision.deny("idempotency_required for side-effect retry")

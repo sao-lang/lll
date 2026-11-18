@@ -128,7 +128,13 @@ def _check(data: DynamicValue, schema: dict[str, DynamicValue], path: str, error
         schema: 该节点对应的 schema 片段。path: 错误路径（如 $.name）。
         errors: 累计错误列表（原地追加）。
     """
-    expected = _JsonType.coerce(schema.get("type"))
+    raw_type = schema.get("type")
+    expected = _JsonType.coerce(raw_type)
+    if "type" in schema and expected is None:
+        # N4：schema 声明了 type 但值非法（如 "str"）→ 报校验错误，不静默跳过。
+        # 静默跳过会让坏 schema 下的非法输出被当成合法，与 strict 红线冲突。
+        errors.append(f"{path}: invalid schema type {raw_type!r}")
+        return
     if expected is not None and not _type_ok(data, expected):
         errors.append(f"{path}: expected {expected.value}, got {type(data).__name__}")
         return  # 类型错则不继续深挖，避免噪音

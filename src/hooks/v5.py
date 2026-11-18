@@ -9,12 +9,15 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Sequence
+import inspect
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Protocol, runtime_checkable
+from typing import Protocol, cast, runtime_checkable
 
-from .types import Decision, DecisionAction
+from runtime import Effect, Result, RuntimeCtx
+
+from .types import Decision, DecisionAction, HookCtx
 
 __all__ = [
     "AroundHook",
@@ -74,6 +77,12 @@ class Signal:
     failed_target: str | None = None
 
 
+# dispatch/call 接收的上下文：R2/R4 编排的两种真实类型（非 Any/object）。
+# 生产默认 RuntimeCtx（含 degrade_target 桥接字段）；R2 桥接测试用 HookCtx（字段超集）。
+# ctx_factory 的用户自定义超集按鸭子语义兼容（桥接处用 hasattr 保护）。
+type HookContextArg = RuntimeCtx | HookCtx
+
+
 @dataclass
 class RequestScope:
     """每次调用新建的请求级协作容器（host.new_scope）。
@@ -83,19 +92,23 @@ class RequestScope:
     所有字段 typed、读写方明确：
         signals: 插件经 emit() 追加，settle 消费
         target: settle 阶段写入的降级目标，供 R4 读取
-        last_result: host.call 写入的本次 Result，观察类插件只读
+        last_result: host.call 写入的本次调用 Result，观察类插件只读
         trace: 各插件 append 的执行轨迹
-        value: settle 的最终判决载体
+        value: settle 的兜底判决载体（Decision.fallback 携带的 Result）
     """
 
     signals: list[Signal] = field(default_factory=list)
     target: str | None = None
-    last_result: Any = None
+    # host.call 写入的本次调用结果：生产与测试均为 Result 成功/失败信封。
+    last_result: Result | None = None
     trace: list[str] = field(default_factory=list)
-    value: Any = None
-    releases: list[Any] = field(default_factory=list)  # 资源释放回调（如舱壁槽位），Host 统一兜底执行
+    # settle 兜底判决携带的 Result（decision.fallback 的 value）；None 表示无兜底。
+    value: Result | None = None
+    # 释放回调零参、返回值不被使用（如舱壁槽位释放），Host 每轮结束逆序兜底执行。
+    releases: list[Callable[[], None]] = field(default_factory=list)
 
     def emit(self, signal: Signal) -> None:
+        """追加一个请求内协作信号（供 settle 消费）。"""
         self.signals.append(signal)
 
     def release_all(self) -> None:
@@ -107,25 +120,50 @@ class RequestScope:
                 pass
         self.releases.clear()
 
-    def decision(self) -> Decision | None:
-        """从 signals 推导是否有降级意图（供 settle 阶段读）。"""
-        if any(s.kind == SignalKind.DEGRADE for s in self.signals):
-            return Decision.degrade(self.target or "")
-        return None
+
+# tap 回调的所有可能返回形态——有限、确定的联合，不是 Any：
+#   Decision  守卫拦截 / 降级裁决 / retry/timeout 兜底
+#   Result    AROUND 中心调用与 normalize 后的结果
+#   str       WATERFALL 链式改写的上下文文本（如预算收尾提示）
+#   None      放行 / 观察点 / 循环终止
+type TapReturn = Decision | Result | str | None
+
+# tap 回调签名：同步或异步均可，返回 TapReturn 联合中的具体一支。
+# 参数形态按 HookKind 分派（BAIL/PARALLEL → (scope, effect)，
+# WATERFALL → (value, effect)，AROUND → (next, scope, effect)）。
+type TapFn = Callable[..., Awaitable[TapReturn] | TapReturn]
 
 
-TapFn = Callable[..., Awaitable[Any] | Any]
+async def _maybe(result: Awaitable[TapReturn] | TapReturn) -> TapReturn:
+    """统一等待同步/异步 tap 返回（类型收敛到 TapReturn 联合）。"""
+    if inspect.isawaitable(result):
+        return await result
+    return result
 
 
-async def _maybe(result: Awaitable[Any] | Any) -> Any:
-    """同步/异步判决统一等待。"""
-    return await result if asyncio.iscoroutine(result) else result
+def _coerce_result(outcome: Result | Decision | None) -> Result | None:
+    """唯一的"调用结果"归一化边界（规则 6）。
+
+    around_invoke 的 core 生产返回裸 Result（E1），部分插件用 Decision(value=Result)
+    载体。此处一次判定把两种确定形态归一为 Result | None——
+    输入是 Result/Decision/None 联合（非 Any），输出是确定的 Result | None。
+    """
+    if isinstance(outcome, Decision):
+        value = outcome.value
+        return value if isinstance(value, Result) else None
+    return outcome
 
 
 class Hook:
     """扩展点：宿主定义时选 kind，插件只 tap。"""
 
     def __init__(self, name: str, kind: HookKind, *, max_loops: int = 100) -> None:
+        """装配扩展点：名称、调用语义与 LOOP 上限；tap 列表初始为空。
+
+        参数：
+            name: 扩展点名（宿主按此取用）。kind: 调用语义。
+            max_loops: LOOP 语义的重跑硬上限，防死循环。
+        """
         self.name = name
         self.kind = kind
         self.max_loops = max_loops
@@ -141,8 +179,11 @@ class Hook:
         """已 tap 的插件名（trace 与诊断用）。"""
         return tuple(n for n, _ in self._taps)
 
-    async def call(self, scope: RequestScope, effect: Any = None, *args: Any, **kwargs: Any) -> Any:
-        """按 kind 语义执行全部 tap。
+    async def call(
+        self, scope: RequestScope, effect: Effect | None = None,
+        *args: str, **kwargs: Callable[[RequestScope], Awaitable[Result | None]],
+    ) -> TapReturn:
+        """按 kind 语义执行全部 tap（返回有限联合 TapReturn，非 Any）。
 
         effect 作为请求期输入参数直送每个回调（不进任何共享容器）：
         BAIL/LOOP/PARALLEL → fn(scope, effect)；WATERFALL → fn(value, effect)；
@@ -155,32 +196,41 @@ class Hook:
         if self.kind is HookKind.LOOP:
             return await self._call_loop(scope, effect)
         if self.kind is HookKind.PARALLEL:
-            return await self._call_parallel(scope, effect)
+            await self._call_parallel(scope, effect)
+            return None
         return await self._call_around(scope, effect, **kwargs)
 
-    async def _call_bail(self, scope: RequestScope, effect: Any) -> Decision | None:
+    async def _call_bail(self, scope: RequestScope, effect: Effect | None) -> Decision | None:
+        """BAIL：首个非 CONTINUE 的 Decision 短路返回。"""
         for _, fn in self._taps:
             d = await _maybe(fn(scope, effect))
             if isinstance(d, Decision) and d.action is not DecisionAction.CONTINUE:
                 return d
         return None
 
-    async def _call_waterfall(self, scope: RequestScope, effect: Any, value: Any) -> Any:
+    async def _call_waterfall(
+        self, scope: RequestScope, effect: Effect | None, value: str,
+    ) -> str:
+        """WATERFALL：上次的字符串返回值作下次首参，逐 tap 链式改写上下文。"""
         for _, fn in self._taps:
-            value = await _maybe(fn(value, effect))
+            out = await _maybe(fn(value, effect))
+            value = out if isinstance(out, str) else value
         return value
 
-    async def _call_loop(self, scope: RequestScope, effect: Any) -> Any:
+    async def _call_loop(self, scope: RequestScope, effect: Effect | None) -> str | None:
+        """LOOP：非 None 返回则重跑整链，带 max_loops 硬上限。"""
         for _ in range(self.max_loops):
-            result: Any = None
+            result: TapReturn = None
             for _, fn in self._taps:
                 result = await _maybe(fn(scope, effect))
             if result is None:
                 return None
         raise RuntimeError(f"hook {self.name!r} exceeded max_loops={self.max_loops}")
 
-    async def _call_parallel(self, scope: RequestScope, effect: Any) -> None:
+    async def _call_parallel(self, scope: RequestScope, effect: Effect | None) -> None:
+        """PARALLEL：全执行、异常隔离、无返回值。"""
         async def guarded(fn: TapFn) -> None:
+            """单个观察 tap：异常就地隔离，不影响其余 tap 与主流程。"""
             try:
                 await _maybe(fn(scope, effect))
             except Exception:  # 观察类异常隔离  # noqa: BLE001, S110
@@ -188,15 +238,24 @@ class Hook:
 
         await asyncio.gather(*(guarded(fn) for _, fn in self._taps))
 
-    async def _call_around(self, scope: RequestScope, effect: Any, *, core: Callable[[RequestScope], Awaitable[Any]]) -> Any:
-        async def layer(index: int) -> Any:
+    async def _call_around(
+        self, scope: RequestScope, effect: Effect | None, *,
+        core: Callable[[RequestScope], Awaitable[Result | None]],
+    ) -> Result | Decision | None:
+        """AROUND：tap 收 next 回调，层层包裹中心调用。"""
+        async def layer(index: int) -> Result | Decision | None:
+            """洋葱第 index 层：越界则调中心 core，否则把下一层作为 next 交给 tap。"""
             if index >= len(self._taps):
                 return await core(scope)
 
-            async def nxt() -> Any:
+            async def nxt() -> Result | Decision | None:
+                """交给当前 tap 的下一层回调。"""
                 return await layer(index + 1)
 
-            return await _maybe(self._taps[index][1](nxt, scope, effect))
+            out = await _maybe(self._taps[index][1](nxt, scope, effect))
+            if isinstance(out, (Decision, Result)):
+                return out
+            return None
 
         return await layer(0)
 
@@ -221,6 +280,7 @@ class Host:
     """总线（Compiler 类比）：持有扩展点与 Scope 工厂，提供 R1 注入适配器。"""
 
     def __init__(self) -> None:
+        """装配宿主：预定义 6 个标准扩展点，冻结前可 define/plugin。"""
         self._hooks: dict[str, Hook] = {}
         self._plugins: list[Plugin] = []
         self._frozen = False
@@ -233,22 +293,24 @@ class Host:
         for name, kind in _STANDARD_HOOKS.items():
             self._hooks[name] = Hook(name, kind)
 
-    def define(self, name: str, kind: HookKind, **kw: Any) -> Hook:
+    def define(self, name: str, kind: HookKind, *, max_loops: int = 100) -> Hook:
         """宿主定义扩展点并选定语义；v5 冻结后不可再定义。"""
         if self._frozen:
             raise RuntimeError("host frozen: cannot define hooks")
         if name in self._hooks and self._hooks[name].names:
             raise ValueError(f"hook already has taps: {name}")
-        hook = Hook(name, kind, **kw)
+        hook = Hook(name, kind, max_loops=max_loops)
         self._hooks[name] = hook
         return hook
 
     def hook(self, name: str) -> Hook:
+        """取已定义扩展点（供插件 tap）；未定义抛 KeyError。"""
         if name not in self._hooks:
             raise KeyError(f"undefined hook: {name}")
         return self._hooks[name]
 
     def plugin(self, plugin: Plugin) -> Host:
+        """注册插件：校验具名后调 apply(host)，返回 self 支持链式。"""
         if not getattr(plugin, "name", None):
             raise ValueError("plugin must have a name")
         plugin.apply(self)
@@ -256,6 +318,7 @@ class Host:
         return self
 
     def freeze(self) -> Host:
+        """冻结宿主：此后不可再 define 扩展点（装配期校验）。"""
         self._frozen = True
         return self
 
@@ -264,11 +327,11 @@ class Host:
         scope = RequestScope(target=self._sticky_target)
         return scope
 
-    async def dispatch(self, effect: Any, ctx: Any) -> Decision:
+    async def dispatch(self, effect: Effect | None, ctx: HookContextArg) -> Decision:
         """R1 注入点：before_invoke → transform → settle。
 
         scope 按 id(ctx) 在 Host 内部桥接到 call 阶段（不污染 ctx 与 scope）。
-        effect 作为参数直送各 tap 回调。
+        effect 作为参数直送各 tap 回调；ctx 为 RuntimeCtx（生产）或 HookCtx（桥接测试）。
         """
         scope = self.new_scope()
         self._scope_bridge[id(ctx)] = scope
@@ -277,8 +340,11 @@ class Host:
 
         before = await self.hook("before_invoke").call(scope, effect)
         if isinstance(before, Decision) and before.action is not DecisionAction.CONTINUE:
-            # 守卫短路：本轮没有 call，立即释放 dispatch 阶段占的资源（舱壁槽位）
+            # 守卫短路：本轮没有 call，立即释放 dispatch 阶段占的资源（舱壁槽位）。
+            # C2：同时清理 scope_bridge——短路后不会有 call 来 pop，残留会导致陈旧 scope
+            # 与 id(ctx) 复用串味。settle 仍用已创建的 scope（不依赖 bridge）。
             scope.release_all()
+            self._scope_bridge.pop(id(ctx), None)
             return await self._settle(scope, effect, ctx, before)
         transformed = await self.hook("transform").call(scope, effect, "")
         # transform 的链式产出回填 scope.trace（避免返回值被丢弃——预算提示等）
@@ -286,26 +352,40 @@ class Host:
             scope.trace.append(str(transformed))
         return await self._settle(scope, effect, ctx, Decision.continue_())
 
-    def scope_of(self, ctx: Any) -> RequestScope | None:
+    def scope_of(self, ctx: HookContextArg) -> RequestScope | None:
         """取回 dispatch 创建的 scope（call 阶段接力读取 target）。"""
         return self._scope_bridge.get(id(ctx))
 
-    def call(self, inner: Callable[[Any, Any], Awaitable[Any]]) -> Callable[[Any, Any], Awaitable[Any]]:
+    def call(
+        self, inner: Callable[[Effect | None, HookContextArg], Awaitable[Result]],
+    ) -> Callable[[Effect | None, HookContextArg], Awaitable[Result]]:
         """R1 注入点：AROUND 包裹真实 Port 调用，成功/失败触发观察扩展点。
 
-        Result（成功或失败信封）写入 scope.last_result（typed 字段，观察插件只读）。
+        inner 是 R4 ModelGateway.as_call()（签名确定的 `(effect, ctx) -> Result`），
+        wrapped 保持同签名交回 Runner。调用结果 Result 写入 scope.last_result（观察插件只读）。
+        around tap 的返回经 _coerce_result 归一为 Result（规则 6 唯一边界），
+        消除"outcome 是 Any"——outcome 声明为 TapReturn 联合，coerce 后确定是 Result。
         call 阶段发的降级信号在返回前经 settle 选级，写 sticky target 供下个 Effect 继承。
         """
-        async def wrapped(effect: Any, ctx: Any) -> Any:
+        async def wrapped(effect: Effect | None, ctx: HookContextArg) -> Result:
+            """包装真实调用：跑 AROUND 链 → 观察 → settle 降级 → 释放 → 回传 Result。"""
             scope = self.scope_of(ctx) or self.new_scope()
             self._scope_bridge[id(ctx)] = scope
 
-            async def core(s: RequestScope) -> Any:
+            async def core(s: RequestScope) -> Result:
+                """洋葱中心：真正调用注入的 inner（R4 网关）。"""
                 return await inner(effect, ctx)
 
             try:
-                outcome = await self.hook("around_invoke").call(scope, effect, core=core)
-                resolved = outcome.value if isinstance(outcome, Decision) and outcome.value is not None else outcome
+                # around 扩展点的返回确定是 Result/Decision/None（不含 str），
+                # call() 对外统一 TapReturn，故在此 cast 到窄联合再归一化（非 Any）。
+                outcome = cast(
+                    Result | Decision | None,
+                    await self.hook("around_invoke").call(scope, effect, core=core),
+                )
+                resolved = _coerce_result(outcome)
+                if resolved is None:
+                    raise RuntimeError("around_invoke produced no Result")
                 scope.last_result = resolved
                 await self.hook("after_invoke").call(scope, effect)
                 # call 阶段的 timeout/retry 降级信号：返回前跑 settle 更新 sticky target
@@ -315,7 +395,6 @@ class Host:
                 self._scope_bridge.pop(id(ctx), None)
                 return resolved
             except Exception:
-                from runtime import Result
                 err = Result.failure("INVOKE_ERROR", "port raised")
                 scope.last_result = err
                 await self.hook("invoke_error").call(scope, effect)
@@ -327,14 +406,17 @@ class Host:
 
         return wrapped
 
-    async def _settle(self, scope: RequestScope, effect: Any, ctx: Any, base: Decision) -> Decision:
+    async def _settle(
+        self, scope: RequestScope, effect: Effect | None, ctx: HookContextArg, base: Decision,
+    ) -> Decision:
         """settle 扩展点：有降级信号时由降级插件选 target 并覆盖占位。"""
         if not any(s.kind == SignalKind.DEGRADE for s in scope.signals):
             return base
         verdict = await self.hook("settle").call(scope, effect)
         if isinstance(verdict, Decision) and verdict.target:
             scope.target = verdict.target
-            scope.value = verdict.value
+            # verdict.value 至少是 Result/None；用唯一边界归一化后写入具名字段（规则 6）。
+            scope.value = _coerce_result(cast(Result | Decision | None, verdict.value))
             self._sticky_target = verdict.target  # 跨 Effect 继承（修 B1）
             if hasattr(ctx, "degrade_target"):
                 object.__setattr__(ctx, "degrade_target", verdict.target)

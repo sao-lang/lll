@@ -56,6 +56,31 @@ class TestComplete:
         llm = OpenAICompatLLM(base_url="x", api_key="k", model="m", client=_client(lambda r: httpx.Response(200)))
         assert isinstance(llm, LLMPort)
 
+    def test_bad_tool_json_keeps_response_body(self) -> None:
+        """N2：工具 arguments 坏 JSON 不得丢弃整份有效响应（正文保留、不误标网络错误）。"""
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={
+                "choices": [{"message": {
+                    "role": "assistant",
+                    "content": "here is your answer",
+                    "tool_calls": [{
+                        "id": "call-1",
+                        "function": {"name": "do_thing", "arguments": "{bad json"},
+                    }],
+                }}],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 2},
+                "model": "m",
+            })
+
+        llm = OpenAICompatLLM(base_url="https://api.test/v1", api_key="k",
+                              model="m", client=_client(handler))
+        resp = asyncio.run(llm.complete(_req(), _ctx()))
+        assert resp.error is None, f"坏 JSON 不该误标网络错误：{resp.error}"
+        assert resp.content == "here is your answer", "有效正文不能丢"
+        assert len(resp.tool_calls) == 1
+        assert resp.tool_calls[0].name == "do_thing"
+        assert resp.tool_calls[0].args == {}, "坏 JSON 参数降级为空字典"
+
 
 class TestStream:
     def test_stream_parses_sse_and_sets_usage(self) -> None:
@@ -77,6 +102,21 @@ class TestStream:
         chunks = asyncio.run(_collect(llm.stream(_req(), _ctx())))
         assert chunks == ["he", "llo"]
         assert llm.last_usage is not None and llm.last_usage.completion_tokens == 2
+
+    def test_stream_disconnect_does_not_fake_zero_usage(self) -> None:
+        """N1：流中途断流不得把 last_usage 设成全零 Usage() 伪装成功结算。
+
+        last_usage 必须保持 None，让网关的 "usage is None → 拒答" 防线生效，
+        避免假零成本 + 空内容写缓存污染后续请求。
+        """
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ReadError("connection reset mid-stream")
+
+        llm = OpenAICompatLLM(base_url="https://api.test/v1", api_key="k",
+                              model="m", client=_client(handler))
+        asyncio.run(_collect(llm.stream(_req(), _ctx())))
+        assert llm.last_usage is None, \
+            f"断流后 last_usage 应保持 None（由网关拒答），实际 {llm.last_usage!r}"
 
 
 class TestErrors:

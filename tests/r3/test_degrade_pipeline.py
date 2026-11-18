@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 
 from hooks import Decision, DecisionAction, Host, RequestScope, Signal
+from runtime import Effect, EffectKind
 
 from harness.resilience import DegradeLadder, DegradeMode, DegradeStep, Degradation
 
@@ -42,6 +43,22 @@ class TestProgressiveDegradation:
 
         cache_down = Signal("degrade", "cache_miss", "cache")
         assert plugin.select([primary_down, backup_down, cache_down]) == DegradeMode.REFUSE.value
+
+    def test_available_shrinks_across_effects_reaches_refuse(self) -> None:
+        """跨 Effect 逐级降级：每次故障收缩 available 并记住，backup 失败不得选回 primary。
+
+        真实场景每次 Effect 新建 scope（signals 不继承），若 available 只在局部副本 discard
+        而不写回插件实例，backup 故障时会重新从 {primary,backup,cache} 里选回 primary，
+        永远到不了 REFUSE——这是审计 R3-6 的实测断点。
+        """
+        plugin = _policy()
+        effect = Effect(EffectKind.LLM, {"model": "primary"})
+        # 第 1 个 Effect：primary 故障 → 选 backup，且 primary 应被永久剔除
+        assert plugin.select([Signal("degrade", "500", "primary")]) == "backup"
+        # 第 2 个 Effect：新 scope 只有 backup 故障信号 → 不得选回 primary，应到 cache
+        assert plugin.select([Signal("degrade", "500", "backup")]) == "cache"
+        # 第 3 个 Effect：cache 也故障 → 末级 REFUSE
+        assert plugin.select([Signal("degrade", "500", "cache")]) == DegradeMode.REFUSE.value
 
     def test_failed_target_not_registered_is_noop(self) -> None:
         """失败目标不在 available 时选级不变（不误伤健康目标）。"""

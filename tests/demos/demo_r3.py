@@ -98,16 +98,18 @@ async def breaker_demo() -> None:
 
 async def degradation_demo() -> None:
     """降级信号链：守卫 emit → settle 读信号 → 插件选级 → scope.target。"""
-    degradation = Degradation(_ladder(), available={"primary", "backup"})
-    assert degradation.select([]) == "primary"
+    # 选级演示：每次用新实例（available 跨 Effect 累积收缩是生产行为，实例复用会互相污染）。
+    assert Degradation(_ladder(), available={"primary", "backup"}).select([]) == "primary"
     primary_down = Signal("degrade", "breaker_open", "primary")
-    assert degradation.select([primary_down]) == "backup"
+    assert Degradation(_ladder(), available={"primary", "backup"}).select([primary_down]) == "backup"
     all_down = [primary_down, Signal("degrade", "timeout", "backup")]
-    assert degradation.select(all_down) == DegradeMode.REFUSE.value
+    assert Degradation(_ladder(), available={"primary", "backup"}).select(all_down) == DegradeMode.REFUSE.value
 
-    # 用 host 串起完整链路：before_invoke（BAIL）→ settle（BAIL）
+    # 用 host 串起完整链路：before_invoke（BAIL）→ settle（BAIL）；用全新实例。
     host = Host()
-    host.plugin(_FaultGuard()).plugin(degradation).freeze()
+    host.plugin(_FaultGuard()).plugin(
+        Degradation(_ladder(), available={"primary", "backup"})
+    ).freeze()
     assert host.hook("before_invoke").names == ("demo_fault_guard",)
     assert host.hook("settle").names == ("r3_degrade",)
 
@@ -118,7 +120,8 @@ async def degradation_demo() -> None:
     verdict = await host.dispatch(effect, ctx)
     assert verdict.action is DecisionAction.DEGRADE
     assert verdict.target == "backup"
-    assert host.scope_of(ctx) is not None and host.scope_of(ctx).target == "backup"  # type: ignore[union-attr]
+    # C2：守卫短路后 scope_bridge 已清理（本轮无 call），不残留陈旧 scope。
+    assert host.scope_of(ctx) is None
 
 
 async def idempotency_demo() -> None:

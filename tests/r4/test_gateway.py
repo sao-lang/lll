@@ -61,16 +61,13 @@ class TestGatewayStructured:
         assert llm.call_count == 2
 
     def test_repair_exhausted_strict_refuses(self) -> None:
-        """修复超次 + strict：拒答（抛错），绝不返回非法输出。"""
+        """修复超次 + strict：返回 SCHEMA_INVALID error 响应拒答（N3：不抛穿成 PORT_CRASHED）。"""
         llm = RecordingLLM([resp('{"age": -1}')])  # 一直非法
         spec = StructuredOutputSpec(schema=sample_schema(), mode="repair", max_repair=1, strict=True)
         gw = ModelGateway(llm=llm, spec=spec)
-        try:
-            asyncio.run(gw.complete(req(), pctx()))
-        except ValueError as exc:
-            assert "repair exhausted" in str(exc)
-        else:
-            raise AssertionError("expected ValueError for repair exhaustion")
+        r = asyncio.run(gw.complete(req(), pctx()))
+        assert r.error is not None and "SCHEMA_INVALID" in r.error
+        assert r.content == "", "拒答不得把非法输出当正文返回"
 
     def test_non_strict_returns_last(self) -> None:
         """非 strict 模式：修复超次后返回最后一次响应（调用方自行处置）。"""

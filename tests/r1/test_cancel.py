@@ -55,3 +55,29 @@ class TestCancellationToken:
         ctx = RuntimeCtx(effect=Effect(EffectKind.LLM, {}), state=AgentState(), session_id="s")
         bound = runner._bind(ctx, runner)
         assert bound.cancellation is token
+
+    def test_runner_cancel_stops_mid_run(self) -> None:
+        """B7：运行中 cancel() 必须能被 step 检查看到并停止后续 Effect。
+
+        CancellationToken frozen 的语义不变（cancel() 返回新对象），
+        Runner 用内部可变 holder 接收运行期取消，兑现 §4.1"每步检查"承诺。
+        """
+        def many_effects():
+            for _ in range(5):
+                yield Effect(EffectKind.LLM, {"messages": []})
+            yield Effect(EffectKind.END, {"output": "done"})
+
+        runner = Runner(dispatch=_dispatch, call=_call, cancellation=CancellationToken())
+        session = Session(session_id="s-mid", program_factory=many_effects)
+        # 先跑一步（未取消，正常执行一个 Effect）
+        first = asyncio.run(runner.step(session))
+        assert first.status == "running"
+        # 运行中取消
+        runner.cancel("user stop mid-run")
+        second = asyncio.run(runner.step(session))
+        assert second.status == "cancelled"
+        assert second.reason == "user stop mid-run"
+        assert second.effects == ()
+        # RunResult 也带取消原因（B6）
+        result = runner._result(session)
+        assert result.reason == "user stop mid-run"

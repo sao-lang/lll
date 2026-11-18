@@ -69,17 +69,36 @@ class TestV5Wiring:
 
         asyncio.run(run())
 
-    def test_scope_shared_between_dispatch_and_call(self) -> None:
-        """dispatch 写入的 scope.target 在 call 阶段可读（R3→R4 接力）。"""
+    def test_short_circuit_does_not_leak_scope_bridge(self) -> None:
+        """C2：守卫短路（本轮无 call）须清理 scope_bridge，避免陈旧 scope + id 复用串味。"""
         async def run() -> None:
             host = Host()
             host.define("before_invoke", HookKind.BAIL)
             host.define("settle", HookKind.BAIL)
             host.plugin(_Guard(should_block=True)).plugin(_Degradation()).freeze()
 
+            # 多个不同的 ctx 依次短路，每个都不应残留在 bridge 里
+            for i in range(10):
+                ctx = make_ctx(Effect(EffectKind.LLM, {}), AgentState(), "before_invoke")
+                await host.dispatch(Effect(EffectKind.LLM, {}), ctx)
+                assert host.scope_of(ctx) is None, f"短路后 ctx#{i} 的 scope 未清理"
+            assert len(host._scope_bridge) == 0, \
+                f"10 次短路后 bridge 应为空，实际残留 {len(host._scope_bridge)} 个"
+
+        asyncio.run(run())
+
+    def test_scope_shared_between_dispatch_and_call(self) -> None:
+        """健康路径：dispatch 创建的 scope 在 call 阶段可经 bridge 取回（R3→R4 接力）。"""
+        async def run() -> None:
+            host = Host()
+            host.define("before_invoke", HookKind.BAIL)
+            host.define("settle", HookKind.BAIL)
+            # 健康守卫（不短路），dispatch 后 scope 应留在 bridge 供 call 接力
+            host.plugin(_Guard(should_block=False)).plugin(_Degradation()).freeze()
+
             ctx = make_ctx(Effect(EffectKind.LLM, {}), AgentState(), "before_invoke")
             await host.dispatch(Effect(EffectKind.LLM, {}), ctx)
             scope = host.scope_of(ctx)
-            assert scope.target == "backup" or scope.target is None  # 待实现细节
+            assert scope is not None, "健康路径 dispatch 后 scope 应留在 bridge 供 call 读取"
 
         asyncio.run(run())

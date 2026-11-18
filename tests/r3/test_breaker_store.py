@@ -33,7 +33,38 @@ class _SpyStore:
         self.data[dim] = state
 
 
+class _SlowStore:
+    """模拟慢后端（Redis/DB）：load 内 await 制造挂起点，暴露 load→save 竞态。"""
+
+    def __init__(self) -> None:
+        self.data: dict[tuple[str, str], BreakerState] = {}
+
+    async def load(self, dim: tuple[str, str]) -> BreakerState | None:
+        await asyncio.sleep(0)  # 让出事件循环，制造并发交错窗口
+        return self.data.get(dim)
+
+    async def save(self, dim: tuple[str, str], state: BreakerState) -> None:
+        await asyncio.sleep(0)
+        self.data[dim] = state
+
+
 class TestBreakerStoreProtocol:
+    def test_concurrent_records_no_lost_updates(self) -> None:
+        """C1：慢 store 下并发 record 不得丢更新（load→save 须原子化）。"""
+        async def run() -> None:
+            store = _SlowStore()
+            # 高阈值/大样本，确保 100 次都进入 window 计数（不中途 OPEN 早退）
+            p = CircuitBreaker(
+                failure_rate=1.0, minimum_samples=1000, store=store,
+                clock=lambda: 0.0, open_cooldown_s=30.0,
+            )
+            await asyncio.gather(*(p.record(err_result("500"), DIM) for _ in range(100)))
+            final = await p.state(DIM)
+            assert final.failures == 100, \
+                f"并发 100 次失败应累计 100，实际 {final.failures}（丢更新）"
+
+        asyncio.run(run())
+
     def test_default_in_memory_store(self) -> None:
         """缺省用 InMemoryBreakerStore，异步 API 正常工作。"""
         async def run() -> None:

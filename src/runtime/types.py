@@ -151,6 +151,19 @@ class Usage:
     completion_tokens: int = 0
     cost_usd: float = 0.0
 
+    @classmethod
+    def from_mapping(cls, raw: Mapping[str, DynamicValue]) -> Usage:
+        """从外部形态恢复 Usage 的唯一归一化边界（规则 6）。
+
+        只挑已知三字段，忽略额外键（如旧快照/外部 port 的 total_tokens），
+        避免 `Usage(**raw)` 遇未知键抛 TypeError（B5）。
+        """
+        return cls(
+            prompt_tokens=int(raw.get("prompt_tokens", 0) or 0),
+            completion_tokens=int(raw.get("completion_tokens", 0) or 0),
+            cost_usd=float(raw.get("cost_usd", 0.0) or 0.0),
+        )
+
 
 @dataclass(frozen=True)
 class Result:
@@ -656,7 +669,12 @@ def _plain(obj: DynamicValue) -> DynamicValue:
         return str(obj)
     if isinstance(obj, Mapping):
         return {str(k): _plain(v) for k, v in obj.items()}
-    if isinstance(obj, (list, tuple, set, frozenset)):
+    if isinstance(obj, (set, frozenset)):
+        # B9：set 迭代顺序随 PYTHONHASHSEED 变化，须先规范化元素再按字符串键排序，
+        # 保证 canonical/指纹跨进程确定（元素可能异质，用 str 作稳定排序键）。
+        normalized = [_plain(v) for v in obj]
+        return sorted(normalized, key=lambda v: str(v))
+    if isinstance(obj, (list, tuple)):
         return [_plain(v) for v in obj]
     if hasattr(obj, "to_dict"):
         return _plain(getattr(obj, "to_dict")())
@@ -778,12 +796,16 @@ def restore_checkpoint(snapshot: JsonSnapshot, program_factory: Callable[[], Pro
                 seq=e["seq"], session_id=e["session_id"], step=e["step"],
                 state_snapshot=restore_state(cast(StateSnapshot, e["state_snapshot"])),
                 effects=tuple(
-                    Effect(EffectKind(x["kind"]), x["payload"], x["batch"], x["trace_id"])
+                    Effect(
+                        EffectKind(x["kind"]), x["payload"], x["batch"], x["trace_id"],
+                        # B2：恢复幂等键，否则 checkpoint 续跑后副作用去重/重试红线失效。
+                        idempotency_key=x.get("idempotency_key"),
+                    )
                     for x in e["effects"]
                 ),
                 results=tuple(
                     Result(ok=r["ok"], data=revive(r["data"]),
-                           usage=Usage(**r["usage"]) if r.get("usage") else None,
+                           usage=Usage.from_mapping(r["usage"]) if r.get("usage") else None,
                            error=PortError(**r["error"]) if r.get("error") else None)
                     for r in e["results"]
                 ),

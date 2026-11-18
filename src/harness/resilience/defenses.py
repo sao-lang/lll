@@ -87,26 +87,41 @@ class Degradation:
     name = "r3_degrade"
 
     def __init__(self, ladder: DegradeLadder, *, available: set[str] | None = None) -> None:
+        """装配降级插件：阶梯装配期强校验，可用目标集缺省为空（走 REFUSE）。
+
+        参数：
+            ladder: 降级阶梯（无环、末级 REFUSE、quality 严格递减）。
+            available: 初始可用注册名集合；None 视为空集。
+        """
         validate_ladder(ladder)
         self._ladder = ladder
         self._available = set(available) if available is not None else set()
 
     def pick(self, available: set[str] | None = None) -> DegradeStep:
+        """从给定（或自身）可用集里选 quality 最高级，全无则 REFUSE。"""
         return self._ladder.pick(available if available is not None else self._available)
 
     def select(self, signals: list[Signal]) -> str:
-        """按降级信号选最终目标（逐级收缩，末级 REFUSE）。"""
-        available = set(self._available)
+        """按降级信号选最终目标（跨 Effect 累积收缩，末级 REFUSE）。
+
+        R3-6 修复：故障目标必须从插件实例的 available 里**永久剔除并写回**，而非只在
+        局部副本 discard。v5.2 每次 Effect 新建 scope、signals 不继承，若剔除不写回，
+        backup 故障时会重新从初始集合选回 primary，永远到不了 REFUSE。ladder 的 REFUSE
+        级是无条件候选，目标剔除干净后 pick 自然落 REFUSE。
+        """
         for sig in signals:
             if sig.kind == SignalKind.DEGRADE and sig.failed_target:
-                available.discard(sig.failed_target)
-        choice = self.pick(available)
+                # 只剔除当前可用集里的目标：已剔除的、未注册的都不误伤（幂等）。
+                self._available.discard(sig.failed_target)
+        choice = self.pick(self._available)
         return choice.target or DegradeMode.REFUSE.value
 
     def apply(self, host: Host) -> None:
+        """挂载 settle 扩展点（BAIL）：有降级信号时选级。"""
         host.hook("settle").tap(self.name, self.settle)
 
     async def settle(self, scope: RequestScope, effect: Effect) -> Decision | None:
+        """settle 回调：有降级意图才按累积收缩后的 available 选目标。"""
         if not any(s.kind == SignalKind.DEGRADE for s in scope.signals):
             return None
         return Decision.degrade(self.select(scope.signals))
@@ -160,7 +175,7 @@ class RateLimit:
         scope.trace.append("ratelimit:exceed")
         if self._on_exceed is _ExceedPolicy.REJECT:
             return Decision.deny("rate_limited")  # deny 的 reason 是人读原因，保留状态串
-        scope.emit(Signal("degrade", "rate_limited"))
+        scope.emit(Signal(SignalKind.DEGRADE, "rate_limited"))
         return Decision.degrade("")  # 占位，settle 覆盖
 
     def apply(self, host: Host) -> None:
@@ -222,7 +237,7 @@ class Bulkhead:
             return Decision.continue_()
         if self._on_full is _ExceedPolicy.REJECT:
             return Decision.deny("bulkhead_full")  # deny reason 是人读状态串，保留
-        scope.emit(Signal("degrade", "bulkhead_full"))
+        scope.emit(Signal(SignalKind.DEGRADE, "bulkhead_full"))
         return Decision.degrade("")  # 占位，settle 覆盖
 
     def apply(self, host: Host) -> None:

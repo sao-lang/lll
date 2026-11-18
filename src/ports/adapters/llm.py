@@ -106,7 +106,14 @@ class OpenAICompatLLM:
             raw_fn = item.get("function")
             fn: dict[str, object] = raw_fn if isinstance(raw_fn, dict) else {}
             args: object = fn.get("arguments", "{}")
-            parsed = json.loads(args) if isinstance(args, str) else args
+            # N2：坏 JSON 只降级该工具调用的参数，不让它冒泡丢弃整份有效响应
+            # （否则正文丢失、整份响应被误标 NETWORK_ERROR 触发重试/熔断）。
+            parsed: object = args
+            if isinstance(args, str):
+                try:
+                    parsed = json.loads(args)
+                except json.JSONDecodeError:
+                    parsed = {}
             calls.append(ToolCall(
                 call_id=str(item.get("id", "")),
                 name=str(fn.get("name", "")),
@@ -159,6 +166,8 @@ class OpenAICompatLLM:
 
     async def _stream_impl(self, req: LLMRequest, ctx: PortCtx) -> AsyncIterator[str]:
         """异步生成器实现体；SSE 断流与取消均在 finally 关闭连接。"""
+        # N1：每次流开始重置结算口，避免复用实例时残留上次调用的 usage。
+        self.last_usage = None
         client = self._client or httpx.AsyncClient()
         acquired = self._client is None  # 自建客户端需自行关闭
         try:
@@ -194,8 +203,9 @@ class OpenAICompatLLM:
                             if isinstance(content, str) and content:
                                 yield content
         except Exception:
-            # 流中错误：折叠为无输出，usage 如实为零（不造假账单）。
-            self.last_usage = Usage()
+            # N1：流中断不得把 last_usage 设成全零 Usage()——那会绕过网关
+            # "usage is None → 拒答" 防线，记假零成本并把空内容写进缓存污染后续请求。
+            # 保持 None（初值即 None），由网关显式拒答；若断流前已收到 usage 则保留真实值。
             return
         finally:
             if acquired:

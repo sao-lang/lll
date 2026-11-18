@@ -123,6 +123,7 @@ class ModelGateway:
         REFUSE → 真拒答 Result.failure("REFUSED")，绝不调后端、绝不回退默认模型。
         """
         async def adapter(effect: Effect, ctx: object) -> Result:
+            """R1 call 适配器：读降级目标 → 构造请求 → complete → 折叠 error 为 Result。"""
             # 规则 6 例外：degrade_target 是 RuntimeCtx 的声明字段（具名桥接，非裸 meta key），
             # 鸭子读取兼容测试用简单 ctx。
             target = getattr(ctx, "degrade_target", None)
@@ -162,9 +163,9 @@ class ModelGateway:
         参数：
             request: LLM 请求。ctx: Port 上下文（含 run_id/user_id）。
         返回：
-            LLMResponse（缓存命中 / 正常返回 / 修复后返回）。
-        异常：
-            ValueError: 结构化校验超次且 strict（拒答）。
+            LLMResponse（缓存命中 / 正常返回 / 修复后返回）；strict 校验失败/修复超次时
+            返回带 error="SCHEMA_INVALID: ..." 的响应（N3：不抛 ValueError 穿透成
+            PORT_CRASHED；由 as_call 折叠为 Result.failure("SCHEMA_INVALID")）。
         """
         cached = await self._cache.get(request, version=self._prompt_version)
         if cached is not None:
@@ -183,9 +184,16 @@ class ModelGateway:
             elif self._spec is not None and self._spec.strict:
                 errors = self._validator.check(response.content or "")
                 if errors:
-                    raise ValueError(f"structured output invalid (strict): {errors}")
+                    # N3：strict 校验失败折叠为带 error 的响应（不抛 ValueError 穿透成
+                    # PORT_CRASHED）；as_call 读 error 前缀得到 SCHEMA_INVALID 语义。
+                    return LLMResponse(
+                        content="", tool_calls=[], usage=response.usage,
+                        model=response.model, error=f"SCHEMA_INVALID: {errors}",
+                    )
 
-        await self._cache.put(request, response, version=self._prompt_version)
+        # 非法输出绝不写缓存（否则污染后续请求）；仅合法响应入缓存。
+        if not response.error:
+            await self._cache.put(request, response, version=self._prompt_version)
         return response
 
     async def stream(
@@ -329,7 +337,10 @@ class ModelGateway:
             )
             current = await (llm or self._llm).complete(patched, ctx)
             self._record_cost(current, ctx)
-        # 超次：strict 模式拒答（抛错，绝不把非法输出当合法返回）。
+        # 超次：strict 模式拒答（N3：折叠为 SCHEMA_INVALID error 响应，不抛穿成 PORT_CRASHED）。
         if spec.strict:
-            raise ValueError("structured output repair exhausted")
+            return LLMResponse(
+                content="", tool_calls=[], usage=current.usage,
+                model=current.model, error="SCHEMA_INVALID: repair exhausted",
+            )
         return current

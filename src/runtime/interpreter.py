@@ -73,6 +73,8 @@ def _expand(effect: Effect) -> tuple[Effect, ...]:
             cast(EffectPayload, {**payload, "call": call}),  # 每个 call 变单值 payload
             batch=False,  # 子 Effect 已展开，不再是 batch
             trace_id=effect.trace_id,  # 保留链路溯源
+            # B3：父 Effect 的幂等键传给每个子 Effect，否则批量副作用的重试红线失效。
+            idempotency_key=effect.idempotency_key,
         )
         for call in calls
     )

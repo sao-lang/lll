@@ -5,11 +5,12 @@ ARCH-v5：状态（store + 三态机）直接由插件实例持有——插件�
 """
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from dataclasses import replace
 from typing import Protocol, runtime_checkable
 
-from hooks import Decision, Host, RequestScope, Signal
+from hooks import Decision, Host, RequestScope, Signal, SignalKind
 from runtime import Effect, Result
 
 from .types import BreakerState, BreakerStatus
@@ -33,12 +34,15 @@ class InMemoryBreakerStore:
     """默认熔断器存储：进程内字典，单实例闭环用。"""
 
     def __init__(self) -> None:
+        """空内存态：按维度键存储熔断快照。"""
         self._data: dict[Dimension, BreakerState] = {}
 
     async def load(self, dim: Dimension) -> BreakerState | None:
+        """读取维度快照；无记录返回 None。"""
         return self._data.get(dim)
 
     async def save(self, dim: Dimension, state: BreakerState) -> None:
+        """写入维度快照（覆盖）。"""
         self._data[dim] = state
 
 
@@ -100,8 +104,20 @@ class CircuitBreaker:
         self._store: BreakerStore = store if store is not None else InMemoryBreakerStore()
         self._dimension_of = dimension_of
         self._failed_target_of = failed_target_of or _default_failed_target
+        # C1：按维度加锁，保护 store 的 load→decide→save 读改写临界区，
+        # 避免异步 store（Redis/DB）下并发交错丢更新。进程内 shed 锁；多进程部署需 store 端原子操作。
+        self._locks: dict[Dimension, asyncio.Lock] = {}
+
+    def _lock_for(self, dim: Dimension) -> asyncio.Lock:
+        """取维度的 asyncio.Lock（首次懒建；单线程事件循环下创建原子）。"""
+        lock = self._locks.get(dim)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._locks[dim] = lock
+        return lock
 
     def apply(self, host: Host) -> None:
+        """挂载三个扩展点：守卫检查、成功/失败结果回喂计数。"""
         host.hook("before_invoke").tap(self.name, self.check_and_signal)
         host.hook("after_invoke").tap(self.name, self.observe)
         host.hook("invoke_error").tap(self.name, self.observe_error)
@@ -114,24 +130,35 @@ class CircuitBreaker:
         return dimension if dimension is not None else _EMPTY
 
     async def state(self, key: object) -> BreakerState:
+        """读取维度当前状态（无记录视为 CLOSED 默认态）。"""
         return await self._store.load(_normalize_key(key)) or BreakerState()
 
     async def check(self, dimension: Dimension | None) -> str | None:
-        """返回降级原因（OPEN 冷却内 / 半开超额），健康返回 None。"""
+        """返回降级原因（OPEN 冷却内 / 半开超额），健康返回 None。
+
+        C1：整个 load→冷却迁移→reload→判定在该维度的锁内完成，与 record 互斥。
+        """
         dim = self._dim(dimension)
-        st = await self.state(dim)
-        if st.status == BreakerStatus.OPEN.value:
-            if self._clock() - (st.opened_at or 0) < self._cooldown:
-                return "breaker_open"
-            await self.maybe_half_open(dim)
-            st = await self.state(dim)
-        if st.status == BreakerStatus.HALF_OPEN.value:
-            if len(st.window) >= self._max_probes:
-                return "breaker_half_open"
-        return None
+        async with self._lock_for(dim):
+            st = await self._store.load(dim) or BreakerState()
+            if st.status == BreakerStatus.OPEN.value:
+                if self._clock() - (st.opened_at or 0) < self._cooldown:
+                    return "breaker_open"
+                await self._maybe_half_open_unlocked(dim)  # 已持锁，调无锁版避免死锁
+                st = await self._store.load(dim) or BreakerState()
+            if st.status == BreakerStatus.HALF_OPEN.value:
+                if len(st.window) >= self._max_probes:
+                    return "breaker_half_open"
+            return None
 
     async def maybe_half_open(self, key: object) -> None:
+        """公开 API：冷却期满 OPEN→HALF_OPEN（带锁，供外部/测试调用）。"""
         dim = _normalize_key(key)
+        async with self._lock_for(dim):
+            await self._maybe_half_open_unlocked(dim)
+
+    async def _maybe_half_open_unlocked(self, dim: Dimension) -> None:
+        """无锁版本：调用方须已持有该维度锁（check 内部复用，避免不可重入死锁）。"""
         st = await self._store.load(dim)
         if st is None or st.status != BreakerStatus.OPEN.value:
             return
@@ -144,11 +171,22 @@ class CircuitBreaker:
     async def record(
         self, result: Result, dimension: Dimension | None = None, *, count: bool = True,
     ) -> None:
-        dim = self._dim(dimension)
-        st = await self._store.load(dim) or BreakerState()
+        """记录一次调用结果并推进三态机（锁内 load→decide→save，C1 防并发丢更新）。
+
+        参数：
+            result: 调用结果信封（ok 决定滑窗记成功/失败）。
+            dimension: 熔断维度；None 用空维度。count: False 表示只探查不计数。
+        """
         if not count:
             return
-        success = result.ok
+        dim = self._dim(dimension)
+        # C1：load→decide→save 全临界区加锁，异步 store 下并发不丢更新。
+        async with self._lock_for(dim):
+            await self._record_unlocked(dim, result.ok)
+
+    async def _record_unlocked(self, dim: Dimension, success: bool) -> None:
+        """无锁记录：调用方须已持该维度锁。"""
+        st = await self._store.load(dim) or BreakerState()
         window = (st.window + (not success,))[-self._window_size:]
         failures = st.failures + (0 if success else 1)
         if st.status == BreakerStatus.OPEN.value:
@@ -185,7 +223,7 @@ class CircuitBreaker:
         reason = await self.check(dim if isinstance(dim, tuple) else None)
         if reason:
             failed_target = self._failed_target_of(effect)
-            scope.emit(Signal("degrade", reason, failed_target))
+            scope.emit(Signal(SignalKind.DEGRADE, reason, failed_target))
             return Decision.degrade("")
         return None
 
@@ -197,5 +235,5 @@ class CircuitBreaker:
             await self.record(result, dim if isinstance(dim, tuple) else None)
 
     async def observe_error(self, scope: RequestScope, effect: Effect) -> None:
-        # invoke_error 由 host.call 写入 last_result（修复旧断点）
+        """invoke_error 观察点：last_result 已由 host.call 写入，复用 observe 记账。"""
         await self.observe(scope, effect)

@@ -86,6 +86,15 @@ class TestRetry:
             s.kind == "degrade" and s.reason == "retry_exhausted" for s in scope.signals
         )
 
+    def test_retry_exhausted_signal_carries_failed_target(self) -> None:
+        """R3-7：重试耗尽的降级信号带 failed_target，settle 才能定位并剔除失败后端。"""
+        p = RetryPolicy(max_attempts=2, base_delay=0.01, jitter="none", sleeper=_no_sleep)
+        eff = Effect(EffectKind.LLM, {"model": "primary"})
+        _, _, scope = _drive(p, [err_result("500")], effect=eff)
+        sig = next(s for s in scope.signals if s.reason == "retry_exhausted")
+        assert sig.failed_target == "primary", \
+            f"retry_exhausted 信号须带失败目标注册名，实际 {sig.failed_target!r}"
+
     def test_backoff_exponential_no_jitter(self) -> None:
         """无抖动：退避按 base_delay × multiplier^(attempt-1) 指数增长。"""
         delays, sleeper = _recording_sleeper()

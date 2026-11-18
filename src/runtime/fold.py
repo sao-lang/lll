@@ -176,7 +176,8 @@ def fold(
             hops=int(delta.get("hops", 0)),
             rounds=int(delta.get("rounds", 0)),
             cost_usd=float(delta.get("cost_usd", 0.0)) + cost,
-            tokens=int(delta.get("tokens", 0)),
+            # B1：usage 实际 token 与 cost 同口径扣进预算，否则 6 维预算的 token 维形同虚设。
+            tokens=int(delta.get("tokens", 0)) + tokens,
             parallel_children=int(delta.get("parallel_children", 0)),
         )
         cost = 0.0  # 已并入预算，清零以防下一个 Effect 重复累加

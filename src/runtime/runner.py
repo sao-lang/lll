@@ -45,6 +45,24 @@ from .types import (
 __all__ = ["InMemoryEventStore", "Runner"]
 
 
+@dataclass
+class _CancellationHolder:
+    """Runner 内部可变取消态（B7）。
+
+    CancellationToken 对外保持 frozen 语义（cancel() 返回新对象），但 Runner 在
+    构造后无法感知新对象，导致运行中取消失效。holder 由 Runner 独占持有，
+    通过 Runner.cancel() 原地置位；step() 每步读 holder，兑现 §4.1 取消承诺。
+    """
+
+    cancelled: bool = False
+    reason: str = ""
+
+    def cancel(self, reason: str) -> None:
+        """原地置位取消态（供 Runner.cancel 调用）。"""
+        self.cancelled = True
+        self.reason = reason
+
+
 class InMemoryEventStore(EventStore):
     """R1 内置默认 checkpoint 存储：进程内存字典。"""
 
@@ -235,7 +253,12 @@ class Runner:
         )
         self._checkpoint_every = max(1, checkpoint_every)  # 至少每步落盘
         self._max_steps = max_steps  # 步数硬上限
-        self._cancellation = cancellation  # 取消令牌（A5；None 表示不可取消）
+        self._cancellation = cancellation  # 原始令牌（A5/_bind identity；None 表示不可取消）
+        # B7：可变 holder 接收运行期 Runner.cancel()；初值来自构造令牌。
+        self._cancel_holder = _CancellationHolder(
+            cancelled=cancellation.cancelled if cancellation else False,
+            reason=cancellation.reason if cancellation else "",
+        )
         self._runtimes: dict[str, _Runtime] = {}  # session_id → 执行态
         self._reasons: dict[str, str] = {}  # session_id → 最近一次结束原因
         self._errors: dict[str, str | None] = {}  # session_id → 最近一次错误码
@@ -377,6 +400,17 @@ class Runner:
         res = await self.run(child)  # 递归跑完整子会话（含其自身的 CHILD）
         return Result.success(res.output, usage=Usage()), tuple(res.events)
 
+    def cancel(self, reason: str) -> None:
+        """运行中请求取消（B7）：下一 step 检查到后停止执行任何 Effect。
+
+        与 frozen CancellationToken 不冲突：token 对外仍不可变，本方法只更新 Runner
+        内部 holder。子 Agent 共享同一 Runner 树时经 holder 递归可见。
+
+        参数：
+            reason: 取消原因，写入 cancelled 事件与 RunResult.reason。
+        """
+        self._cancel_holder.cancel(reason)
+
     async def step(self, session: Session) -> StepReport:
         """执行一个 step（供调试 / HITL 单步使用）。
 
@@ -385,8 +419,10 @@ class Runner:
         返回：
             StepReport：本步步号、新 State、Effect/Result、状态与事件。
         """
-        # A5 取消检查：令牌已置位则本步不执行任何 Effect，写 cancelled 事件并报告。
-        if self._cancellation is not None and self._cancellation.cancelled:
+        # A5 取消检查：holder 已置位则本步不执行任何 Effect，写 cancelled 事件并报告。
+        # B7：读内部 holder（支持运行期 Runner.cancel()），不再只读构造时的不可变 token。
+        if self._cancel_holder.cancelled:
+            reason = self._cancel_holder.reason
             session.events.append(Event(
                 seq=len(session.events) + 1,
                 session_id=session.session_id,
@@ -395,13 +431,15 @@ class Runner:
                 effects=(),
                 results=(),
                 status="cancelled",
-                reason=self._cancellation.reason,
+                reason=reason,
             ))
+            # B6：取消原因也要进 RunResult（_result 读 _reasons），不能只进事件。
+            self._reasons[session.session_id] = reason
             return StepReport(
                 step=0,
                 state=session.state,
                 status="cancelled",
-                reason=self._cancellation.reason,
+                reason=reason,
                 events=tuple(session.events),
             )
 
@@ -465,16 +503,17 @@ class Runner:
                     effects = (Effect(EffectKind.END, {"reason": reason}),)
                     results = (Result.success(None),)
                     status = _StepStatus.DONE.value
-                elif effects and effects[0].kind is EffectKind.END:
-                    # Program 主动 END：不调用 Port，直接置 done。
-                    results = (Result.success(None),)
+                elif effects and all(e.kind is EffectKind.END for e in effects):
+                    # Program 主动 END：整批都是 END 才走快路径，不调用 Port（B8）。
+                    # 每个 END 都回填一个 success，保证 effects/results 等长配对。
+                    results = tuple(Result.success(None) for _ in effects)
                     status, reason = (
                         _StepStatus.DONE.value,
                         str(effects[0].payload.get("reason", "end")),
                     )
-                elif effects and effects[0].kind is EffectKind.WAIT_HUMAN:
-                    # 人工在环：本步挂起，等待 resume(answer)。
-                    results = (Result.success(None),)
+                elif effects and all(e.kind is EffectKind.WAIT_HUMAN for e in effects):
+                    # 人工在环：整批都是 WAIT_HUMAN 才挂起（B8：混合批不能被首元素吞掉）。
+                    results = tuple(Result.success(None) for _ in effects)
                     status, reason = _StepStatus.SUSPENDED.value, "wait_human"
                 else:
                     # 常规批：为每个 Effect 构造上下文并绑定 invoke，然后并发执行。
@@ -568,7 +607,32 @@ class Runner:
             _StepStatus.SUSPENDED.value,
         ):
             return self._result(session)  # 终态幂等：不重复跑
-        return await self._loop(session)
+        try:
+            return await self._loop(session)
+        except (ProgramInvalid, ProgramCrashed) as exc:
+            # B4：构造期 Program 违规不抛穿，折叠为 error RunResult（与 step 同口径）。
+            return self._program_error(session, exc)
+
+    def _program_error(self, session: Session, exc: AgentKitError) -> RunResult:
+        """构造期 Program 异常的兜底：写 error 事件 + 错误码，返回 error RunResult（B4）。
+
+        参数：
+            session: 目标会话。
+            exc: 构造期框架异常（ProgramInvalid/ProgramCrashed）。
+        """
+        session.events.append(Event(
+            seq=len(session.events) + 1,
+            session_id=session.session_id,
+            step=0,
+            state_snapshot=session.state,
+            effects=(),
+            results=(),
+            status=_StepStatus.ERROR.value,
+            reason=str(exc),
+        ))
+        self._errors[session.session_id] = exc.code
+        self._reasons[session.session_id] = str(exc)
+        return self._result(session)
 
     async def resume(self, session: Session, answer: DynamicValue) -> RunResult:
         """从挂起断点继续：答案 send 回 Program，事件日志不动。
@@ -580,10 +644,17 @@ class Runner:
             继续跑到终态的 RunResult。
         """
         # 重建解释器并按事件回放，把 answer 作为末事件（suspended）的回填值。
-        rt = _Runtime(InterpreterImpl(session.program_factory()))
+        try:
+            rt = _Runtime(InterpreterImpl(session.program_factory()))
+        except (ProgramInvalid, ProgramCrashed) as exc:
+            # B4：构造期失败不抛穿（与 run/step 同口径）。
+            return self._program_error(session, exc)
         self._runtimes[session.session_id] = rt
         self._replay(session, rt, answer=answer)
-        return await self._loop(session, initial_value=answer)
+        try:
+            return await self._loop(session, initial_value=answer)
+        except (ProgramInvalid, ProgramCrashed) as exc:
+            return self._program_error(session, exc)
 
     async def _loop(
         self, session: Session, initial_value: DynamicValue = None

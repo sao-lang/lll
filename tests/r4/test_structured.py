@@ -35,6 +35,12 @@ class TestValidateJsonSchema:
         errors = validate_json_schema("not json at all", sample_schema())
         assert errors
 
+    def test_bad_schema_type_does_not_skip_validation(self) -> None:
+        """N4：schema 的 type 写错（如 "str"）不得静默跳过校验放行非法输出。"""
+        bad_schema = {"type": "object", "properties": {"age": {"type": "str"}}}
+        errors = validate_json_schema({"age": 123}, bad_schema)
+        assert errors, "坏 schema type 应报校验错误，不能静默放行"
+
 
 class TestStructuredOutputValidator:
     def test_valid_output_passes(self) -> None:

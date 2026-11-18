@@ -62,6 +62,14 @@ class TestTimeout:
         assert any(s.kind == "degrade" and s.reason == "timeout" for s in scope.signals)
         assert any("timeout" in x for x in scope.trace)
 
+    def test_timeout_signal_carries_failed_target(self) -> None:
+        """R3-7：超时降级信号带 failed_target，settle 才能剔除失败后端。"""
+        eff = Effect(EffectKind.LLM, {"model": "primary"})
+        _, scope = _call(Timeout(timeout=0.01), _never, effect=eff)
+        sig = next(s for s in scope.signals if s.reason == "timeout")
+        assert sig.failed_target == "primary", \
+            f"timeout 信号须带失败目标注册名，实际 {sig.failed_target!r}"
+
     def test_no_timeout_passes_through(self) -> None:
         """未超时 → 原样透传内层 Decision。"""
         t = Timeout(timeout=1.0)
