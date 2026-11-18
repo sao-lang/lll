@@ -164,8 +164,8 @@ class TestProductionChainNoHandFill:
         runner = Runner(dispatch=host.dispatch, call=host.call(gw.as_call()))  # type: ignore[arg-type]
         session = Session(session_id="b1", program_factory=_program)
         asyncio.run(runner.run(session))
-        assert host._sticky_target == "backup", \
-            f"call 阶段降级信号应经 settle 写 sticky target，实际 {host._sticky_target!r}"
+        assert host.sticky_target_of("b1") == "backup", \
+            f"call 阶段降级信号应经 settle 写该会话的 sticky target，实际 {host.sticky_target_of('b1')!r}"
 
     def test_idempotency_key_from_effect_field(self) -> None:
         """幂等：键来自 Effect.idempotency_key 具名字段，不靠手填 meta。"""

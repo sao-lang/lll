@@ -87,6 +87,32 @@ class TestV5Wiring:
 
         asyncio.run(run())
 
+    def test_sticky_target_isolated_per_session(self) -> None:
+        """多会话降级目标互不覆盖：session A 切 backup 不影响 session B 的 sticky target。"""
+        async def run() -> None:
+            host = Host()
+            host.define("before_invoke", HookKind.BAIL)
+            host.define("settle", HookKind.BAIL)
+            host.plugin(_Guard(should_block=True)).plugin(_Degradation()).freeze()
+
+            ctx_a = make_ctx(Effect(EffectKind.LLM, {}), AgentState(), session_id="session-A")
+            ctx_b = make_ctx(Effect(EffectKind.LLM, {}), AgentState(), session_id="session-B")
+
+            # session A 触发降级 → sticky target 记到 A
+            await host.dispatch(Effect(EffectKind.LLM, {}), ctx_a)
+            assert host.sticky_target_of("session-A") == "backup"
+            # session B 尚未降级 → 不应继承 A 的目标
+            assert host.sticky_target_of("session-B") is None
+            scope_b = host.new_scope("session-B")
+            assert scope_b.target is None, "B 的新 scope 不得继承 A 的降级目标"
+
+            # 修改 A 的目标不影响 B：两个会话各自隔离
+            host.set_sticky_target("session-A", "refuse")
+            assert host.sticky_target_of("session-A") == "refuse"
+            assert host.sticky_target_of("session-B") is None
+
+        asyncio.run(run())
+
     def test_scope_shared_between_dispatch_and_call(self) -> None:
         """健康路径：dispatch 创建的 scope 在 call 阶段可经 bridge 取回（R3→R4 接力）。"""
         async def run() -> None:

@@ -286,9 +286,10 @@ class Host:
         self._frozen = False
         # scope 桥接：按 id(ctx) 关联（框架内部，不写进 ctx 或 scope.meta）
         self._scope_bridge: dict[int, RequestScope] = {}
-        # 会话级降级目标：call 阶段（timeout/retry）发的信号经 settle 选级后写这里，
-        # 供下一次 Effect 的 dispatch 继承——因为 R1 每个 Effect 新建 ctx/scope。
-        self._sticky_target: str | None = None
+        # 会话级降级目标（按 session_id 隔离，消除全局单槽串味）：call 阶段
+        # （timeout/retry）发的信号经 settle 选级后写对应会话槽，
+        # 供该会话下一次 Effect 的 dispatch 继承——R1 每个 Effect 新建 ctx/scope。
+        self._sticky_targets: dict[str, str] = {}
         # 预定义 6 个标准扩展点（ARCH-v5 §2）；宿主可用 define 覆盖语义。
         for name, kind in _STANDARD_HOOKS.items():
             self._hooks[name] = Hook(name, kind)
@@ -322,10 +323,26 @@ class Host:
         self._frozen = True
         return self
 
-    def new_scope(self) -> RequestScope:
-        """新建 scope，继承会话级 sticky target（call 阶段降级的跨 Effect 接力）。"""
-        scope = RequestScope(target=self._sticky_target)
-        return scope
+    def new_scope(self, session_id: str = "") -> RequestScope:
+        """新建 scope，继承该会话的 sticky target（call 阶段降级的跨 Effect 接力）。
+
+        参数：
+            session_id: 会话标识；缺省空串（无会话上下文的独立 scope）。
+        """
+        return RequestScope(target=self._sticky_targets.get(session_id))
+
+    @staticmethod
+    def _session_of(ctx: HookContextArg) -> str:
+        """从上下文提取 session_id（规则 6 例外：鸭子读取具名字段，兼容超集 ctx）。"""
+        return str(getattr(ctx, "session_id", "") or "")
+
+    def sticky_target_of(self, session_id: str) -> str | None:
+        """读取会话的 sticky 降级目标（无记录返回 None）；诊断/测试用。"""
+        return self._sticky_targets.get(session_id)
+
+    def set_sticky_target(self, session_id: str, target: str) -> None:
+        """显式设置会话的 sticky 降级目标（测试/装配用）。"""
+        self._sticky_targets[session_id] = target
 
     async def dispatch(self, effect: Effect | None, ctx: HookContextArg) -> Decision:
         """R1 注入点：before_invoke → transform → settle。
@@ -333,7 +350,7 @@ class Host:
         scope 按 id(ctx) 在 Host 内部桥接到 call 阶段（不污染 ctx 与 scope）。
         effect 作为参数直送各 tap 回调；ctx 为 RuntimeCtx（生产）或 HookCtx（桥接测试）。
         """
-        scope = self.new_scope()
+        scope = self.new_scope(self._session_of(ctx))
         self._scope_bridge[id(ctx)] = scope
         if hasattr(ctx, "degrade_target"):
             object.__setattr__(ctx, "degrade_target", scope.target)
@@ -369,7 +386,7 @@ class Host:
         """
         async def wrapped(effect: Effect | None, ctx: HookContextArg) -> Result:
             """包装真实调用：跑 AROUND 链 → 观察 → settle 降级 → 释放 → 回传 Result。"""
-            scope = self.scope_of(ctx) or self.new_scope()
+            scope = self.scope_of(ctx) or self.new_scope(self._session_of(ctx))
             self._scope_bridge[id(ctx)] = scope
 
             async def core(s: RequestScope) -> Result:
@@ -417,7 +434,8 @@ class Host:
             scope.target = verdict.target
             # verdict.value 至少是 Result/None；用唯一边界归一化后写入具名字段（规则 6）。
             scope.value = _coerce_result(cast(Result | Decision | None, verdict.value))
-            self._sticky_target = verdict.target  # 跨 Effect 继承（修 B1）
+            # 跨 Effect 继承（修 B1）：按 session_id 隔离，避免全局单槽串味。
+            self._sticky_targets[self._session_of(ctx)] = verdict.target
             if hasattr(ctx, "degrade_target"):
                 object.__setattr__(ctx, "degrade_target", verdict.target)
             return verdict

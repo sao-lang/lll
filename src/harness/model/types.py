@@ -21,6 +21,7 @@ __all__ = [
     "CostAttributor",
     "CostGuard",
     "CostRecord",
+    "Reservation",
     "RouteDecision",
     "StructuredOutputSpec",
     "UsageLedger",
@@ -173,21 +174,78 @@ class CostAttributor(UsageLedger):
         return {"total": self.total(), "records": self.count}
 
 
+@dataclass(frozen=True, slots=True)
+class Reservation:
+    """成本预留凭证（P2b）：调用前 reserve 得到，调用后 commit/cancel 结清。
+
+    字段：
+        id: 预留唯一标识（防重复结清）。amount: 预留金额（预估成本）。
+    """
+
+    id: int
+    amount: float
+
+
 @dataclass
 class CostGuard:
-    """成本硬闸：调用前 allow 检查，调用后 charge 扣减；超限拒绝（红线：不得绕过 Budgets）。"""
+    """成本硬闸：调用前 reserve 预留（硬闸），调用后 commit 按实际结算（P2b）。
+
+    并发下"先调用后扣费"会让硬闸失效（预算 0.5、20 并发全通过）；reserve 在读改写
+    原子操作里立即占用额度，超预算的调用在发起前就被拒。allow/charge 保留供
+    简单场景与向后兼容，但生产链路（gateway）走 reserve/commit。
+    """
 
     max_cost_usd: float
     spent: float = 0.0
+    _reserved: float = field(default=0.0, repr=False)
+    _seq: int = field(default=0, repr=False)
+    _active: dict[int, float] = field(default_factory=dict, repr=False)
 
     def allow(self, estimated_cost: float) -> bool:
-        """预计成本加上已花是否仍在预算内。"""
-        return round(self.spent + estimated_cost, 10) <= self.max_cost_usd
+        """（旧 API）预计成本加上已花是否仍在预算内；不含未结清预留。"""
+        return round(self.spent + self._reserved + estimated_cost, 10) <= self.max_cost_usd
 
     def charge(self, cost: float) -> None:
-        """扣减预算（调用后按实际成本）。"""
+        """（旧 API）扣减预算（调用后按实际成本）。"""
         self.spent = round(self.spent + cost, 10)
 
+    def reserve(self, estimated_cost: float) -> Reservation | None:
+        """调用前预留额度：原子检查并占用，超预算返回 None（硬闸拒绝）。
+
+        参数：
+            estimated_cost: 预估成本（>=0；负数视为 0）。
+        返回：
+            Reservation 凭证（供 commit/cancel）；预算不足返回 None。
+        """
+        amount = max(0.0, estimated_cost)
+        if not self.allow(amount):
+            return None
+        self._seq += 1
+        self._reserved = round(self._reserved + amount, 10)
+        self._active[self._seq] = amount
+        return Reservation(id=self._seq, amount=amount)
+
+    def commit(self, reservation: Reservation, actual: float) -> None:
+        """调用后结清：释放预留、按实际成本扣减（差额自动退还/补扣）。
+
+        未登记的凭证（重复/伪造）被忽略，防止重复扣减。
+
+        参数：
+            reservation: reserve 返回的凭证。actual: 实际成本。
+        """
+        if reservation.id not in self._active:
+            return
+        del self._active[reservation.id]
+        self._reserved = round(self._reserved - reservation.amount, 10)
+        self.spent = round(self.spent + max(0.0, actual), 10)
+
+    def cancel(self, reservation: Reservation) -> None:
+        """调用失败取消：释放预留且不记支出。"""
+        if reservation.id not in self._active:
+            return
+        del self._active[reservation.id]
+        self._reserved = round(self._reserved - reservation.amount, 10)
+
     def remaining(self) -> float:
-        """剩余预算。"""
-        return round(self.max_cost_usd - self.spent, 10)
+        """剩余可用预算（扣除已花与未结清预留）。"""
+        return round(self.max_cost_usd - self.spent - self._reserved, 10)
