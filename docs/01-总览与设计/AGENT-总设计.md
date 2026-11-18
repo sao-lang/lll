@@ -7,7 +7,8 @@
 > **状态**：v5.0 设计定稿——R2 插件宿主已按 tapable 式 Hook 原语重构（架构基线 `.workbuddy/specs/ARCH-v5.md`，唯一真相源）；R1/R2/R3/R4 已落地且各有门禁，其余为设计态。
 > **版本记录**：
 > - v5.0（2026-11-18）：**架构重构**。R2 由「HookMode 四 mode + HookBus.emit + ControlState + DEGRADER」彻底重构为 tapable 式原语——5 种 `HookKind`（`Bail`/`Waterfall`/`Loop`/`Parallel`/`Around`）+ `Host`/`RequestScope` 两层模型 + `Plugin.apply(host)`（跨调用状态由插件实例自身持有，无独立 Policy 层）。旧概念（HookMode 五泳道/四 mode、ControlState、DEGRADER、`bus.emit`、`degrade_target` 构造参数、Signal 冒泡）全部作废、不做兼容。R1 `Runner(dispatch, call, ...)` 签名与 `_settle` 四 action 消费保持不变（四模块命脉）。本次重写 §2、§3、R1、R2 章节，其余章节不变。
-> - v5.1（2026-11-18）：**参数直送回调签名**。`Hook.call(scope, effect, ...)` 把当前 `Effect` 作为请求期输入直送每个 tap（BAIL/LOOP/PARALLEL `fn(scope, effect)`；WATERFALL `fn(value, effect)`；AROUND `fn(next, scope, effect)`），装配期配置走插件构造参数私有注入；`RequestScope` 删除 `meta`，改为 typed 协作字段（`signals/target/last_result/trace/value/releases`）；R4 降级桥接由 `ctx.meta` 裸键改为 `RuntimeCtx.degrade_target` 具名字段，Effect 幂等键改为具名 `idempotency_key`。配套修复 B1（`_sticky_target` 跨 Effect 继承）、B2（`failed_target_of`）、E1~E4。
+> - v5.1（2026-11-18）：**参数直送回调签名**。`Hook.call(scope, effect, ...)` 把当前 `Effect` 作为请求期输入直送每个 tap（BAIL/LOOP/PARALLEL `fn(scope, effect)`；WATERFALL `fn(value, effect)`；AROUND `fn(next, scope, effect)`），装配期配置走插件构造参数私有注入；`RequestScope` 删除 `meta`，改为 typed 协作字段（`signals/target/last_result/trace/value/releases`）；R4 降级桥接由 `ctx.meta` 裸键改为 `RuntimeCtx.degrade_target` 具名字段，Effect 幂等键改为具名 `idempotency_key`。配套修复 B1（`_sticky_targets: dict[session_id, str]` 按会话隔离的跨 Effect 继承）、B2（`failed_target_of`）、E1~E4。
+> - v5.2（2026-11-18）：**断点修复 + 并发硬闸**。R1：usage token/cost 同口径扣预算、幂等键恢复/展开、运行期 `Runner.cancel()`、构造期异常不抛穿、混合批次等长、set 确定性序列化；R2/R3：degrade 信号改用 `SignalKind.DEGRADE`、`Degradation.select` 累积收缩到 REFUSE、`failed_target_of`、熔断按维度 asyncio.Lock、`_sticky_targets` 按会话隔离；R4：singleflight 防击穿、`CostGuard.reserve/commit/cancel` 调用前预留、strict 校验失败返回 `SCHEMA_INVALID` error；类型收敛（`HookContextArg`/`TapReturn`/`Result|None`）、魔法串消除、docstring 补齐。详见 `.workbuddy/specs/BREAKPOINT-FIX-PLAN.md`。
 > - v2.x：历史版本（架构已作废，不再兼容）。
 
 ---
@@ -151,7 +152,7 @@ flowchart TD
     NX -->|END / wait_human| T["终态 / 挂起"]
 ```
 
-> **信号与降级（v5.1）**：守卫/重试/超时检测到故障 → `scope.emit(Signal("degrade", reason, failed_target))`；`settle` 扩展点读 `scope.signals`，由降级插件（Degradation）选 target 写入 `scope.target`；Host `_settle` 把它刷新到 `ctx.degrade_target` 具名字段与 `_sticky_target`（跨 Effect 继承）→ R4 `as_call()` 从 `ctx.degrade_target` 读目标并切后端或 REFUSE 拒答；本轮结束 `scope.release_all()` 逆序释放资源。无独立 Signal 层、无 ControlState、无 `scope.meta` / `ctx.meta` 裸键桥接。
+> **信号与降级（v5.2）**：守卫/重试/超时检测到故障 → `scope.emit(Signal(SignalKind.DEGRADE, reason, failed_target))`；`settle` 扩展点读 `scope.signals`，由降级插件（Degradation）选 target 写入 `scope.target`（失败目标按 failed_target 从 available 累积剔除，全剔除落 REFUSE）；Host `_settle` 把它刷新到 `ctx.degrade_target` 具名字段与 `_sticky_targets[session_id]`（经 `_session_of(ctx)` 取键，按会话隔离的跨 Effect 继承）→ R4 `as_call()` 从 `ctx.degrade_target` 读目标并切后端或 REFUSE 拒答；本轮结束 `scope.release_all()` 逆序释放资源。无独立 Signal 层、无 ControlState、无 `scope.meta` / `ctx.meta` 裸键桥接。
 
 ---
 
@@ -338,7 +339,9 @@ DONE = _Done()
 class Runner:
     def __init__(self, dispatch: DispatchFn, call: CallFn, *,
                  store: EventStore|None=None,
-                 ctx_factory=None, checkpoint_every=1, max_steps=1000): ...
+                 ctx_factory=None, checkpoint_every=1, max_steps=1000,
+                 cancellation: CancellationToken | None = None): ...
+    def cancel(self, reason: str) -> None: ...   # 运行期取消，下一 step 生效（内部 _CancellationHolder）
     async def run(self, session: Session) -> RunResult: ...
     async def step(self, session: Session) -> StepReport: ...
     async def resume(self, session: Session, answer: DynamicValue) -> RunResult: ...
@@ -425,7 +428,7 @@ Host 是**唯一装配与分发入口**：`define(name, kind)` 定义扩展点�
 - **Parallel**：`gather` 全执行、异常隔离、返回 `None`（或首个结果）。
 - **Around**：fn 收到 `next` 回调，包裹中心调用（retry 内、timeout 外）。
 
-**两层模型**：`Host` 持有扩展点与每次调用新建的 `RequestScope`（signals/target/last_result/trace/value/releases，无 `meta`）；跨调用状态由插件实例自身持有（熔断三态机在 `CircuitBreaker`、ladder+available 在 `Degradation`）；无独立 Policy 层、无 Signal 层、无 ControlState。Host 内部用 `_scope_bridge[id(ctx)]` 关联 dispatch 与 call 阶段的 scope，`_sticky_target` 承担降级目标的跨 Effect 继承。
+**两层模型**：`Host` 持有扩展点与每次调用新建的 `RequestScope`（signals/target/last_result/trace/value/releases，无 `meta`）；跨调用状态由插件实例自身持有（熔断三态机在 `CircuitBreaker`、ladder+available 在 `Degradation`）；无独立 Policy 层、无 Signal 层、无 ControlState。Host 内部用 `_scope_bridge[id(ctx)]` 关联 dispatch 与 call 阶段的 scope，`_sticky_targets: dict[session_id, str]` 按会话隔离承担降级目标的跨 Effect 继承（替代全局单槽，消除多会话串味）。
 
 ### R2.3 流程图
 
@@ -452,8 +455,11 @@ class HookKind(str, Enum):
     BAIL="bail"; WATERFALL="waterfall"; LOOP="loop"
     PARALLEL="parallel"; AROUND="around"
 
+class SignalKind(str, Enum):
+    DEGRADE="degrade"; ABORT="abort"     # 代码内一律用枚举，禁裸串
+
 class Signal:
-    kind: str          # "degrade" / "abort" / "budget" ...
+    kind: SignalKind | str   # SignalKind.DEGRADE / SignalKind.ABORT（无 budget 取值）
     reason: str
     failed_target: str|None = None
 
@@ -473,10 +479,10 @@ class Decision:
 class RequestScope:                      # 每次 call 新建；替代 ControlState；只放协作数据，无 meta
     signals: list[Signal] = field(default_factory=list)
     target: str|None = None              # settle 写入，供 R4 经 ctx.degrade_target 读取
-    last_result: Any = None              # host.call 写入本次 Result，观察插件只读
+    last_result: Result | None = None    # host.call 写入本次 Result，观察插件只读（_coerce_result 归一化）
     trace: list[str] = field(default_factory=list)
-    value: Any = None                    # settle 最终判决载体
-    releases: list[Any] = field(default_factory=list)   # 资源释放回调，Host 每轮结束逆序执行
+    value: Result | None = None          # settle 兜底判决载体（Result|None，非 Any）
+    releases: list[Callable[[], None]] = field(default_factory=list)   # 资源释放回调，Host 每轮结束逆序执行
     def emit(self, signal: Signal) -> None: ...
     def release_all(self) -> None: ...   # LIFO、幂等
 
@@ -497,7 +503,11 @@ class Host:                              # 替代 HookBus（无 Policy 注册表
     def define(self, name: str, kind: HookKind) -> Hook: ...
     def plugin(self, plugin: Plugin) -> Host: ...       # 调 plugin.apply(self)
     def freeze(self) -> Host: ...
-    def new_scope(self) -> RequestScope: ...
+    def new_scope(self, session_id: str = "") -> RequestScope: ...   # 继承该会话 sticky target
+    @staticmethod
+    def _session_of(ctx: RuntimeCtx | HookCtx) -> str: ...
+    def sticky_target_of(self, session_id: str) -> str | None: ...
+    def set_sticky_target(self, session_id: str, target: str) -> None: ...
     async def dispatch(self, effect, ctx) -> Decision: ...   # R1 注入点，签名不变
     def call(self) -> Callable: ...                          # R1 注入点，签名不变
 
@@ -526,7 +536,7 @@ class Registry:                                          # 注册表
 | `settle` | BAIL | 降级裁决：读 scope.signals，降级插件选 target 写 scope.target |
 
 **Decision.action → R1 行为**：continue→继续；rewrite→改写；deny→拒绝；ask→挂起；retry→重放；degrade→换目标；fallback→兜底；abort→终止。
-**Signal → 降级链**：守卫/重试/超时 → `scope.emit(Signal("degrade", reason, failed_target))`；`settle` 读 signals 由降级插件（Degradation.select）选 target 写 `scope.target` → Host `_settle` 刷新 `ctx.degrade_target` 具名字段与 `_sticky_target` → R4 `as_call()` 从 `ctx.degrade_target` 切后端或 REFUSE 真拒答；本轮结束 `scope.release_all()` 逆序释放资源。
+**Signal → 降级链**：守卫/重试/超时 → `scope.emit(Signal(SignalKind.DEGRADE, reason, failed_target))`；`settle` 读 signals 由降级插件（Degradation.select）选 target 写 `scope.target` → Host `_settle` 刷新 `ctx.degrade_target` 具名字段与 `_sticky_targets[session_id]`（按会话隔离）→ R4 `as_call()` 从 `ctx.degrade_target` 切后端或 REFUSE 真拒答；本轮结束 `scope.release_all()` 逆序释放资源。
 
 ### R2.6 可插拔契约
 
