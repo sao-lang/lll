@@ -81,35 +81,35 @@ class RetryPolicy:
         sleeper = self._sleep or asyncio.sleep
         prev_delay = 0.0
         last = Decision.continue_()
-        for attempt in range(1, self._spec.max_attempts + 1):
+        for attempt in range(1, self._spec.max_attempts + 1):  # 从 1 计到 max_attempts；末次失败走耗尽降级而非再退避
             verdict = await next_fn()
             last = verdict
             result = verdict.value if isinstance(verdict, Decision) else verdict
-            if not isinstance(result, Result):
+            if not isinstance(result, Result):  # 非 Result 载体（守卫短路的 Decision）原样透传，不参与重试判定
                 return verdict
             fc = classify_failure(result, scope)
-            if not fc.retryable or result.ok:
+            if not fc.retryable or result.ok:  # 成功或确定性失败立即返回，避免放大不可逆副作用
                 return verdict
             scope.trace.append(f"retry:classified:{fc.code}")
-            if attempt >= self._spec.max_attempts:
+            if attempt >= self._spec.max_attempts:  # 末次仍失败：发耗尽降级信号，由 settle 剔除该目标
                 scope.trace.append("retry:exhausted")
                 # R3-7：带上失败目标注册名，settle 才能从 available 剔除它（否则选回自身）。
                 scope.emit(Signal(SignalKind.DEGRADE, "retry_exhausted", self._failed_target_of(effect)))
                 return verdict
-            if self._is_retryable_side_effect(scope, effect):
+            if self._is_retryable_side_effect(scope, effect):  # 无幂等键的 TOOL 副作用禁止重试，防重复执行
                 return Decision.deny("idempotency_required for side-effect retry")
             delay = backoff_delay(
                 attempt, self._spec, self._rng,
                 prev_delay=prev_delay, retry_after=fc.suggested_delay,
             )
-            prev_delay = delay
+            prev_delay = delay  # 留存本次退避值供下次 decorrelated 抖动使用（解相关防同步重试）
             await sleeper(delay)
         return last
 
     def _is_retryable_side_effect(self, scope: RequestScope, effect: Effect) -> bool:
         """幂等红线：TOOL 副作用无幂等键时禁止重试。"""
-        if not self._spec.idempotency_required:
+        if not self._spec.idempotency_required:  # 显式关闭幂等要求才放行重试，默认保守拒绝
             return False
-        if effect.kind != EffectKind.TOOL:
+        if effect.kind != EffectKind.TOOL:  # 非 TOOL 无副作用风险，不受幂等键约束
             return False
         return not bool(effect.idempotency_key)

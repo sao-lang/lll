@@ -130,6 +130,7 @@ class ModelGateway:
             f"{decision.reason}->{target or 'default'}"
         )
         if target is None or self._registry is None:
+            # 无目标或未接注册表时无法映射实例，回退默认后端——兼容未装配注册表的旧行为。
             return self._llm
         resolved = self._registry.resolve_llm(target)
         if resolved is None:
@@ -189,14 +190,14 @@ class ModelGateway:
             PORT_CRASHED；由 as_call 折叠为 Result.failure("SCHEMA_INVALID")）。
         """
         cached = await self._cache.get(request, version=self._prompt_version)
-        if cached is not None:
+        if cached is not None:  # 命中即短路：不再路由、不再调后端、不再记成本（usage 已随条目存好）
             return cached
 
         # P2a singleflight：相同 key 的并发 miss 共享一次完整调用（含记账/校验/缓存），
         # 后续等待者直接拿同一 Future 的结果，不再各调一次后端、各记一笔成本。
         key = cache_key_string(request, prompt_version=self._prompt_version)
         inflight = self._inflight.get(key)
-        if inflight is None:
+        if inflight is None:  # 首个 miss 成为 owner 建 Future；并发后来者走 shield 等同一结果，不重复击穿
             loop = asyncio.get_running_loop()
             inflight = loop.create_future()
             # 消费 owner 路径 fut 的异常，避免无等待者时 "Future exception was never retrieved"；
@@ -205,12 +206,12 @@ class ModelGateway:
                 lambda f: f.exception() if not f.cancelled() else None
             )
             self._inflight[key] = inflight
-            try:
+            try:  # owner 独占后端调用；异常/取消必须广播给等待者，避免它们各自重试再次击穿
                 response = await self._complete_miss(request, ctx, degrade_target)
                 inflight.set_result(response)
             except BaseException as exc:
                 # 异常/取消传播给所有等待者（避免它们各自重试再次击穿）。
-                if not inflight.done():
+                if not inflight.done():  # 幂等防御：已置终态时再 set 会抛 InvalidStateError 淹没原异常
                     inflight.set_exception(exc)
                 raise
             finally:
@@ -227,7 +228,7 @@ class ModelGateway:
         失败/异常 cancel 释放预留——彻底消除"先调用后扣费"的并发击穿。
         """
         reservation = None
-        if self._cost_guard is not None:
+        if self._cost_guard is not None:  # 有硬闸才预留；reserve 用预估兜底，失败即视为预算耗尽
             reservation = self._cost_guard.reserve(self._cost_estimator(request))
             if reservation is None:
                 # 预算不足：调用前就拒，绝不发起后端请求。
@@ -236,10 +237,10 @@ class ModelGateway:
                     error="COST_LIMIT: budget exhausted before call",
                 )
 
-        try:
+        try:  # 包住整条调用链：任何异常/取消都必须走到下面释放预留，不留悬空额度
             llm = self._resolve_llm(request, ctx, degrade_target=degrade_target)
             response = await llm.complete(request, ctx)
-            if response.error:
+            if response.error:  # 错误响应提前返回：不校验、不缓存；预留必须在此释放而非拖到结算
                 # 后端失败：释放预留、照实记账（usage 为零由响应自带）。
                 if reservation is not None and self._cost_guard is not None:
                     self._cost_guard.cancel(reservation)
@@ -247,13 +248,13 @@ class ModelGateway:
                 self._record_cost(response, ctx)
                 return response
 
-            if self._validator is not None:
+            if self._validator is not None:  # 仅装配 spec 时才有校验器；非结构化场景跳过校验直接结算
                 # E6：按 spec.mode 决定是否修复；constrained/prompt 模式只校验不修复。
                 if self._validator.should_repair:
                     response = await self._complete_with_repair(response, request, ctx, llm=llm)
-                elif self._spec is not None and self._spec.strict:
+                elif self._spec is not None and self._spec.strict:  # 非修复模式靠 strict 兜底拒绝非法输出
                     errors = self._validator.check(response.content or "")
-                    if errors:
+                    if errors:  # 有错即判非法：折叠成 error 响应，绝不流入缓存或工具调用
                         # N3：strict 失败折叠 error（不抛穿）；预留也要释放。
                         if reservation is not None and self._cost_guard is not None:
                             self._cost_guard.cancel(reservation)
@@ -290,7 +291,7 @@ class ModelGateway:
             流式路径禁用结构化校验（无法校验半截流），不经过 R1 Effect 循环。
         """
         cached = await self._cache.get(request, version=self._prompt_version)
-        if cached is not None:
+        if cached is not None:  # 命中直接吐缓存文本，跳过预留/后端/结算（usage 已随条目存好）
             # 流式是 Port 层，ctx 是 PortCtx（无 hook trace）；缓存命中信息随响应走。
             for ch in cached.content or "":
                 yield ch
@@ -305,7 +306,7 @@ class ModelGateway:
 
         chunks: list[str] = []
         llm = self._resolve_llm(request, ctx, degrade_target=degrade_target)
-        try:
+        try:  # 断流/取消也从这里传播；只有正常流末才结算，异常一律释放预留
             # LLMPort.stream 返回 AsyncIterator（PEP 525 签名），直接 async for 迭代。
             async for chunk in llm.stream(request, ctx):
                 chunks.append(chunk)
@@ -323,7 +324,7 @@ class ModelGateway:
             self._record_cost(full_response, ctx, reservation=reservation)
             reservation = None
             await self._cache.put(request, full_response, version=self._prompt_version)
-        except BaseException:
+        except BaseException:  # 断流/取消：不结算不写缓存，取消预留以免额度悬空
             if reservation is not None and self._cost_guard is not None:
                 self._cost_guard.cancel(reservation)
             raise
@@ -345,6 +346,7 @@ class ModelGateway:
     async def _stream_events_impl(
         self, request: LLMRequest, ctx: PortCtx, *, degrade_target: str | None = None
     ) -> AsyncIterator[StreamEvent]:
+        """实现体：透传/包装后端事件，遇 USAGE 或流末 last_usage 结算，断流释放预留。"""
         cached = await self._cache.get(request, version=self._prompt_version)
         if cached is not None:
             yield StreamEvent(kind=StreamEventKind.TEXT_DELTA, data=cached.content or "")
@@ -354,7 +356,7 @@ class ModelGateway:
 
         # P2b：事件流同样调用前预留、流末结算（硬闸三路径一致）。
         reservation = None
-        if self._cost_guard is not None:
+        if self._cost_guard is not None:  # 与 complete/stream 同闸：预留失败即拒流，不建立事件源
             reservation = self._cost_guard.reserve(self._cost_estimator(request))
             if reservation is None:
                 raise ValueError("cost budget exceeded (CostGuard) before stream_events")
@@ -362,23 +364,23 @@ class ModelGateway:
         chunks: list[str] = []
         settled: Usage | None = None
         llm = self._resolve_llm(request, ctx, degrade_target=degrade_target)
-        try:
+        try:  # 同 stream：仅正常流末结算；异常/取消取消预留，绝不留半途账单
             # 后端有 stream_events 直接用；旧后端用帮助函数把文本流包成事件流。
             # 规则 6 例外：stream_events 是可选能力探测（具名固定字符串），不在 LLMPort 强制协议内。
-            if has_stream_events(llm):
+            if has_stream_events(llm):  # 能力探测决定事件源：有则用原生事件，旧后端走文本包装兜底
                 stream_events_fn = getattr(llm, "stream_events")  # noqa: B009
                 source = stream_events_fn(request, ctx)
             else:
                 source = wrap_text_stream(llm, request, ctx)
-            async for event in source:
-                if event.kind is StreamEventKind.TEXT_DELTA and isinstance(event.data, str):
+            async for event in source:  # 透传同时旁路累积文本与 usage，供流末兜底结算/写缓存
+                if event.kind is StreamEventKind.TEXT_DELTA and isinstance(event.data, str):  # 只收文本块拼完整响应；守卫挡住畸形 data
                     chunks.append(event.data)
-                elif event.kind is StreamEventKind.USAGE and isinstance(event.data, Usage):
+                elif event.kind is StreamEventKind.USAGE and isinstance(event.data, Usage):  # USAGE 优先作结算依据；守卫过滤同 kind 的坏负载
                     settled = event.data
                 yield event  # 原样透传，包含工具/handoff/done
 
             # 结算：优先事件里的 USAGE，其次后端 last_usage；两者都无则拒绝（不记假成本）。
-            usage = settled or llm.last_usage
+            usage = settled or llm.last_usage  # 断流可能收不到 USAGE 事件，靠 last_usage 兜底，绝不记假零成本
             if usage is None:
                 raise ValueError(
                     "LLMPort.stream_events() finished without USAGE or last_usage; "
@@ -388,7 +390,7 @@ class ModelGateway:
             self._record_cost(full, ctx, reservation=reservation)
             reservation = None
             await self._cache.put(request, full, version=self._prompt_version)
-        except BaseException:
+        except BaseException:  # 断流/取消：释放预留；不结算不写缓存，避免半途账单与污染条目
             if reservation is not None and self._cost_guard is not None:
                 self._cost_guard.cancel(reservation)
             raise
@@ -405,7 +407,7 @@ class ModelGateway:
                 无则走旧 allow/charge 兼容路径（流式等未预留的场景）。
         """
         cost = float(response.usage.cost_usd)
-        if reservation is not None and self._cost_guard is not None:
+        if reservation is not None and self._cost_guard is not None:  # 有预留走 commit 按实结清；差额退还/补扣，不按预估死扣
             # P2b：按实际成本结清预留（差额退还/补扣）。
             self._cost_guard.commit(reservation, cost)
         elif self._cost_guard is not None:
@@ -438,10 +440,10 @@ class ModelGateway:
         assert self._spec is not None  # validator 存在时 spec 必存在（构造时同源创建）
         spec = self._spec
         current = response
-        for _ in range(self._validator.max_repair + 1):
+        for _ in range(self._validator.max_repair + 1):  # +1 是首次校验，其后最多 max_repair 次修复，防止无限重试烧成本
             # 走 validator 持有的校验器（默认或注入），保证"校验"与"修复"同一口径。
             errors = self._validator.check(current.content or "")
-            if not errors:
+            if not errors:  # 一旦合法立即返回，避免对已合规输出再发起一次无谓修复调用
                 return current
             repair_prompt = self._validator.build_repair_prompt(current.content or "", errors)
             # 统一复用 R1 Message 四字段具名结构（规则 4）：消除仅两字段的重复 ChatMessage。

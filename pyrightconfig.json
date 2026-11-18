@@ -1,0 +1,21 @@
+{
+  // 诊断范围只含 src：与质量门禁一致（mypy --strict src / pyright src 均 0 error）。
+  // tests/ 用大量 duck fake，历史遗留宽松类型；纳入诊断会在 IDE 里制造 176 条噪音红线，
+  // 但它们仍能被 hover/go-to-def 解析（Pylance 会分析所有打开文件）。
+  "include": ["src"],
+  "exclude": [
+    "**/.venv",
+    "**/__pycache__",
+    "**/.pytest_cache",
+    "**/.mypy_cache",
+    "**/htmlcov"
+  ],
+  // src/ 布局：让 hooks/runtime/harness 等非标准顶层包可被解析。
+  "extraPaths": ["src"],
+  "typeCheckingMode": "basic",
+  "pythonVersion": "3.13",
+  "venvPath": ".",
+  "venv": ".venv",
+  "reportMissingImports": "error",
+  "reportMissingTypeStubs": "none"
+}

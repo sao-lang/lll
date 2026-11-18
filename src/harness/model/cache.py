@@ -304,18 +304,18 @@ class SimilarityCache:
         prefix = _store_key("semantic", version, "")
         best: LLMResponse | None = None
         best_score = 0.0
-        for _key, raw in await self._store.scan(prefix):
+        for _key, raw in await self._store.scan(prefix):  # 遍历同前缀全部候选取最相似者；阈值裁决延到循环后，避免先到先得
             entry = _parse_entry(raw)
-            if entry is None:
+            if entry is None:  # 解析失败的条目跳过，不让坏数据参与匹配或污染缓存
                 continue
-            if q_vec is not None and entry["vec"] is not None:
+            if q_vec is not None and entry["vec"] is not None:  # 双方都有向量才走余弦；否则降级文本相似度（零依赖开箱即用）
                 score = _cosine(q_vec, tuple(entry["vec"]))
             else:
                 score = SequenceMatcher(None, query, entry["text"]).ratio()
-            if score > best_score:
+            if score > best_score:  # 只保留当前最优；遍历完整后再按 threshold 一锤定音
                 best_score = score
                 best = LLMResponse.model_validate_json(entry["resp"])
-        if best is not None and best_score >= self._threshold:
+        if best is not None and best_score >= self._threshold:  # 阈值在循环后统一判定：命中必须是全局最优候选
             self.hits += 1
             return best
         self.misses += 1
@@ -343,13 +343,13 @@ class SimilarityCache:
         query = _query_text(request)
         q_vec = await self._vector_of(query)
         prefix = _store_key("semantic", version, "")
-        for key, raw in await self._store.scan(prefix):
+        for key, raw in await self._store.scan(prefix):  # 语义失效可能命中多条，须逐个删除，不能只删第一个
             entry = _parse_entry(raw)
-            if entry is None:
+            if entry is None:  # 坏条目无法算分，跳过以免影响其它候选的失效判断
                 continue
-            if q_vec is not None and entry["vec"] is not None:
+            if q_vec is not None and entry["vec"] is not None:  # 与 get 同一套相似度口径，保证写入/失效判定一致
                 score = _cosine(q_vec, tuple(entry["vec"]))
             else:
                 score = SequenceMatcher(None, query, entry["text"]).ratio()
-            if score >= self._threshold:
+            if score >= self._threshold:  # 达阈值即失效：语义相同的历史条目都清掉，避免旧响应被再次命中
                 await self._store.delete(key)

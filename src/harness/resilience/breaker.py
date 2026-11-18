@@ -25,9 +25,13 @@ Dimension = tuple[str, str]
 class BreakerStore(Protocol):
     """熔断共享态存储协议（异步，可落 Redis/DB）。"""
 
-    async def load(self, dim: Dimension) -> BreakerState | None: ...
+    async def load(self, dim: Dimension) -> BreakerState | None:
+        """读取维度熔断快照；无记录返回 None，由调用方回退 CLOSED 默认态。"""
+        ...
 
-    async def save(self, dim: Dimension, state: BreakerState) -> None: ...
+    async def save(self, dim: Dimension, state: BreakerState) -> None:
+        """覆盖写入维度熔断快照（整份替换，非增量合并）。"""
+        ...
 
 
 class InMemoryBreakerStore:
@@ -47,6 +51,7 @@ class InMemoryBreakerStore:
 
 
 def _normalize_key(key: object) -> Dimension:
+    """把外部传入的任意 key 收敛成二元组维度；形态不符一律回退空维度，避免污染 store key。"""
     if isinstance(key, tuple) and len(key) == 2:
         return (str(key[0]), str(key[1]))
     return _EMPTY
@@ -111,7 +116,7 @@ class CircuitBreaker:
     def _lock_for(self, dim: Dimension) -> asyncio.Lock:
         """取维度的 asyncio.Lock（首次懒建；单线程事件循环下创建原子）。"""
         lock = self._locks.get(dim)
-        if lock is None:
+        if lock is None:  # 懒建：只给真正出现过的维度建锁，避免预建所有可能 key 导致字典无界增长
             lock = asyncio.Lock()
             self._locks[dim] = lock
         return lock
@@ -125,6 +130,7 @@ class CircuitBreaker:
     # ---- 状态逻辑（原 Policy 方法，现直接在插件上）----
 
     def _dim(self, dimension: Dimension | None) -> Dimension:
+        """按 per_dimension 决定用调用方维度，还是归并到单一空维度（全局熔断）。"""
         if not self._per_dimension:
             return _EMPTY
         return dimension if dimension is not None else _EMPTY
@@ -141,13 +147,13 @@ class CircuitBreaker:
         dim = self._dim(dimension)
         async with self._lock_for(dim):
             st = await self._store.load(dim) or BreakerState()
-            if st.status == BreakerStatus.OPEN.value:
-                if self._clock() - (st.opened_at or 0) < self._cooldown:
+            if st.status == BreakerStatus.OPEN.value:  # OPEN 态先判冷却：届满才尝试迁移，未届满维持拦截
+                if self._clock() - (st.opened_at or 0) < self._cooldown:  # opened_at 缺失视为 0；冷却未过就继续熔断，给下游恢复窗口
                     return "breaker_open"
                 await self._maybe_half_open_unlocked(dim)  # 已持锁，调无锁版避免死锁
                 st = await self._store.load(dim) or BreakerState()
-            if st.status == BreakerStatus.HALF_OPEN.value:
-                if len(st.window) >= self._max_probes:
+            if st.status == BreakerStatus.HALF_OPEN.value:  # 迁移后重新 load，按半开态的探测上限二次判定
+                if len(st.window) >= self._max_probes:  # 探测数达上限即拦截，防止半开流量放大成真实压力
                     return "breaker_half_open"
             return None
 
@@ -160,9 +166,9 @@ class CircuitBreaker:
     async def _maybe_half_open_unlocked(self, dim: Dimension) -> None:
         """无锁版本：调用方须已持有该维度锁（check 内部复用，避免不可重入死锁）。"""
         st = await self._store.load(dim)
-        if st is None or st.status != BreakerStatus.OPEN.value:
+        if st is None or st.status != BreakerStatus.OPEN.value:  # 仅 OPEN 态需要迁移；无记录或已迁移则无事可做
             return
-        if self._clock() - (st.opened_at or 0) >= self._cooldown:
+        if self._clock() - (st.opened_at or 0) >= self._cooldown:  # 冷却期满才半开：给下游恢复窗口，避免频繁抖动
             await self._store.save(dim, replace(
                 st, status=BreakerStatus.HALF_OPEN.value, window=(),
                 half_open_successes=0, opened_at=None,
@@ -177,7 +183,7 @@ class CircuitBreaker:
             result: 调用结果信封（ok 决定滑窗记成功/失败）。
             dimension: 熔断维度；None 用空维度。count: False 表示只探查不计数。
         """
-        if not count:
+        if not count:  # count=False 为纯探查：只解析维度不记账，避免观察动作污染统计
             return
         dim = self._dim(dimension)
         # C1：load→decide→save 全临界区加锁，异步 store 下并发不丢更新。
@@ -187,27 +193,27 @@ class CircuitBreaker:
     async def _record_unlocked(self, dim: Dimension, success: bool) -> None:
         """无锁记录：调用方须已持该维度锁。"""
         st = await self._store.load(dim) or BreakerState()
-        window = (st.window + (not success,))[-self._window_size:]
-        failures = st.failures + (0 if success else 1)
-        if st.status == BreakerStatus.OPEN.value:
+        window = (st.window + (not success,))[-self._window_size:]  # 滑窗只留最近 window_size 次结果（True=失败），旧样本老化出窗
+        failures = st.failures + (0 if success else 1)  # 累计失败数不清零，与滑窗一起供样本量判定
+        if st.status == BreakerStatus.OPEN.value:  # OPEN 态不重新决策：在途请求回喂不得刷新 opened_at，否则冷却永不结束
             return
-        if st.status == BreakerStatus.HALF_OPEN.value:
-            if success:
+        if st.status == BreakerStatus.HALF_OPEN.value:  # 半开态走专用判定：用连续成功数决定回 CLOSED 还是再 OPEN，不看滑窗失败率
+            if success:  # 探测成功只累加连续成功数，达标才恢复，防偶发成功误判已恢复
                 successes = st.half_open_successes + 1
-                if successes >= self._success_to_close:
+                if successes >= self._success_to_close:  # 连续成功达标：重置整份快照回 CLOSED，清掉半开计数
                     await self._store.save(dim, BreakerState())
-                else:
+                else:  # 未达标：保留半开态和滑窗，仅累加计数继续探测
                     await self._store.save(dim, replace(st, half_open_successes=successes))
-            else:
+            else:  # 探测失败即重新 OPEN：一次失败视为未恢复，刷新冷却起点重新计时
                 await self._store.save(dim, replace(
                     st, status=BreakerStatus.OPEN.value, opened_at=self._clock(),
                     half_open_successes=0,
                 ))
             return
         new_state = replace(st, window=window, failures=failures)
-        if len(window) >= self._min_samples:
+        if len(window) >= self._min_samples:  # 样本不足不算失败率，避免个别失败误触发熔断
             rate = sum(1 for bad in window if bad) / len(window)
-            if rate >= self._threshold:
+            if rate >= self._threshold:  # 失败率越阈值即跳闸 OPEN，opened_at 作为后续冷却起点
                 new_state = replace(
                     new_state, status=BreakerStatus.OPEN.value, opened_at=self._clock()
                 )
@@ -220,8 +226,8 @@ class CircuitBreaker:
     ) -> Decision | None:
         """before_invoke BAIL：检查熔断状态，异常则发降级信号 + 占位 DEGRADE。"""
         dim = self._dimension_of(effect) if self._dimension_of else None
-        reason = await self.check(dim if isinstance(dim, tuple) else None)
-        if reason:
+        reason = await self.check(dim if isinstance(dim, tuple) else None)  # 自定义维度非二元组时回退空维度，避免污染 store key
+        if reason:  # 有降级原因才发信号并占位 DEGRADE，具体目标交 settle 统一裁决
             failed_target = self._failed_target_of(effect)
             scope.emit(Signal(SignalKind.DEGRADE, reason, failed_target))
             return Decision.degrade("")
@@ -230,7 +236,7 @@ class CircuitBreaker:
     async def observe(self, scope: RequestScope, effect: Effect) -> None:
         """after_invoke / invoke_error PARALLEL：从 scope.last_result 记录结果。"""
         result = scope.last_result
-        if isinstance(result, Result):
+        if isinstance(result, Result):  # 只处理 Result 载体；其他形式（如守卫短路的 Decision）不参与记账
             dim = self._dimension_of(effect) if self._dimension_of else None
             await self.record(result, dim if isinstance(dim, tuple) else None)
 

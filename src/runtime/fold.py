@@ -156,7 +156,7 @@ def fold(
         # ② 特殊 kind 写入托管字段（互斥：同一 Effect 只可能命中其一）
         if effect.kind is EffectKind.SKILL:
             last_skill = _plain_value(result.data)
-        elif effect.kind is EffectKind.CHILD:
+        elif effect.kind is EffectKind.CHILD:  # 子 Agent 结果单列托管：与 SKILL 结果来源不同，上层需分别取用
             last_child = _plain_value(result.data)
         elif effect.kind is EffectKind.WAIT_HUMAN:
             last_wait_human = _plain_value(result.data)

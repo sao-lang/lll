@@ -23,5 +23,5 @@ testpaths = ["tests"]
 addopts = "-q --import-mode=importlib"
 
 [tool.coverage.run]
-source = ["runtime", "hooks", "harness.resilience", "harness.model", "ports"]
+source = ["runtime", "hooks", "harness.resilience", "harness.model", "harness.tools", "harness.skills", "ports"]
 branch = true

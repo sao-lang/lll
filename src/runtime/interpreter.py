@@ -132,6 +132,7 @@ class InterpreterImpl:
             single = _expand(raw)  # 单 Effect（可能是 batch，需展开）
             return EffectBatch(single, batched=raw.batch or len(single) > 1)
         # Program 也允许一次 yield 一个 Effect 列表（并行声明）。
+        # 这里仅认「非空」列表：空列表既非合法 Effect 批、也不能当成 DONE，必须落到底部按契约违规报告。
         if isinstance(raw, (list, tuple)) and raw:
             items: tuple[DynamicValue, ...] = tuple(raw)
             if all(isinstance(e, Effect) for e in items):

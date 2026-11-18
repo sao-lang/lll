@@ -113,6 +113,8 @@ class RequestScope:
 
     def release_all(self) -> None:
         """执行所有释放回调（逆序，LIFO）；幂等，清空列表。"""
+        # 后注册的先释放（LIFO）：资源之间常有依赖关系，逆序归还才不会让先释放者
+        # 依赖到已被回收的资源；清空列表使本方法可重复调用而不重复执行。
         for fn in reversed(self.releases):
             try:
                 fn()
@@ -189,6 +191,8 @@ class Hook:
         BAIL/LOOP/PARALLEL → fn(scope, effect)；WATERFALL → fn(value, effect)；
         AROUND → fn(next, scope, effect)。装配期配置由插件构造参数私有持有。
         """
+        # kind 在装配期锁定、互斥，这里仅按语义把调用路由到对应实现；
+        # PARALLEL 只有观察副作用、无业务返回值，故调用后统一回 None。
         if self.kind is HookKind.BAIL:
             return await self._call_bail(scope, effect)
         if self.kind is HookKind.WATERFALL:
@@ -202,8 +206,10 @@ class Hook:
 
     async def _call_bail(self, scope: RequestScope, effect: Effect | None) -> Decision | None:
         """BAIL：首个非 CONTINUE 的 Decision 短路返回。"""
+        # 按注册顺序逐个问守卫：第一个拦截者即胜出，后续 tap 不再执行（bail 语义）。
         for _, fn in self._taps:
             d = await _maybe(fn(scope, effect))
+            # 仅 Decision 能拦截，且 CONTINUE 表示放行；其它返回形态在 BAIL 点无拦截含义。
             if isinstance(d, Decision) and d.action is not DecisionAction.CONTINUE:
                 return d
         return None
@@ -212,6 +218,8 @@ class Hook:
         self, scope: RequestScope, effect: Effect | None, value: str,
     ) -> str:
         """WATERFALL：上次的字符串返回值作下次首参，逐 tap 链式改写上下文。"""
+        # 链式累积：只有字符串返回才推进 value，避免某个 tap 顺手返回非字符串时把
+        # 前面积累的改写文本清空（守卫型返回值在 WATERFALL 点被忽略）。
         for _, fn in self._taps:
             out = await _maybe(fn(value, effect))
             value = out if isinstance(out, str) else value
@@ -219,10 +227,14 @@ class Hook:
 
     async def _call_loop(self, scope: RequestScope, effect: Effect | None) -> str | None:
         """LOOP：非 None 返回则重跑整链，带 max_loops 硬上限。"""
+        # 每轮 = 整链重跑一次；max_loops 是硬上限，防止 tap 持续返回非 None 时死循环。
         for _ in range(self.max_loops):
+            # 预置 None：tap 列表为空时视为已收敛，直接落到下面的终止分支。
             result: TapReturn = None
+            # result 逐 tap 覆盖，只有链上最后一个 tap 的返回决定是否再跑一轮。
             for _, fn in self._taps:
                 result = await _maybe(fn(scope, effect))
+            # None = 收敛/终止；任意非 None 返回都表示还需要再跑一轮。
             if result is None:
                 return None
         raise RuntimeError(f"hook {self.name!r} exceeded max_loops={self.max_loops}")
@@ -253,6 +265,8 @@ class Hook:
                 return await layer(index + 1)
 
             out = await _maybe(self._taps[index][1](nxt, scope, effect))
+            # 只有 Decision/Result 是有效的包裹结果；其余形态按放行(None)处理，
+            # 与 TapReturn 联合在此处的窄化保持一致，不让非法返回污染上游。
             if isinstance(out, (Decision, Result)):
                 return out
             return None
@@ -273,7 +287,9 @@ class Plugin(Protocol):
 
     name: str
 
-    def apply(self, host: Host) -> None: ...
+    def apply(self, host: Host) -> None:
+        """插件向宿主注册自己的扩展点 tap（由 Host.plugin 在装配期调用）。"""
+        ...
 
 
 class Host:
@@ -393,6 +409,8 @@ class Host:
                 """洋葱中心：真正调用注入的 inner（R4 网关）。"""
                 return await inner(effect, ctx)
 
+            # 把 AROUND 链与观察钩子一并纳入保护：任一步抛错都进 except 统一发
+            # invoke_error、跑降级并重抛，避免 port 异常裸穿出包装器。
             try:
                 # around 扩展点的返回确定是 Result/Decision/None（不含 str），
                 # call() 对外统一 TapReturn，故在此 cast 到窄联合再归一化（非 Any）。
@@ -401,6 +419,8 @@ class Host:
                     await self.hook("around_invoke").call(scope, effect, core=core),
                 )
                 resolved = _coerce_result(outcome)
+                # core 必返 Result，归一后仍为 None 说明 around 链吞掉了结果（契约违背），
+                # 抛错落入 except 按失败路径处理，而非静默返回空 Result 掩盖问题。
                 if resolved is None:
                     raise RuntimeError("around_invoke produced no Result")
                 scope.last_result = resolved
@@ -415,6 +435,8 @@ class Host:
                 err = Result.failure("INVOKE_ERROR", "port raised")
                 scope.last_result = err
                 await self.hook("invoke_error").call(scope, effect)
+                # 与成功路径对称：失败阶段（如 invoke_error 钩子）发出的降级信号也要 settle，
+                # 保证两条路径对 sticky target 的更新行为一致。
                 if any(s.kind == SignalKind.DEGRADE for s in scope.signals):
                     await self._settle(scope, effect, ctx, Decision.continue_())
                 scope.release_all()
@@ -430,6 +452,8 @@ class Host:
         if not any(s.kind == SignalKind.DEGRADE for s in scope.signals):
             return base
         verdict = await self.hook("settle").call(scope, effect)
+        # 只有 settle 插件给出带 target 的 Decision 才真正改写降级目标；否则保留
+        # 守卫原裁决（base），不让观察/兜底插件误覆盖上游决定。
         if isinstance(verdict, Decision) and verdict.target:
             scope.target = verdict.target
             # verdict.value 至少是 Result/None；用唯一边界归一化后写入具名字段（规则 6）。

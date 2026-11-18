@@ -15,9 +15,10 @@
 
     Port             默认实现类              归属模块（源码位置）
     LLMPort          OpenAICompatLLM        R4  src/ports/adapters/llm.py ✅已实现
-    ToolPort         ToolRegistry           R5  src/harness/tools/（待实现）
-    MCPPort          MCPManager             R5  src/harness/tools/（待实现）
-    SkillPort        FileSkillProvider      R5  src/harness/skills/（待实现）
+    ToolPort         ToolRegistry           R5  src/harness/tools/ ✅已实现
+    MCPPort          MCPManager             R5  src/harness/tools/ ✅已实现
+    SkillPort        FileSkillProvider      R5  src/harness/skills/ ✅已实现
+    DisclosureIndex  ToolIndex              R5  src/harness/tools/ ✅已实现
     RAGPort          RAGPipeline            R6  src/harness/rag/（待实现）
     MemoryPort       MemoryStore            R7  src/harness/memory/（待实现）
     StorePort        InMemoryStorePort      R7  src/harness/memory/（待实现）
@@ -39,12 +40,16 @@ from typing import Protocol, runtime_checkable
 
 from runtime import DynamicValue
 
-from .dto import LLMRequest, LLMResponse, PortCtx, ToolCall, ToolResult, ToolSpec, Usage
+from .dto import (
+    DisclosurePacket, LLMRequest, LLMResponse, PortCtx, SkillManifest,
+    ToolCall, ToolResult, ToolSpec, Usage,
+)
 
 __all__ = [
     "PORT_PROTOCOLS",
     "AuditPort",
     "AuditStore",
+    "DisclosureIndex",
     "EvalPort",
     "EventStreamPort",
     "HumanPort",
@@ -96,8 +101,8 @@ class ToolPort(Protocol):
         """注册工具：spec 定义 schema，fn 是实际实现。"""
         ...
 
-    def catalog(self) -> list[ToolSpec]:
-        """返回工具目录（渐进披露由 DisclosureIndex 投影）。"""
+    def catalog(self, level: int = 1) -> list[ToolSpec]:
+        """返回工具目录；level=1 只 name+描述，2/3 含完整 schema（渐进披露）。"""
         ...
 
     async def call(self, call: ToolCall, ctx: PortCtx) -> ToolResult:
@@ -110,11 +115,11 @@ class SkillPort(Protocol):
     """技能能力：渐进式披露正文。"""
     name: str
 
-    def discover(self) -> list[DynamicValue]:
-        """发现所有可用技能清单。"""
+    def discover(self) -> list[SkillManifest]:
+        """发现所有可用技能清单（具名视图，非 DynamicValue）。"""
         ...
 
-    def catalog(self) -> list[DynamicValue]:
+    def catalog(self) -> list[SkillManifest]:
         """返回技能目录（name/version/触发词，常驻 L1）。"""
         ...
 
@@ -134,6 +139,24 @@ class RAGPort(Protocol):
 
     async def retrieve(self, query: str, ctx: PortCtx) -> list[DynamicValue]:
         """检索命中列表，每项带引用溯源信息。"""
+        ...
+
+
+@runtime_checkable
+class DisclosureIndex(Protocol):
+    """三级披露能力（R5）：把统一合集投影成 L1 目录/L2 schema/L3 正文。
+
+    为何是独立 Port：披露策略可替换（默认 ToolIndex），且 token 预算是硬约束；
+    装配期经 PORT_PROTOCOLS["disclosure"] 做 isinstance 履约校验。
+    """
+    name: str
+
+    def disclose(
+        self,
+        names: list[str],
+        skills: list[SkillManifest],
+    ) -> DisclosurePacket:
+        """按命中意图名与技能清单投影披露包；超预算由实现显式拒绝。"""
         ...
 
 
@@ -267,7 +290,7 @@ class HumanPort(Protocol):
 
 @runtime_checkable
 class MCPPort(Protocol):
-    """MCP 能力：发现与调用外部工具。"""
+    """MCP 能力：发现与调用外部工具（R5 统一以本协议的带 ctx 签名为准）。"""
     name: str
 
     async def list_tools(self, server: str, ctx: PortCtx) -> list[ToolSpec]:
@@ -278,6 +301,10 @@ class MCPPort(Protocol):
         self, server: str, tool: str, args: dict[str, DynamicValue], ctx: PortCtx,
     ) -> DynamicValue:
         """调用 MCP 工具，返回形态由工具决定。"""
+        ...
+
+    async def ping(self, server: str, ctx: PortCtx) -> bool:
+        """健康检查：探测 server 可达（R5/R13 契约，纳入履约校验）。"""
         ...
 
 
@@ -304,4 +331,5 @@ PORT_PROTOCOLS: dict[str, type] = {
     "memory": MemoryPort, "store": StorePort, "sandbox": SandboxPort,
     "audit": AuditPort, "eval": EvalPort, "telemetry": TelemetryPort,
     "human": HumanPort, "mcp": MCPPort, "event_stream": EventStreamPort,
+    "disclosure": DisclosureIndex,
 }

@@ -17,6 +17,8 @@ from runtime import DynamicValue
 
 __all__ = [
     "DangerLevel",
+    "DisclosurePacket",
+    "SkillManifest",
     "LLMRequest",
     "LLMResponse",
     "PortCtx",
@@ -68,19 +70,65 @@ class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
 
-class DangerLevel:
-    """工具风险分级常量：SAFE/LOW/HIGH/CRITICAL。
+class DangerLevel(str, Enum):
+    """工具风险分级（规则 5：有限取值集合用 Enum，禁止裸魔法串）。
 
-    属性：
-        SAFE/LOW/HIGH/CRITICAL: 四级风险字符串常量。
-        ALL: 全部级别的元组，供校验/遍历。
+    四级语义对齐 R9 §5（权威）：
+        SAFE=直接执行 / LOW=审计后直执行 / HIGH=沙盒执行 / CRITICAL=审批后沙盒执行。
     """
 
     SAFE = "SAFE"
     LOW = "LOW"
     HIGH = "HIGH"
     CRITICAL = "CRITICAL"
-    ALL = (SAFE, LOW, HIGH, CRITICAL)
+
+    @classmethod
+    def coerce(cls, value: str | DangerLevel | None) -> DangerLevel:
+        """归一外部字符串/枚举为成员；未知或 None 回退到最严格的 CRITICAL（fail closed）。
+
+        为何不回退 SAFE：danger 决定沙盒与审批路由，未知值按最低风险处理会放行高危工具，
+        属安全漏洞；按 CRITICAL 处理只会多走一次审批/沙盒，代价可接受。
+        """
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, str):
+            try:
+                return cls(value)
+            except ValueError:
+                return cls.CRITICAL
+        return cls.CRITICAL
+
+
+@dataclass(frozen=True, slots=True)
+class SkillManifest:
+    """技能清单条目（SkillPort.discover/catalog 返回，L1 常驻披露）。
+
+    字段：
+        name: 技能唯一名。version: 语义版本。description: 一句话描述。
+        triggers: 触发词元组（命中后加载 L3 正文）。
+    """
+
+    name: str
+    version: str
+    description: str
+    triggers: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class DisclosurePacket:
+    """三级披露投影结果（DisclosureIndex.disclose 返回）。
+
+    字段：
+        l1: 常驻目录（name+一句话，绝不含 parameters_schema 完整 schema）。
+        l2: 命中意图后披露的完整 ToolSpec（含 schema）。
+        l3: 技能正文（name→正文映射）。
+        token_cost: 本次披露的估算 token 成本（进 trace）。
+    """
+
+    l1: tuple[ToolSpec, ...]
+    l2: tuple[ToolSpec, ...]
+    l3: dict[str, str]
+    token_cost: int
 
 
 class Usage(_Strict):
@@ -131,7 +179,7 @@ class ToolCall(_Strict):
     call_id: str = Field(description="调用关联 id")
     name: str = Field(description="工具名")
     args: dict[str, DynamicValue] = Field(default_factory=dict, description="参数字典")
-    danger: str = Field(default=DangerLevel.SAFE, description="风险级别 SAFE/LOW/HIGH/CRITICAL")
+    danger: DangerLevel = Field(default=DangerLevel.SAFE, description="风险级别（Enum，未知值由 coerce 归一）")
     source: str = Field(default="local", description="工具来源 local/mcp/skill")
 
 
@@ -150,7 +198,7 @@ class ToolSpec(_Strict):
     parameters_schema: dict[str, DynamicValue] = Field(
         default_factory=dict, description="JSON Schema"
     )
-    danger: str | None = Field(default=None, description="SAFE/LOW/HIGH/CRITICAL")
+    danger: DangerLevel | None = Field(default=None, description="风险级别；装配期必填校验")
     source: str = Field(default="local", description="local/mcp/skill")
 
 
@@ -214,7 +262,7 @@ def make_call(
     args: dict[str, DynamicValue],
     call_id: str = "",
     *,
-    danger: str = DangerLevel.SAFE,
+    danger: DangerLevel = DangerLevel.SAFE,
     source: str = "local",
 ) -> ToolCall:
     """构造 ToolCall 的便捷函数。

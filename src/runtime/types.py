@@ -237,7 +237,7 @@ class Budgets:
             ("tokens", self.used_tokens >= self.max_tokens),
             ("parallel_children", self.used_parallel_children >= self.max_parallel_children),
         )
-        for name, hit in checks:
+        for name, hit in checks:  # 按 checks 的声明顺序即优先级遍历：命中首个即返回，多维护约时错误码仍确定
             if hit:
                 return name
         return None

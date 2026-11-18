@@ -1,0 +1,40 @@
+<svg viewBox="0 0 680 470" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>R3 韧性插件介入 LLM 调用的完整链路</title>
+<desc>Runner dispatch 触发 before_model 与 before_invoke，R3 的 TRANSFORM、GUARD、AROUND 插件在此判决或包裹，放行后经 gateway.as_call 调用 LLMPort，after_invoke 反馈给熔断器。</desc>
+<defs>
+<marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+<path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+</marker>
+</defs>
+<text x="40" y="24" font-family="var(--font-sans)" font-size="12" fill="#5F5E5A">Program yield Effect(LLM) → Runner._execute 接管</text>
+
+<rect x="40" y="34" width="600" height="40" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+<text x="56" y="54" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" fill="#042C53">dispatch = bus.dispatch()　先 emit before_model，再 emit before_invoke</text>
+<path d="M340 76 L340 90" fill="none" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+<rect x="40" y="94" width="600" height="52" rx="8" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.5"/>
+<text x="56" y="112" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#26215C">before_model · BudgetGuard [TRANSFORM]</text>
+<text x="56" y="132" dominant-baseline="central" font-family="var(--font-sans)" font-size="12" fill="#534AB7">预算吃紧 → rewrite 注入"收尾"上下文，不阻断，继续往下</text>
+<path d="M340 148 L340 162" fill="none" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+<rect x="40" y="166" width="600" height="72" rx="8" fill="#FCEBEB" stroke="#A32D2D" stroke-width="0.5"/>
+<text x="56" y="185" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#501313">before_invoke · GUARD 链（按 priority 串行，首个非 CONTINUE 即短路）</text>
+<text x="56" y="205" dominant-baseline="central" font-family="var(--font-sans)" font-size="12" fill="#A32D2D">KillSwitch → Watchdog → Idempotency → Bulkhead → RateLimit → CircuitBreaker → Degradation</text>
+<text x="56" y="225" dominant-baseline="central" font-family="var(--font-sans)" font-size="12" fill="#A32D2D">deny/degrade/ask… → Runner 短路，LLMPort 根本不被调用</text>
+<path d="M340 240 L340 254" fill="none" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+<rect x="40" y="258" width="600" height="66" rx="8" fill="#FAEEDA" stroke="#BA7517" stroke-width="0.5"/>
+<text x="56" y="277" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#633806">around · RetryPolicy [AROUND 洋葱]</text>
+<text x="56" y="297" dominant-baseline="central" font-family="var(--font-sans)" font-size="12" fill="#854F0B">ctx.meta['next'] → 调 LLM → 失败分类 → 退避 → 再调（最多 max_attempts 次）</text>
+<text x="56" y="315" dominant-baseline="central" font-family="var(--font-sans)" font-size="12" fill="#854F0B">结果装进 Decision.value 回填，避免 R1 重复调用 Port</text>
+<path d="M340 326 L340 340" fill="none" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+<rect x="40" y="344" width="600" height="52" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
+<text x="56" y="362" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#04342C">call = gw.as_call() → gateway.complete() → llm.complete()</text>
+<text x="56" y="382" dominant-baseline="central" font-family="var(--font-sans)" font-size="12" fill="#0F6E56">这里才真正调用 LLMPort；缓存命中/路由/结构化校验都在网关内完成</text>
+<path d="M340 398 L340 412" fill="none" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+<rect x="40" y="416" width="600" height="44" rx="8" fill="#F1EFE8" stroke="#888780" stroke-width="0.5"/>
+<text x="56" y="430" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#2C2C2A">bus.call(...) 包装 → emit after_invoke / invoke_error</text>
+<text x="56" y="446" dominant-baseline="central" font-family="var(--font-sans)" font-size="12" fill="#5F5E5A">CircuitBreaker 据此 record 失败，驱动 closed→open→half_open 三态翻转</text>
+</svg>

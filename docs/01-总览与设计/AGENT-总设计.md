@@ -782,69 +782,116 @@ class StructuredOutputSpec:
 
 ### R5.1 职责与边界
 
-**做**：工具定义（@tool/pydantic）、统一 ToolRegistry、MCP 发现并合并进同一合集、技能 manifest/正文、tools+skills 三级渐进披露、danger 四级路由、代码/shell/文件执行（经沙盒）。
-**不做**：沙盒实现细节（R9 提供 SandboxPort，R5 只做路由）。
+**做**：工具定义（@tool/pydantic）、统一 ToolRegistry、MCP 发现并合并进同一合集、技能 manifest/正文、tools+skills 三级渐进披露、danger 四级路由、代码/shell/文件执行（经沙盒）、WebFetchTool 工具封装（D13，浏览器/Web 访问，正文一律过注入检测）。
+**不做**：沙盒实现细节（R9 提供 SandboxPort，R5 只做路由）；R9 三 Port 的实现本体。
+
+> **权威 danger 四级路由语义**（R9 §5 / 本设计 §R9.5）：`SAFE`=直接执行 / `LOW`=AuditPort.record 审计后直执行 / `HIGH`=SandboxPort 沙盒执行 / `CRITICAL`=HumanPort.ask 审批通过后再 SandboxPort。外部 danger 经 `DangerLevel.coerce()` 归一，未知值/None 回退 CRITICAL（fail closed）。
 
 ### R5.2 设计架构
 
-**统一合集**是核心：本地 @tool 工具、MCP 工具（`mcp__server__tool`）、Skill 正文都进同一个 Registry，运行时无差别。三级披露对统一合集投影：L1 目录常驻 / L2 schema 按需 / L3 正文按需。danger 分级驱动沙盒与审批路由。
+**统一合集**是核心：本地 @tool 工具、MCP 工具（`mcp__<server>__<tool>`）、Skill 正文都进同一个 Registry，运行时无差别。三级披露对统一合集投影：L1 目录常驻 / L2 schema 按需 / L3 正文按需。danger 分级驱动沙盒与审批路由。
+
+R9 三 Port（SandboxPort/HumanPort/AuditPort）经 ToolRegistry 构造注入、缺席即拒绝；`DisclosureIndex` 归 R2 `protocols.py` 协议清单与 `PORT_PROTOCOLS["disclosure"]`，默认 ToolIndex 在 R5；装配类 ToolsCapability 把工具/MCP/技能/披露与 R9 三 Port 组装为可插拔能力。
 
 ### R5.3 流程图
 
 ```mermaid
 flowchart TD
     subgraph 注册期
-        A["@tool pydantic → ToolSpec"] --> B["ToolRegistry.register"]
-        C["MCPManager.connect<br/>list_tools→加前缀→注入"] --> B
-        D["SkillPort.discover → manifest"] --> B
+        A["@tool pydantic → ToolSpec"] --> B["ToolRegistry.register<br/>构造注入 sandbox/human/audit"]
+        C["MCPManager.connect<br/>list_tools→mcp__server__tool→注入"] --> B
+        D["SkillPort.discover → SkillManifest"] --> B
         B --> SC["static_check: 重名/schema/danger/沙盒审批"]
     end
     subgraph 披露期
-        E["before_model"] --> L1["L1: name+一句话 常驻"]
+        E["装配层/R12 调 disclose()"] --> L1["L1: name+一句话 常驻<br/>MCP 工具只进目录不进 schema"]
         L1 --> L2["L2: 命中意图→完整 schema"]
-        L2 --> L3["L3: Effect(skill,body)→正文"]
+        L2 --> L3["L3: 技能正文→注入检测→正文"]
     end
     subgraph 调用期
-        F["ToolCall"] --> V["参数校验 extra=forbid"]
-        V --> DR{"danger 分级"}
-        DR -->|CRITICAL| AP["HumanPort 审批"]
-        DR -->|HIGH+| SB["SandboxPort 隔离执行"]
+        F["ToolCall.danger 经 DangerLevel.coerce 归一<br/>未知值→CRITICAL"] --> V["参数校验 extra=forbid"]
+        V --> DR{"DangerLevel 四级路由"}
         DR -->|SAFE| EX["直接执行"]
-        AP --> SB
-        SB --> RES["ToolResult(ok,value,error,meta)"]
+        DR -->|LOW| AU["AuditPort.record 审计<br/>缺席→降级直执行 + meta.audit_missing"]
+        DR -->|HIGH| SB{"SandboxPort 在场?"}
+        DR -->|CRITICAL| AP{"HumanPort 与 SandboxPort 均在场?"}
+        AU --> EX
+        SB -->|是| SBrun["SandboxPort 沙盒执行"]
+        SB -->|否| REJ["ToolResult 失败: 缺席拒绝"]
+        AP -->|齐备| APR["HumanPort.ask 审批通过"]
+        AP -->|缺一| REJ
+        APR --> SBrun
+        SBrun --> RES["ToolResult(ok,value,error,meta)"]
         EX --> RES
+        REJ --> RES
     end
 ```
 
 ### R5.4 API 接口
 
 ```python
-def tool(name=None, danger=DangerLevel, sandbox=SandboxPolicy.AUTO,
-         timeout=30, retries=2): ...           # 装饰器；pydantic model 即 schema
+# R2 权威 DTO：DangerLevel(str, Enum)+coerce（未知→CRITICAL fail closed）；
+# ToolCall.danger / ToolSpec.danger / make_call(danger=...) 均为 DangerLevel
+def tool(*, name: str | None = None, danger: DangerLevel,   # danger 必填关键字
+         sandbox: SandboxPolicy = SandboxPolicy.AUTO, timeout: float = 30.0,
+         retries: int = 2) -> Callable[[Callable[..., DynamicValue]], ToolFn]: ...  # pydantic model 即 schema
 
-@dataclass(frozen=True)
-class ToolSpec:
-    name: str; description: str; parameters_schema: dict
-    danger: DangerLevel|None; source: Literal["local","mcp","skill"]
-
-class ToolPort(Protocol):                       # 已实现
-    def register(self, spec, fn, *, bind=False) -> None: ...
-    def catalog(self, level=1) -> list[ToolSpec]: ...
-    def schema_of(self, name) -> dict: ...
+# ---- ToolPort：以 R2 protocols.py 协议为基础 ----
+class ToolPort(Protocol):
+    name: str
+    def register(self, spec: ToolSpec, fn: Callable[..., DynamicValue]) -> None: ...
+    def catalog(self, level: int = 1) -> list[ToolSpec]: ...
     async def call(self, call: ToolCall, ctx: PortCtx) -> ToolResult: ...
 
-class MCPTransport(Protocol):                   # 用户可接入自己的 MCP 客户端
-    async def list_tools(self, server) -> list[ToolSpec]: ...
-    async def call_tool(self, server, tool, args, ctx) -> DynamicValue: ...
-    async def ping(self, server) -> bool: ...
+class ToolRegistry:                             # ToolPort 默认实现
+    def __init__(self, *, sandbox: SandboxPort | None = None,
+                 human: HumanPort | None = None,
+                 audit: AuditPort | None = None) -> None: ...   # 构造注入，缺席即拒绝
+    def register(self, spec: ToolSpec, fn: Callable[..., DynamicValue]) -> None: ...
+    def catalog(self, level: int = 1) -> list[ToolSpec]: ...
+    async def call(self, call: ToolCall, ctx: PortCtx) -> ToolResult: ...
+    # 超出协议的公共 API（不破坏 LSP）
+    def bind(self, name: str, fn: Callable[..., DynamicValue]) -> None: ...
+    def schema_of(self, name: str) -> dict[str, DynamicValue]: ...
+    def static_check(self) -> list[str]: ...
+    def freeze(self) -> Self: ...
+
+# ---- MCP：以 R2 MCPPort 为准（list_tools/call_tool 均带 ctx）----
+class MCPPort(Protocol):                        # R2 protocols.py
+    name: str
+    async def list_tools(self, server: str, ctx: PortCtx) -> list[ToolSpec]: ...
+    async def call_tool(self, server: str, tool: str,
+                        args: dict[str, DynamicValue], ctx: PortCtx) -> DynamicValue: ...
+    async def ping(self, server: str, ctx: PortCtx) -> bool: ...   # 新增
+
+class MCPTransport(Protocol):                   # R5 本地协议；用户注入 stdio/http 客户端
+    async def list_tools(self, server: str) -> list[ToolSpec]: ...
+    async def call_tool(self, server: str, tool: str, args: dict[str, DynamicValue]) -> DynamicValue: ...
+    async def ping(self, server: str) -> bool: ...
+
+class MCPManager:                               # 实现 MCPPort；transport 构造注入
+    name: str
+    def __init__(self, registry: ToolRegistry, transport: MCPTransport) -> None: ...
+    async def list_tools(self, server: str, ctx: PortCtx) -> list[ToolSpec]: ...
+    async def call_tool(self, server: str, tool: str,
+                        args: dict[str, DynamicValue], ctx: PortCtx) -> DynamicValue: ...
+    async def ping(self, server: str, ctx: PortCtx) -> bool: ...
+    async def connect(self, server: str, ctx: PortCtx) -> list[ToolSpec]: ...   # fqname=mcp__<server>__<tool>
+    async def health(self, ctx: PortCtx) -> dict[str, bool]: ...
 
 class SkillPort(Protocol):
+    name: str
     def discover(self) -> list[SkillManifest]: ...
     def catalog(self) -> list[SkillManifest]: ...
-    def body(self, name) -> str: ...            # L3 正文
+    def body(self, name: str) -> str: ...        # L3 正文，须过注入检测
+class DisclosureIndex(Protocol):                # R2 protocols.py + PORT_PROTOCOLS["disclosure"]
+    name: str
+    def disclose(self, names: list[str], skills: list[SkillManifest]) -> DisclosurePacket: ...   # {l1,l2,l3,token_cost}
 
-class DisclosureIndex(Protocol):
-    def disclose(self, names, skills) -> DisclosurePacket: ...   # {L1,L2,L3,token_cost}
+# 技能正文注入检测：R5 本地 InjectionDetector 协议 + KeywordInjectionDetector 默认实现
+class InjectionDetector(Protocol):
+    name: str
+    def detect(self, text: str) -> InjectionVerdict: ...   # 与 src/harness/skills/provider.py 一致
 ```
 
 ### R5.5 元数据与核心字段
@@ -852,11 +899,14 @@ class DisclosureIndex(Protocol):
 | 字段 | 说明 |
 |------|------|
 | ToolSpec.name | 全局唯一；MCP 为 `mcp__<server>__<tool>`；用户工具 `x-*` 前缀 |
-| ToolSpec.danger | SAFE/LOW/HIGH/CRITICAL，必填 |
+| ToolSpec.danger | `DangerLevel`，装配期必填；经 `coerce()` 归一，未知→CRITICAL（fail closed） |
 | ToolSpec.source | local/mcp/skill，审计用 |
-| ToolResult.meta | danger/source/sandbox/duration_ms/approved/retryable |
+| ToolResult.meta | danger/source/sandbox/duration_ms/approved/retryable/audit_missing |
 | DisclosurePacket | L1/L2/L3/token_cost，披露成本进 trace |
-| SkillManifest | name/version/描述/触发词 |
+| SkillManifest | name/version/description/triggers（定义于 R2 dto.py） |
+| InjectionVerdict | clean/injected；技能与 WebFetchTool 抓取正文的注入检测结果 |
+
+**WebFetchTool（D13）**：R5 提供 WebFetchTool 工具封装（浏览器/Web 访问），抓取正文视为不可信输入，L3 披露前过注入检测，命中即拒载并记审计。
 
 ### R5.6 可插拔契约
 
@@ -864,18 +914,23 @@ class DisclosureIndex(Protocol):
 |--------|------|------|------|
 | 工具实现 | ToolPort/@tool | ToolRegistry | danger 必填/schema 合法/高危配沙盒 |
 | MCP 客户端 | MCPTransport | stdio/http | 三方法齐全；MCP 工具 L1 只进目录（红线） |
-| 技能 | SkillPort | 文件技能 | 正文过注入检测 |
-| 披露策略 | DisclosureIndex | ToolIndex | token 预算；>20 条强制披露 |
+| MCP 能力 | MCPPort（R2，含 ping） | MCPManager(reg, transport) | fqname 注册；health 逐 server |
+| 技能 | SkillPort | 文件技能(FileSkillProvider) | 正文过注入检测 |
+| 披露策略 | DisclosureIndex（R2 协议 + PORT_PROTOCOLS["disclosure"]） | ToolIndex（R5） | token 预算；>20 条强制披露 |
+| 正文注入检测 | InjectionDetector（R5 本地） | KeywordInjectionDetector | 技能/WebFetch 正文必过 |
+| 沙盒（R9） | SandboxPort | 构造注入，缺席即拒绝 | HIGH/CRITICAL 缺 sandbox → ToolResult 失败 |
+| 审批（R9） | HumanPort | 构造注入，缺席即拒绝 | CRITICAL 缺 human → ToolResult 失败 |
+| 审计（R9） | AuditPort | 构造注入，LOW 缺席降级 | LOW 缺 audit → 直执行 + meta.audit_missing |
 
 ### R5.7 验收门禁
 
 | 门禁 | 条目 | 达标标准 | 级别 |
 |------|------|---------|------|
-| R5-G1 | 覆盖 | 注册/披露/调用三期单测 ≥85% | G1 |
+| R5-G1 | 覆盖 | 注册/披露/调用三期单测 ≥95%（tools+skills 双包） | G1 |
 | R5-G2 | 合并 | 本地与 MCP 工具同一 Registry，catalog/call 无差别 | G2 |
 | R5-G2 | 披露 | L1 不含完整 schema；超预算报错 | G2 |
-| R5-G3 | 路由 | danger 四级路由（审批/沙盒/直执行）各有用例 | G3 |
-| R5-红线 | 安全 | CRITICAL 未审批执行；MCP schema 全量进 L1 → 拒绝 | 红线 |
+| R5-G3 | 路由 | danger 四级路由（直执行/审计/沙盒/审批+沙盒）各有用例；coerce 未知→CRITICAL | G3 |
+| R5-红线 | 安全 | CRITICAL 未审批执行 / HIGH 缺 sandbox 放行；MCP schema 全量进 L1 → 拒绝 | 红线 |
 
 ---
 
@@ -1544,7 +1599,7 @@ host.plugin(MyGuard())
 > 都在此登记归属、状态与回头动作。**不得把"文档标注了归属"当成"已实现"**——必须按本表状态列推进。
 > 协议定义在 `src/hooks/protocols.py`；本表是它的设计侧追踪镜像，两处须一致。
 
-### B.1.1 已实现模块（R1~R4）：默认实现全部落地 ✅
+### B.1.1 已实现模块（R1~R5）：默认实现全部落地 ✅
 
 | 协议 | 默认实现 | 源码位置 | 状态 |
 |------|---------|---------|------|
@@ -1557,6 +1612,10 @@ host.plugin(MyGuard())
 | StructuredOutputSpec | repair 模式 | `src/harness/model/structured.py` | ✅ 已实现 |
 | SchemaValidator | MinimalSchemaValidator | `src/harness/model/structured.py` | ✅ 已实现（v1.6，可注入） |
 | LLMPort | OpenAICompatLLM | `src/ports/adapters/llm.py` | ✅ 已实现（R4 §6.1） |
+| ToolPort | ToolRegistry | `src/harness/tools/registry.py` | ✅ 已实现（R5，@tool/注册/披露/四路路由） |
+| MCPPort | MCPManager | `src/harness/tools/mcp.py` | ✅ 已实现（R5，fqname 注入/health） |
+| SkillPort | FileSkillProvider | `src/harness/skills/provider.py` | ✅ 已实现（R5，manifest/正文/注入检测） |
+| DisclosureIndex | ToolIndex | `src/harness/tools/index.py` | ✅ 已实现（R5，三级披露+预算） |
 
 ### B.1.2 待实现模块：回头实现清单 ⏳
 
@@ -1565,9 +1624,6 @@ host.plugin(MyGuard())
 
 | 协议（接口体 `...`） | 默认实现类 | 归属模块 | 源码位置（模块开发时创建） | 回头动作 |
 |------|------|---------|------|------|
-| ToolPort | ToolRegistry | R5 工具 | `src/harness/tools/` | R5 开发时实现 @tool + 注册 + catalog/call |
-| MCPPort | MCPManager | R5 工具 | `src/harness/tools/` | R5 开发时实现 stdio/http transport + list_tools |
-| SkillPort | FileSkillProvider | R5 技能 | `src/harness/skills/` | R5 开发时实现 discover/catalog/body |
 | RAGPort | RAGPipeline | R6 RAG | `src/harness/rag/` | R6 开发时实现 ingest/retrieve（20 项链路） |
 | MemoryPort | MemoryStore | R7 记忆 | `src/harness/memory/` | R7 开发时实现 read/write/forget（hot/warm/cold） |
 | StorePort | InMemoryStorePort | R7 记忆 | `src/harness/memory/` | R7 开发时实现 save/load（可复用 InMemoryEventStore） |
@@ -1596,7 +1652,7 @@ host.plugin(MyGuard())
 | OTel/OTLP 接入规范 | profile 提"OTel"字样，无规范 | R10 | 设计时补 OTel span/metric 映射与导出契约 |
 | 工具 decorator 运行期实现 | R5 设计有 `@tool`，代码未实现 | R5 | R5 开发时实现 decorator+ToolSpec 生成 |
 | output parser / prompt 模板抽象 | 无独立抽象（结构化校验已有） | R4 增强 | 评估是否需要独立协议；结构化校验已覆盖大部分场景 |
-| 5 项设计缺失（B10/B11/G9/J10/N8/Q10/D13） | 设计态待补 | R5~R11 | 各模块开发前补齐设计到可写代码深度 |
+| 7 项设计缺失（B10/B11/G9/J10/N8/Q10/D13） | 设计态待补 | R5~R11 | 各模块开发前补齐设计到可写代码深度 |
 | R5~R13 剩余能力代码（约 82 项设计充分项） | 设计有、代码无 | R5~R13 | 按模块整块推进，每次完成一个模块 100% 项 |
 | **R4→R1 接线断链**：R1 `call(Effect,ctx)->Result` 与 R4 `ModelGateway.complete(LLMRequest,PortCtx)->LLMResponse` 签名不同，缺 Effect→LLM 适配器 | 两模块各自闭环，无生产接线 | R12 装配层 | composition root 实现时补适配器；这是 R1~R4 间唯一真缺代码的一环 |
 | **R1↔R2 / R3→R2 接线未装配**：函数已就绪（ctx_factory/_bind/ResilienceCapability.install）但无生产代码调用 | 接口就绪、无人串接 | R12 装配层 | composition root（Agent 装配器）统一注册，非模块遗漏 |
@@ -1650,7 +1706,7 @@ host.plugin(MyGuard())
 | R2 | 矩阵覆盖 | 8 action 定义齐全；R1 当前消费 continue/deny/abort/fallback 4 种，rewrite/ask/retry/degrade 待 R3/R4/R9 接线 | 组件留名 | 唯一扩展点 |
 | R3 | ≥90% | 重试/熔断/降级语义 | 五插件协同顺序 | 幂等键 |
 | R4 | ≥85% | 结构化/缓存 | 换 Port 零改动 | 预算不绕过 |
-| R5 | ≥85% | 合并/披露 | danger 四级路由 | 审批/披露红线 |
+| R5 | ≥95% | 合并/披露 | danger 四级路由 | 审批/披露红线 |
 | R6 | 五段替换 | 预算/降级 | 召回基线 | 引用/注入红线 |
 | R7 | ≥85% | 压缩/记忆分层 | 顺序确定性 | 不改messages/secret |
 | R8 | 端到端 | 装配检查/幂等 | 嵌套/换架构 | 无直接IO/自数轮次 |

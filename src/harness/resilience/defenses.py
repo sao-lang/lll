@@ -109,7 +109,7 @@ class Degradation:
         backup 故障时会重新从初始集合选回 primary，永远到不了 REFUSE。ladder 的 REFUSE
         级是无条件候选，目标剔除干净后 pick 自然落 REFUSE。
         """
-        for sig in signals:
+        for sig in signals:  # 逐条信号累积剔除，不能只看末条，否则前序故障目标会被漏掉
             if sig.kind == SignalKind.DEGRADE and sig.failed_target:
                 # 只剔除当前可用集里的目标：已剔除的、未注册的都不误伤（幂等）。
                 self._available.discard(sig.failed_target)
@@ -342,13 +342,13 @@ class Watchdog:
         """
         self._history.append(kind)
         self._history = self._history[-self._window:]
-        if self._repeat_k > 0 and len(self._history) >= self._repeat_k:
+        if self._repeat_k > 0 and len(self._history) >= self._repeat_k:  # repeat_k<=0 视为关闭重复检测；样本不足则提前跳过
             tail = self._history[-self._repeat_k:]
-            if len(set(tail)) == 1:
+            if len(set(tail)) == 1:  # 尾部全为同一 kind 即连续重复，判定死循环
                 return Decision.abort("watchdog:repeat")
-        if self._detect_abab and len(self._history) >= 4:
+        if self._detect_abab and len(self._history) >= 4:  # A-B 交替需至少 4 个观测才构成完整周期
             tail = self._history[-4:]
-            if tail[0] == tail[2] and tail[1] == tail[3] and tail[0] != tail[1]:
+            if tail[0] == tail[2] and tail[1] == tail[3] and tail[0] != tail[1]:  # 奇偶位各自相同且两者不同，排除全重复的干扰
                 return Decision.abort("watchdog:abab")
         return Decision.continue_()
 

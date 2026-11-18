@@ -6,12 +6,13 @@ Hook 调用语义（Bail/Waterfall/Loop/Parallel/Around）见 hooks/v5.py。
 from __future__ import annotations
 
 from .dto import (
-    DangerLevel, LLMRequest, LLMResponse, PortCtx, StreamEvent, StreamEventKind,
-    ToolCall, ToolResult, ToolSpec, Usage, make_call,
+    DangerLevel, DisclosurePacket, LLMRequest, LLMResponse, PortCtx, SkillManifest,
+    StreamEvent, StreamEventKind, ToolCall, ToolResult, ToolSpec, Usage, make_call,
 )
 from .protocols import (
-    PORT_PROTOCOLS, AuditPort, AuditStore, EvalPort, EventStreamPort, HumanPort, LLMPort,
-    MCPPort, MemoryPort, RAGPort, SandboxPort, SkillPort, StorePort, TelemetryExporter, TelemetryPort, ToolPort,
+    PORT_PROTOCOLS, AuditPort, AuditStore, DisclosureIndex, EvalPort, EventStreamPort,
+    HumanPort, LLMPort, MCPPort, MemoryPort, RAGPort, SandboxPort, SkillPort, StorePort,
+    TelemetryExporter, TelemetryPort, ToolPort,
 )
 from .types import (
     Capability, Decision, DecisionAction, HookBusError, HookCtx,
@@ -28,8 +29,8 @@ __all__ = [
     "HookCtx", "Decision", "DecisionAction", "RetrySpec", "Matcher",
     "Capability", "Provider", "Registry", "HookBusError", "LifecycleEvent",
     "LLMPort", "ToolPort", "SkillPort", "RAGPort", "MemoryPort", "StorePort",
-    "SandboxPort", "AuditPort", "AuditStore", "EvalPort", "TelemetryPort", "TelemetryExporter", "HumanPort",
+    "SandboxPort", "AuditPort", "AuditStore", "DisclosureIndex", "EvalPort", "TelemetryPort", "TelemetryExporter", "HumanPort",
     "MCPPort", "EventStreamPort", "PORT_PROTOCOLS",
     "LLMRequest", "LLMResponse", "ToolCall", "ToolResult", "ToolSpec", "Usage",
-    "DangerLevel", "PortCtx", "make_call", "StreamEvent", "StreamEventKind",
+    "DangerLevel", "DisclosurePacket", "SkillManifest", "PortCtx", "make_call", "StreamEvent", "StreamEventKind",
 ]

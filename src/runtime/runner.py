@@ -485,25 +485,25 @@ class Runner:
                 )
                 batch = EffectBatch(())
 
-            if status == _StepStatus.RUNNING.value and batch is DONE:
+            if status == _StepStatus.RUNNING.value and batch is DONE:  # 仅未出错时处理自然结束，避免覆盖此前 interpreter 抛错写入的 error 态
                 # Program 已 return：合成一个 END Effect 收尾。
                 status, reason = _StepStatus.DONE.value, "program_returned"
                 effects = (Effect(EffectKind.END, {"reason": reason}),)
                 results = (Result.success(None),)
-            elif status == _StepStatus.RUNNING.value:
+            elif status == _StepStatus.RUNNING.value:  # 仍在运行且非 DONE：确实拿到了 Effect，才进入下面的批次分派
                 assert isinstance(batch, EffectBatch)
                 # 给每个 Effect 打 trace_id：<session>:<step>:<index>，便于事件溯源定位。
                 effects = tuple(
                     replace(e, trace_id=f"{session.session_id}:{step_no:04d}:{i:02d}")
                     for i, e in enumerate(batch.effects)
                 )
-                if state.budgets.check_parallel(len(effects)):
+                if state.budgets.check_parallel(len(effects)):  # 并行度是内核硬预算：超限必须先于任何 Port 调用被拦截
                     # 并行度超限：内核拦截，强制 END。
                     reason = "BUDGET_EXCEEDED:parallel_children"
                     effects = (Effect(EffectKind.END, {"reason": reason}),)
                     results = (Result.success(None),)
                     status = _StepStatus.DONE.value
-                elif effects and all(e.kind is EffectKind.END for e in effects):
+                elif effects and all(e.kind is EffectKind.END for e in effects):  # 必须「整批皆 END」：只要混有普通 Effect 就得真正执行，不能被单个 END 提前收尾
                     # Program 主动 END：整批都是 END 才走快路径，不调用 Port（B8）。
                     # 每个 END 都回填一个 success，保证 effects/results 等长配对。
                     results = tuple(Result.success(None) for _ in effects)
@@ -511,7 +511,7 @@ class Runner:
                         _StepStatus.DONE.value,
                         str(effects[0].payload.get("reason", "end")),
                     )
-                elif effects and all(e.kind is EffectKind.WAIT_HUMAN for e in effects):
+                elif effects and all(e.kind is EffectKind.WAIT_HUMAN for e in effects):  # 同 B8：仅当全批都在等人，混合批若含可执行 Effect 则不能被「挂起」吞掉
                     # 人工在环：整批都是 WAIT_HUMAN 才挂起（B8：混合批不能被首元素吞掉）。
                     results = tuple(Result.success(None) for _ in effects)
                     status, reason = _StepStatus.SUSPENDED.value, "wait_human"
@@ -670,7 +670,7 @@ class Runner:
         rt = self._runtime(session)
         if initial_value is not None:
             rt.last_value = initial_value
-        for _ in range(self._max_steps):  # 硬上限防死循环
+        for _ in range(self._max_steps):  # 步数硬上限兜底：Program 若永不 yield END，靠此循环边界终止而非无限 step
             report = await self.step(session)
             if report.status != _StepStatus.RUNNING.value:
                 break  # 到达 done/suspended/error

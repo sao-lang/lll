@@ -71,9 +71,9 @@ def _coerce_route(effect: Effect) -> _RouteInput:
     hint = str(effect.payload.get("task_hint") or "")
     raw_meta = cast(_RouteMeta | None, effect.payload.get("meta"))
     max_cost: float | None = None
-    if raw_meta is not None:
+    if raw_meta is not None:  # meta 缺席即无成本约束；存在才深入读取，不臆造默认预算
         raw_budget = raw_meta.get("max_cost_per_call")
-        if isinstance(raw_budget, (int, float)) and not isinstance(raw_budget, bool):
+        if isinstance(raw_budget, (int, float)) and not isinstance(raw_budget, bool):  # bool 是 int 子类须排除；形态合法才转 float，否则回退无约束（规则 5）
             max_cost = float(raw_budget)
     return _RouteInput(task_hint=hint, max_cost=max_cost)
 
@@ -119,10 +119,10 @@ class RuleRouter:
         if not self._registered:
             return  # 未给 registered 时不校验（独立测试路由逻辑用）
         targets = set(self._routes.values())
-        if self._default != _NO_DEFAULT:
+        if self._default != _NO_DEFAULT:  # 哨兵表示未显式配置默认模型，不纳入注册校验
             targets.add(self._default)
         unknown = targets - self._registered
-        if unknown:
+        if unknown:  # 装配期暴露配置错误，避免运行期才路由到不存在的模型
             raise ValueError(f"route targets not registered: {sorted(unknown)}")
 
     def route(self, effect: Effect, ctx: PortCtx) -> RouteDecision:
@@ -143,9 +143,9 @@ class RuleRouter:
             affordable = [
                 model for model, cost in self._cost_tiers.items() if cost <= max_cost
             ]
-            if affordable:
+            if affordable:  # 仅在预算内有候选时才改选；否则保留 task_hint 的结果，不强行改写
                 chosen = min(affordable, key=lambda m: self._cost_tiers[m])
-                if chosen != target:
+                if chosen != target:  # 决策真被成本约束改变时才更新 reason，保证 trace 与实际选择一致
                     target = chosen
                     reason = f"cost<={max_cost}"
 

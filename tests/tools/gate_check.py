@@ -8,6 +8,8 @@
 G5 设计稳定性（契约锁）已于 2026-11-18 按用户要求删除——它锁死公共 API 与文档锚点，
 导致多轮迭代只敢改文档表述、不敢动代码（薄实现长期得不到纠正）。
 质量门禁（测试/覆盖率/类型/红线）保留不变。
+G0 增加规则 11 检查：模块承诺的默认实现类必须在生产源码真实存在（fake/门面不算），
+防止 R5 那种"协议+MCPManager 门面+测试 fake 三件套冒充 stdio/http 默认实现"的假完成。
 
 R1=核心运行时(src/runtime)，R2=插件总线与协议(src/hooks)。
 旧 m1~m4 体系已重写为 R1/R2，见 docs/02-模块详设/Agent/。
@@ -25,6 +27,19 @@ ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"
 sys.path.insert(0, str(SRC))
 PY = sys.executable
+
+# 规则 11（设计承诺反向闭包核对）机器化：协议声明的默认实现必须真实存在。
+# key=PORT_PROTOCOLS 的 port 名；value=(默认实现类名, 期望源码路径片段)。
+# 来源：docs/01-总览与设计/AGENT-总设计.md 附录 B.1.1/B.1.2 + 各模块回头清单。
+DEFAULT_IMPL_CONTRACTS: dict[str, tuple[str, str]] = {
+    "llm": ("OpenAICompatLLM", "ports/adapters/llm.py"),
+    "tool": ("ToolRegistry", "harness/tools/registry.py"),
+    "skill": ("FileSkillProvider", "harness/skills/provider.py"),
+    "disclosure": ("ToolIndex", "harness/tools/index.py"),
+    "mcp": ("HttpMCPTransport", "ports/adapters/mcp.py"),
+    "webfetch": ("HttpFetcher", "ports/adapters/webfetch.py"),
+}
+
 
 MODULES = {
     "r1": {
@@ -68,6 +83,26 @@ MODULES = {
         "integration": ["test_adapter.py", "test_cost.py", "test_gateway.py",
                         "test_e2e_wiring.py", "test_v5_e2e.py", "test_production_chain.py"],
     },
+    "r5": {
+        "title": "R5 工具·MCP·技能", "pkg": "harness.tools", "path": "harness",
+        "doc": "docs/02-模块详设/Agent/R5-工具MCP与技能.md", "demo": "tests/demos/demo_r5.py", "coverage": 95,
+        "symbols": ["ToolSource", "SandboxPolicy", "ToolFn", "tool", "ToolRegistry",
+                    "ToolIndex", "MCPTransport", "MCPManager", "ToolsCapability",
+                    "WebFetcher", "WebFetchTool"],
+        "behavior": ["test_decorator.py", "test_routing.py", "test_index.py", "test_errors.py"],
+        "integration": ["test_mcp.py", "test_skills.py", "test_capability.py", "test_webfetch.py",
+                        "test_custom_mcp_client.py"],
+        # R5 跨 tools/skills 两包：额外强制 skills 包覆盖率（主 pkg=tools 已由 coverage 字段约束）。
+        "extra_cov": ["harness.skills"],
+        # 规则 11：本模块承诺的默认实现必须真实存在（fake/门面不算）。
+        "required_defaults": {
+            "tool": DEFAULT_IMPL_CONTRACTS["tool"],
+            "skill": DEFAULT_IMPL_CONTRACTS["skill"],
+            "disclosure": DEFAULT_IMPL_CONTRACTS["disclosure"],
+            "mcp": DEFAULT_IMPL_CONTRACTS["mcp"],
+            "webfetch": DEFAULT_IMPL_CONTRACTS["webfetch"],
+        },
+    },
 }
 
 results: list[tuple[str, bool, str]] = []
@@ -91,6 +126,24 @@ def tail(proc: subprocess.CompletedProcess[str], lines: int = 12) -> str:
     return "\n".join((proc.stdout + proc.stderr).strip().splitlines()[-lines:])
 
 
+def check_default_impls(module: str) -> None:
+    """规则 11 G0：本模块声明的默认实现类必须在生产源码中存在（fake 不算）。
+
+    只检查 cfg 声明的 required_defaults，避免跨模块误报（如 R5 不检查 R9 的 LocalSandbox）。
+    """
+    cfg = MODULES[module]
+    required = cfg.get("required_defaults", {})
+    if not required:
+        return
+    missing: list[str] = []
+    for port_name, (class_name, path_hint) in required.items():
+        target = SRC / path_hint
+        if not target.exists() or f"class {class_name}" not in target.read_text(encoding="utf-8"):
+            missing.append(f"{port_name}→{class_name}({path_hint})")
+    record("G0 规则11 默认实现存在性", not missing,
+           f"{len(required)} 个默认实现类真实存在" if not missing else f"缺失 {missing}")
+
+
 def g0(cfg: dict, module: str) -> None:
     try:
         mod = importlib.import_module(cfg["pkg"])
@@ -109,6 +162,9 @@ def g0(cfg: dict, module: str) -> None:
     record("G0 装配期静态检查 / 红线扫描", proc.returncode == 0,
            proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else proc.stderr.strip())
 
+    # 规则 11：设计承诺的默认实现必须真实存在（防"协议+门面+fake 冒充完成"）。
+    check_default_impls(module)
+
 
 def g1(cfg: dict, module: str) -> None:
     proc = command(["-m", "pytest", f"tests/{module}", "-q", "-c", "pyproject.toml",
@@ -119,6 +175,16 @@ def g1(cfg: dict, module: str) -> None:
     detail = f"覆盖率 {cover_line.split()[-1]}" if cover_line else "pytest rc=0"
     record(f"G1 单测 + 覆盖率 ≥ {cfg['coverage']}%", proc.returncode == 0,
            detail if proc.returncode == 0 else tail(proc))
+
+    # R5 跨包：对额外声明的包逐一强制同一覆盖率阈值（如 harness.skills）。
+    for extra in cfg.get("extra_cov", []):
+        extra_proc = command(["-m", "pytest", f"tests/{module}", "-q", "-c", "pyproject.toml",
+                              f"--cov={extra}", "--cov-report=term",
+                              f"--cov-fail-under={cfg['coverage']}"])
+        extra_line = next((line for line in (extra_proc.stdout or "").splitlines()
+                           if line.startswith("TOTAL")), "")
+        record(f"G1 附加包 {extra} 覆盖率 ≥ {cfg['coverage']}%", extra_proc.returncode == 0,
+               extra_line.split()[-1] if extra_line else "pytest rc=0")
 
     mypy = command(["-m", "mypy", "--strict", "src"])
     record("G1 mypy strict", mypy.returncode == 0,

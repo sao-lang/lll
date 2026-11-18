@@ -1,9 +1,11 @@
-"""红线静态扫描（AST），按模块：python tests/tools/ast_scan.py --module r1|r2|r3|r4
+"""红线静态扫描（AST），按模块：python tests/tools/ast_scan.py --module r1|r2|r3|r4|r5
 
 R1：Program 内不得有时间/随机/网络调用（破坏确定性）；纯运行时不 import random/datetime。
 R2：hook/plugin 强制留名；对外只有 host.define()/plugin() 扩展点，无 middleware/filter/pipe 独立 API。
 R3：降级阶梯装配期强校验（无环/末级拒答）+ 副作用重试幂等键检查；能力插件不 import IO SDK。
 R4：网关必须做结构化校验（未过 schema 不进业务）+ 成本闸（路由/重试不得绕过 Budgets）。
+R5：danger 四路路由齐全（CRITICAL 审批/HIGH 沙盒/LOW 审计缺席降级）+ L1 披露脱 schema
+    + 异常折叠 + MCP fqname 同 Registry 合并 + 编码规则 5/6 防回归。
 
 扫描真实源码，不做运行时推断；任一红线命中退出码 1。
 """
@@ -22,6 +24,8 @@ TARGETS = {
     "r2": [SRC / "hooks", ROOT / "tests" / "demos" / "demo_r2.py", ROOT / "tests" / "r2"],
     "r3": [SRC / "harness" / "resilience", ROOT / "tests" / "demos" / "demo_r3.py", ROOT / "tests" / "r3"],
     "r4": [SRC / "harness" / "model", ROOT / "tests" / "demos" / "demo_r4.py", ROOT / "tests" / "r4"],
+    "r5": [SRC / "harness" / "tools", SRC / "harness" / "skills",
+           ROOT / "tests" / "demos" / "demo_r5.py", ROOT / "tests" / "r5"],
 }
 
 FORBIDDEN_IN_PROGRAM = (
@@ -277,7 +281,47 @@ def scan_r4(files: list[Path]) -> list[str]:
     return violations
 
 
-SCANNERS = {"r1": scan_r1, "r2": scan_r2, "r3": scan_r3, "r4": scan_r4}
+def scan_r5(files: list[Path]) -> list[str]:
+    """R5 红线：CRITICAL 必须经审批 + MCP 合并同 Registry + 异常折叠 + 不 import IO SDK。"""
+    violations: list[str] = []
+    tools_dir = SRC / "harness" / "tools"
+
+    registry = tools_dir / "registry.py"
+    reg_text = registry.read_text(encoding="utf-8") if registry.exists() else ""
+    # 四级路由：CRITICAL 必经 HumanPort 审批、HIGH 必经沙盒、异常折叠、缺席拒绝错误码。
+    for token in ("NO_SANDBOX", "NO_HUMAN", "APPROVAL_DENIED", "INVALID_ARGS",
+                  "except Exception", "DangerLevel"):
+        if token not in reg_text:
+            violations.append(f"registry.py 缺路由/折叠要素 {token}")
+    # LOW 审计缺席降级标记（四级完整：LOW 不能被整级吞掉）。
+    if "audit_missing" not in reg_text:
+        violations.append("registry.py 缺 LOW 审计降级标记 audit_missing")
+
+    # 披露红线：L1（catalog level=1）不含完整 schema + 超预算拒绝。
+    index = tools_dir / "index.py"
+    idx_text = index.read_text(encoding="utf-8") if index.exists() else ""
+    if "parameters_schema" not in idx_text or "budget" not in idx_text.lower():
+        violations.append("index.py 缺 L1 脱 schema 或预算校验")
+
+    # MCP 合并：fqname 前缀 + 同一 registry 注册。
+    mcp = tools_dir / "mcp.py"
+    mcp_text = mcp.read_text(encoding="utf-8") if mcp.exists() else ""
+    if "mcp__" not in mcp_text or "register" not in mcp_text:
+        violations.append("mcp.py 缺 mcp__ fqname 前缀或同 Registry 注册")
+
+    # D13 WebFetch：抓取正文必须过注入检测、命中拒载。
+    webfetch = tools_dir / "webfetch.py"
+    web_text = webfetch.read_text(encoding="utf-8") if webfetch.exists() else ""
+    if "InjectionDetector" not in web_text or "InjectionVerdict.INJECTED" not in web_text:
+        violations.append("webfetch.py 缺注入检测或命中拒载")
+
+    # 编码规则 5/6 红线（防回归）：规则 5 扫字面量比较、规则 6 扫动态读取收敛。
+    violations.extend(_scan_coding_rules(files, tools_dir))
+    violations.extend(_scan_coding_rules(files, SRC / "harness" / "skills"))
+    return violations
+
+
+SCANNERS = {"r1": scan_r1, "r2": scan_r2, "r3": scan_r3, "r4": scan_r4, "r5": scan_r5}
 
 
 def main() -> int:

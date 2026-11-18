@@ -12,7 +12,7 @@ from hooks import (
 
 def test_port_protocols_complete():
     expected = {"llm", "tool", "skill", "rag", "memory", "store", "sandbox",
-                "audit", "eval", "telemetry", "human", "mcp", "event_stream"}
+                "audit", "eval", "telemetry", "human", "mcp", "event_stream", "disclosure"}
     assert expected <= set(PORT_PROTOCOLS)
     for name, proto in PORT_PROTOCOLS.items():
         assert isinstance(proto, type), name

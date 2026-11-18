@@ -100,7 +100,10 @@ class OpenAICompatLLM:
         calls: list[ToolCall] = []
         if not isinstance(raw, list):
             return calls
+        # 逐项解析 vendor tool_calls：单项形态非法只跳过该项，保住同批其余有效调用
+        # （整批失败会丢掉正文并被误标 NETWORK_ERROR 触发无谓重试/熔断）。
         for item in raw:
+            # 非 dict 的项无字段可提取，跳过而非让整批解析崩掉。
             if not isinstance(item, dict):
                 continue
             raw_fn = item.get("function")
@@ -109,6 +112,8 @@ class OpenAICompatLLM:
             # N2：坏 JSON 只降级该工具调用的参数，不让它冒泡丢弃整份有效响应
             # （否则正文丢失、整份响应被误标 NETWORK_ERROR 触发重试/熔断）。
             parsed: object = args
+            # 协议里 arguments 是 JSON 字符串，需反序列化成结构化参数；
+            # 若 vendor 直接给了对象则原样使用，兼容两种形态（边界条件）。
             if isinstance(args, str):
                 try:
                     parsed = json.loads(args)
@@ -178,28 +183,38 @@ class OpenAICompatLLM:
                 json=self._payload(req, stream=True),
             ) as resp:
                 resp.raise_for_status()
+                # SSE 逐行推送，按行读才能及时把文本片段 yield 出去；
+                # aiter_lines 负责 TCP 分包/粘包，调用方无需自己拼缓冲区。
                 async for line in resp.aiter_lines():
                     line = line.strip()
+                    # 只认 data: 行；event:/id:/重试间隔/空行等 SSE 控制行一律忽略。
                     if not line.startswith("data:"):
                         continue
                     payload = line[len("data:"):].strip()
+                    # 流结束标记或空 data 不含增量文本，跳过（空行常作保活心跳）。
                     if not payload or payload == _SSE_DONE:
                         continue
                     try:
                         data = json.loads(payload)
                     except json.JSONDecodeError:
                         continue
+                    # 非 dict 的 JSON 行（如标量）不是有效 chunk，忽略而非当成文本。
                     if not isinstance(data, dict):
                         continue
                     # 末块：usage 无 choices，写入结算口后不 yield 文本。
                     usage = data.get("usage")
+                    # usage 只出现在末块；出现即写入结算口，保留真实账单值。
                     if usage is not None:
                         self.last_usage = self._usage_from(usage)
                     choices = data.get("choices", [])
+                    # 仅从首个 choice 取增量（本适配器只服务单主流）；
+                    # choices 为空正是 usage-only 末块的标志，此时不产出文本。
                     if isinstance(choices, list) and choices and isinstance(choices[0], dict):
                         delta = choices[0].get("delta", {})
+                        # delta 形态可能是 dict 或缺省；非 dict 时无 content 可取，直接忽略。
                         if isinstance(delta, dict):
                             content = delta.get("content")
+                            # 只 yield 非空字符串片段，空 content 不产生无意义的下游事件。
                             if isinstance(content, str) and content:
                                 yield content
         except Exception:

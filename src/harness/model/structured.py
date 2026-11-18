@@ -140,22 +140,22 @@ def _check(data: DynamicValue, schema: dict[str, DynamicValue], path: str, error
         return  # 类型错则不继续深挖，避免噪音
 
     raw_enum = schema.get("enum")
-    if isinstance(raw_enum, list) and data not in raw_enum:
+    if isinstance(raw_enum, list) and data not in raw_enum:  # 仅 enum 为合法列表时约束取值；坏 schema 形态不误伤合法值
         errors.append(f"{path}: value {data!r} not in enum {raw_enum}")
 
-    if expected is _JsonType.OBJECT and isinstance(data, dict):
-        for req in schema.get("required", []):
-            if req not in data:
+    if expected is _JsonType.OBJECT and isinstance(data, dict):  # 仅对象类型且数据确为 dict 才深挖字段，避免对标量误报
+        for req in schema.get("required", []):  # 逐个必需字段查存在性；不提前 break，一次报全缺失项便于修复
+            if req not in data:  # 缺字段即记错；required 列表形态由 schema 保证，异常形态当作空约束
                 errors.append(f"{path}.{req}: required field missing")
         raw_props = schema.get("properties", {})
-        if isinstance(raw_props, dict):
-            for prop, sub_schema in raw_props.items():
-                if prop in data and isinstance(sub_schema, dict):
+        if isinstance(raw_props, dict):  # properties 形态合法才递归，防止把非 dict 值当成子 schema
+            for prop, sub_schema in raw_props.items():  # 逐字段下钻；只校验数据中实际存在的键，缺席交由 required 负责
+                if prop in data and isinstance(sub_schema, dict):  # 双重守卫：字段缺席或子 schema 畸形都跳过，兼容宽松 schema
                     _check(data[prop], sub_schema, f"{path}.{prop}", errors)
 
-    if expected in (_JsonType.NUMBER, _JsonType.INTEGER):
+    if expected in (_JsonType.NUMBER, _JsonType.INTEGER):  # 仅数值类型才谈最小值，字符串比大小无意义
         minimum = schema.get("minimum")
-        if isinstance(minimum, (int, float)) and isinstance(data, (int, float)) and data < minimum:
+        if isinstance(minimum, (int, float)) and isinstance(data, (int, float)) and data < minimum:  # 边界/数据都须是数值；形态不合法视为无约束（显式回退）
             errors.append(f"{path}: {data} < minimum {minimum}")
 
 

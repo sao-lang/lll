@@ -164,9 +164,9 @@ def normalize_code(raw: str) -> str:
         归一化族名；无法识别时原样返回（规则 5：未知值不静默改写语义，由分类兜底）。
     """
     upper = raw.strip().upper()
-    if upper in _CODE_ALIASES:
+    if upper in _CODE_ALIASES:  # 符号码与 HTTP 码先查别名表，统一到语义族
         return _CODE_ALIASES[upper]
-    if _HTTP_5XX.match(upper):
+    if _HTTP_5XX.match(upper):  # 未列入别名表的 5xx 段兜底为服务端错误，避免漏判
         return "SERVER_ERROR"
     return raw
 
@@ -199,7 +199,7 @@ class _DefaultClassifier:
 
     def classify(self, result: Result, ctx: object) -> FailureClass:
         """成功→终态；失败→查表；未知码按确定性错误（不重试、不计熔断）。"""
-        if result.ok:
+        if result.ok:  # 成功是终态，不参与任何重试/熔断判定
             return _SUCCESS_CLASS
         error = result.error
         if error is None:  # pragma: no cover - Result.failure 必带 error，防御性兜底
@@ -293,17 +293,17 @@ def backoff_delay(
     """
     raw = min(spec.max_delay, spec.base_delay * (spec.multiplier ** max(0, attempt - 1)))
     jitter = Jitter.coerce(spec.jitter)  # 未知值显式回退 FULL（规则 5）
-    if jitter is Jitter.NONE:
+    if jitter is Jitter.NONE:  # 无抖动：固定退避；装配期已保证 base_delay>0，不会形成重试风暴
         delay = raw
-    elif jitter is Jitter.FULL:
+    elif jitter is Jitter.FULL:  # 全抖动：打散到 [0, raw)，防多客户端同步重试
         delay = rng.uniform(0.0, raw)
-    elif jitter is Jitter.EQUAL:
+    elif jitter is Jitter.EQUAL:  # 等抖动：保留一半基线，抖动另一半，兼顾退避强度与打散
         half = raw / 2
         delay = half + rng.uniform(0.0, half)
-    else:  # Jitter.DECORRELATED
-        base = prev_delay if prev_delay > 0 else spec.base_delay
+    else:  # Jitter.DECORRELATED：按上次退避值放大，避免与上次退避同步
+        base = prev_delay if prev_delay > 0 else spec.base_delay  # 首次无上次值，回退 base_delay 作起点
         delay = min(spec.max_delay, base * rng.uniform(1.0, 3.0))
-    if spec.respect_retry_after and retry_after is not None:
+    if spec.respect_retry_after and retry_after is not None:  # 服务端 Retry-After 优先：取较大值，尊重对方背压
         delay = max(delay, retry_after)
     return max(0.0, delay)
 
@@ -374,15 +374,15 @@ def validate_ladder(ladder: DegradeLadder) -> None:
         steps 非空；末级必须 REFUSE；非拒答级 target 不重复（无环）；quality 严格递减。
     """
     steps = ladder.steps
-    if not steps:
+    if not steps:  # 空阶梯无任何候选，装配期直接拒绝
         raise ValueError("degrade ladder must not be empty")
-    if steps[-1].mode is not DegradeMode.REFUSE:
+    if steps[-1].mode is not DegradeMode.REFUSE:  # 末级必须拒答，否则目标剔除干净后可能编造答案
         raise ValueError("degrade ladder must end with a REFUSE step (no fabrication)")
     targets = [step.target for step in steps if step.mode is not DegradeMode.REFUSE]
-    if len(set(targets)) != len(targets):
+    if len(set(targets)) != len(targets):  # 目标重复即成环，会让降级在两级间来回震荡
         raise ValueError("degrade ladder contains a cycle (duplicate target)")
-    for prev, nxt in zip(steps, steps[1:]):
-        if nxt.quality >= prev.quality:
+    for prev, nxt in zip(steps, steps[1:]):  # 相邻两级配对比较，保证 quality 沿阶梯严格递减
+        if nxt.quality >= prev.quality:  # 下一级质量未更低则无法单调收敛，装配期拒绝
             raise ValueError(
                 f"degrade ladder quality must strictly decrease: "
                 f"{prev.quality} -> {nxt.quality}"

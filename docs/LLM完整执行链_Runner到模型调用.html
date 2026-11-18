@@ -1,0 +1,42 @@
+<svg viewBox="0 0 680 300" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>LLM Effect 在 Runner 中的完整执行链</title>
+<desc>Runner 先 dispatch 触发 hook 判决，放行后通过 call 回调进入 gateway.as_call，再调用 llm.complete；around hook 经 ctx.invoke 参与。</desc>
+<defs>
+<marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+<path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+</marker>
+</defs>
+<text x="40" y="38" font-family="var(--font-sans)" font-size="12" fill="#5F5E5A">Program: yield Effect(LLM, ...)</text>
+<g>
+<rect x="40" y="52" width="160" height="56" rx="8" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.5"/>
+<text x="120" y="74" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="14" font-weight="500" fill="#26215C">Runner._execute</text>
+<text x="120" y="94" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="12" fill="#534AB7">单个 Effect 编排</text>
+</g>
+<path d="M202 80 L235 80" fill="none" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+<g>
+<rect x="240" y="52" width="185" height="56" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+<text x="332" y="74" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="14" font-weight="500" fill="#042C53">bus.dispatch()</text>
+<text x="332" y="94" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="12" fill="#185FA5">emit before_model→before_invoke</text>
+</g>
+<path d="M427 80 L460 80" fill="none" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+<g>
+<rect x="465" y="52" width="175" height="56" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
+<text x="552" y="74" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="14" font-weight="500" fill="#04342C">gw.as_call()</text>
+<text x="552" y="94" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="12" fill="#0F6E56">Effect→LLMRequest→complete</text>
+</g>
+<path d="M552 110 L552 148" fill="none" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+<g>
+<rect x="465" y="152" width="175" height="56" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
+<text x="552" y="174" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="14" font-weight="500" fill="#04342C">gateway.complete()</text>
+<text x="552" y="194" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="12" fill="#0F6E56">缓存/路由/校验/修复/记账</text>
+</g>
+<path d="M463 180 L430 180" fill="none" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+<g>
+<rect x="240" y="152" width="185" height="56" rx="8" fill="#EAF3DE" stroke="#3B6D11" stroke-width="0.5"/>
+<text x="332" y="174" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="14" font-weight="500" fill="#173404">llm.complete()</text>
+<text x="332" y="194" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="12" fill="#3B6D11">真正的模型后端调用</text>
+</g>
+<rect x="40" y="238" width="600" height="46" rx="8" fill="#F1EFE8" stroke="#888780" stroke-width="0.5"/>
+<text x="56" y="256" dominant-baseline="central" font-family="var(--font-sans)" font-size="12" fill="#2C2C2A">判决非 CONTINUE（deny/degrade/ask…）→ Runner 短路，不调 Port；around hook 经 ctx.invoke 进入同一 call</text>
+<text x="56" y="274" dominant-baseline="central" font-family="var(--font-sans)" font-size="12" fill="#2C2C2A">ctx_factory=bus.ctx_factory() 产出 HookCtx（带 trace/meta/budget_left），供 hook 读取</text>
+</svg>
