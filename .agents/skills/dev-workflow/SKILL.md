@@ -44,7 +44,7 @@ description: 通用的 AI 开发工作流治理外壳。当收到开发、重构
 
 | 阶段 | 主控 | 加载 / 调用 |
 |---|---|---|
-| S0 会话开始 | 本 skill | `scripts/preflight.py` 预检依赖 → `handoff`（读上次）→ 建 overview md |
+| S0 会话开始 | 本 skill | `scripts/preflight.py` 预检依赖 → **确认加载 `handoff` 并调用** → 建 overview md |
 | S1 场景路由 | 本 skill | 声明 skill 组 + 禁止项 + 下一站 |
 | S2 设计计划 | 工程内核 | `brainstorming` → `writing-plans`；拷问设计加挂 `grill-design`；架构类加 `architecture-contracts` |
 | S3 TDD 实现 | 工程内核 | `TDD`、`subagent-driven`；加挂 `ponytail` + `caveman` + coding-rules |
@@ -94,6 +94,16 @@ description: 通用的 AI 开发工作流治理外壳。当收到开发、重构
 - **何时用**：跨文件问题（谁调用 / 改了波及什么 / A 怎么到 B）、陌生代码库初次理解。
 - **何时不用**：单文件小问题、短会话——工具定义有冷启动成本，可能 net-negative。
 - **纪律**：graphify 给的是**上下文**（带源码位置）不是已验证答案；关键边必须打开源码核对。它不替代 `scan_gaps.py`（一个查结构，一个查约定违反）。
+
+## skill 加载纪律（防"声明了但没加载"）
+
+本 skill 声明"加载 X"时（尤其 S0 的 `handoff`），执行方必须**真的调用该 skill**，并遵守：
+
+1. **先确认存在**：S0 跑 `preflight.py`，它检查外部 skill 是否安装。缺失项必须显式处理。
+2. **失败要出声**：若某 skill 加载失败（未安装 / 工具不可用），**禁止静默跳过**——必须在 overview 写"缺失：X，影响：Y，已降级为 Z"，并向用户声明降级方案。
+3. **不可假装加载**：没实际调用就不得声称"已加载 handoff"。证据是 skill 的调用动作，不是文字声明。
+4. **关键依赖缺失要问**：`handoff`（S0）与 `superpowers`（工程主控）若缺失，必须先告知用户并给出安装命令，不可直接开跑。
+5. **路径相关**：只读路径（9/10）不强依赖 handoff——无上次交接也能做理解/拷问，但需在 overview 标注"无交接上下文"。
 
 ## 铁律（贯穿全程）
 

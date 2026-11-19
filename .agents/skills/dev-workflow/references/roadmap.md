@@ -41,6 +41,15 @@
 - 已写入 `SKILL.md` 的"代码理解工具"段、`skill-matrix.md` 的 skill 清单、场景 10 步骤。
 - 纪律：只给带源码位置的上下文非验证答案；冷启动有成本，短任务不用；不替代 scan_gaps。
 
+### 依赖安装 + skill 加载纪律（2026-11-19）
+- 背景：其他会话用 dev-workflow 时 AI 未加载 handoff。根因是 handoff 当时未安装（只给了仓库地址）。
+- 已装齐 11 个 skill：superpowers / grill-design / grill-me / code-quality-review /
+  handoff / metago-code-review-deep / graphify（市场）+ ponytail / ponytail-review /
+  caveman / caveman-compress（从 GitHub 仓库复制到用户级目录）。
+- 修复软约束缺陷：SKILL.md 新增"skill 加载纪律"段——先 preflight 确认存在、
+  加载失败必须显式降级并写 overview、禁止假装加载、关键依赖缺失要问用户。
+- preflight 复核：8 个 skill 缺失已清零；剩余 18 项为语言验证工具缺失（另案）。
+
 ## 二、P2 候选（🟡，有真实需求再加）
 
 - 安全审计（只读，加载 `security-redlines.md`）

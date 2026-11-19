@@ -24,12 +24,15 @@
 
 ## 2. Skill 清单与仓库地址
 
+> 安装状态（2026-11-19 核实）：下表 9 个 skill **全部已装**到 `~/.workbuddy/skills/`。
+> 另装了 `ponytail-review`、`caveman-compress` 作为配套（非主流程必需）。用 `preflight.py` 可随时复核。
+
 | Skill | 用途 | 仓库 / 来源 | 备注 |
 |---|---|---|---|
 | **superpowers** | 工程方法论总框架（主控） | `https://github.com/obra/superpowers` | 工程流程唯一主控；不修改本体 |
-| **ponytail** | 精简代码（YAGNI 七级梯） | `https://github.com/DietrichGebert/ponytail` | 砍过度设计，不动安全/校验/测试 |
-| **caveman** | 精简输出（省 token） | `https://github.com/JuliusBrussee/caveman`（或 ponytail 仓库 `benchmarks/arms/caveman`） | 代码/命令/报错 byte-exact，不压缩 |
-| **handoff** | 会话压缩交接 | `https://github.com/mattpocock/skills`（skill: handoff） | 写交接文档 + suggested skills |
+| **ponytail** | 精简代码（YAGNI 七级梯） | `https://github.com/DietrichGebert/ponytail`（`skills/ponytail/SKILL.md`） | 砍过度设计，不动安全/校验/测试 |
+| **caveman** | 精简输出（省 token） | `https://github.com/JuliusBrussee/caveman`（`skills/caveman/SKILL.md`） | 代码/命令/报错 byte-exact，不压缩 |
+| **handoff** | 会话压缩交接 | WorkBuddy 市场 `handoff`（原 `mattpocock/skills`） | 写交接文档 + suggested skills；S0 关键依赖 |
 | **grill-design** | 拷问设计（设计树+前沿） | WorkBuddy 市场 | 每分支必须有结论、不许静默假设 |
 | **grill-me** | 深度追问方案/代码 | WorkBuddy 市场 | 逐层拆解直到共识 |
 | **code-quality-review** | 代码七维审查 | WorkBuddy 市场 | 带行号、结论分级、可直接应用的改法 |
