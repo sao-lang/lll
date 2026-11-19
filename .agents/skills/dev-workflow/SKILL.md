@@ -16,9 +16,9 @@ description: 通用的 AI 开发工作流治理外壳。当收到开发、重构
 ## 触发后必须先做的两件事
 
 1. **建会话记录**：按 `references/overview.md` 在项目根的 `overviews/YYYY-MM-DD/` 下创建本轮会话 md（含环境、日期、场景）。
-2. **场景路由**：按 `references/routing.md` 的三层漏斗判定九场景之一，用声明模板向用户声明"场景 / 加载哪些 skill / 禁止项 / 下一站"。**未声明不推进。**
+2. **场景路由 + 路径判定**：按 `references/routing.md` 的三层漏斗判定十三场景之一，**并判路径类型（改码/只读/文档/验证）**，用声明模板向用户声明"场景 / 路径 / 走的阶段 / 加载哪些 skill / 禁止项 / 下一站"。**未声明不推进。**
 
-## 九场景与流程裁剪
+## 十三场景与流程裁剪
 
 | 场景 | 交给工程内核的阶段 | 本外壳额外负责 |
 |---|---|---|
@@ -31,8 +31,12 @@ description: 通用的 AI 开发工作流治理外壳。当收到开发、重构
 | 项目重构 | TDD 锁行为 → review → finish | ponytail 砍复杂度、禁止夹带新功能 |
 | 解 bug | systematic-debugging → TDD 复现 → review | 根因台账、回归证据 |
 | 拷问代码/设计 | 不委托（纯只读） | grill-design / grill-me / code-quality-review，出清单不改码 |
+| 代码库理解 | 不委托（纯只读） | `graphify` 查图 + scan_gaps + architecture-contracts，出代码地图/调用链 |
+| 文档同步 | 局部（只核差异，不跑代码 TDD） | grill-design + architecture-contracts，出文档-代码差异清单 |
+| 门禁验收/发布 | 不委托（只验证） | preflight + verify + scan_gaps + review 全套，出门禁报告 |
+| 测试补课 | TDD 变体（只补测试，不写新实现） | test-strategy.md，出新增测试 + 覆盖率证据 |
 
-详细步骤见 `references/scenarios.md`（九场景）。
+详细步骤见 `references/scenarios.md`（十三场景）。路径与阶段的对应关系见下节矩阵。
 
 ## 阶段 → skill 加载矩阵
 
@@ -44,10 +48,22 @@ description: 通用的 AI 开发工作流治理外壳。当收到开发、重构
 | S1 场景路由 | 本 skill | 声明 skill 组 + 禁止项 + 下一站 |
 | S2 设计计划 | 工程内核 | `brainstorming` → `writing-plans`；拷问设计加挂 `grill-design`；架构类加 `architecture-contracts` |
 | S3 TDD 实现 | 工程内核 | `TDD`、`subagent-driven`；加挂 `ponytail` + `caveman` + coding-rules |
-| S4 自省补强 | 本 skill | `scripts/scan_gaps.py` 生成台账 → `scripts/verify.py` 拿退出码 → `code-quality-review`；拷问代码加挂 `grill-me` |
+| S4 自省补强（改码变体） | 本 skill | `scripts/scan_gaps.py` 生成台账 → `scripts/verify.py` 拿退出码 → `code-quality-review`；拷问代码加挂 `grill-me` |
+| S4 分析（只读变体） | 本 skill | `graphify` / `scan_gaps.py` / review，**不跑 verify**（无代码改动可验） |
 | S5 review 收尾 | 工程内核 | `requesting-code-review`、`finish`；深度审查加挂 `metago-code-review-deep`；收尾 `handoff` + 写 overview |
 
 确定性脚本（scripts/，非 skill）：`preflight.py`（依赖预检）、`verify.py --lang <lang>`（验证命令汇总）、`scan_gaps.py`（缺口台账草稿）。脚本输出即证据，直接写入 overview。
+
+### 场景 × 阶段矩阵（S1 硬输出，决定跳过哪些阶段）
+
+| 路径 | 场景 | S0 | S1 | S2 | S3 | S4 | S5 |
+|---|---|---|---|---|---|---|---|
+| 改码 | 1/4/5/6/7/8 | ✓ | ✓ | ✓ | ✓ | 改码变体 | ✓ |
+| 只读 | 9/10 | ✓ | ✓ | — | — | 只读变体 | —（写 overview 后结束） |
+| 文档 | 2/3/11 | ✓ | ✓ | 核差异 | S3' 只改文档 | 核签名 | ✓ |
+| 验证 | 12/13 | ✓ | ✓ | — | 13 补测试 / 12 跳过 | ✓ | ✓ |
+
+**只读出口**：只读路径的出口是"发现清单 / 代码地图 / 证据台账已交付且可追溯"，**不是"测试全绿"**。禁止对无代码改动的场景套用"未达标不许进 review"的门禁，否则空转。
 
 ## 代码规则如何生效（关键机制）
 
@@ -69,6 +85,15 @@ description: 通用的 AI 开发工作流治理外壳。当收到开发、重构
 - **锁 3 · 写码后**：跑 formatter/linter/type-checker/注释检查，**退出码非 0 → 禁止进 review、禁止标完成**（客观强制，不靠自觉）。
 
 例外必须显式声明并记入 overview（如生成代码、第三方文件、vendor 边界），禁止以"技术债"名义静默放行。
+
+## 代码理解工具（graphify）
+
+场景 10（代码库理解）与场景 9（拷问）用 `graphify` 替代 grep/read 循环——本地 tree-sitter 建图，查询默认卡 2000 token，边标 `EXTRACTED`/`INFERRED` 可追溯。
+
+- **安装**：`pip install graphifyy`（双 y）→ `graphify install` 注册 skill/MCP → `/graphify .` 建图。市场 skill 名 `graphify`（代码知识图谱问答）。
+- **何时用**：跨文件问题（谁调用 / 改了波及什么 / A 怎么到 B）、陌生代码库初次理解。
+- **何时不用**：单文件小问题、短会话——工具定义有冷启动成本，可能 net-negative。
+- **纪律**：graphify 给的是**上下文**（带源码位置）不是已验证答案；关键边必须打开源码核对。它不替代 `scan_gaps.py`（一个查结构，一个查约定违反）。
 
 ## 铁律（贯穿全程）
 

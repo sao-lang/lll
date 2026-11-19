@@ -34,6 +34,7 @@
 | **grill-me** | 深度追问方案/代码 | WorkBuddy 市场 | 逐层拆解直到共识 |
 | **code-quality-review** | 代码七维审查 | WorkBuddy 市场 | 带行号、结论分级、可直接应用的改法 |
 | **metago-code-review-deep** | 深度代码审查（四级报告） | WorkBuddy 市场 | Critical/Major/Minor/Info |
+| **graphify** | 代码知识图谱（本地 tree-sitter 建图，查询卡 2000 token） | WorkBuddy 市场 `graphify`；开源 `pip install graphifyy` | 场景 10/9 用；替代 grep/read 循环；冷启动有成本，短任务慎用 |
 
 ## 3. 跨 agent 安装方式
 
