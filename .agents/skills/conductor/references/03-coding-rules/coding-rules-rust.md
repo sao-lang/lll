@@ -1,6 +1,6 @@
 # 编码规则 · Rust
 
-> 语言特定规则，与 `coding-rules-common.md` 一起遵守。Edition 2021/2024。
+> 语言特定规则，与 `references/03-coding-rules/coding-rules-common.md` 一起遵守。Edition 2021/2024。
 
 ## 注释方案（rustdoc，中文）
 

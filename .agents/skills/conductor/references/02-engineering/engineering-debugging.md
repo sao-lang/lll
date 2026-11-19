@@ -24,4 +24,4 @@
 
 ## 在 conductor 中的挂载
 
-由 conductor 在**场景 8（解 bug）**加载：`systematic-debugging`（4 阶段根因法）→ TDD 写复现测试（`engineering-tdd.md`）→ 代码评审（`engineering-code-review.md`）。产出根因台账 + 回归证据写入 overview。
+由 conductor 在**场景 8（解 bug）**加载：`systematic-debugging`（4 阶段根因法）→ TDD 写复现测试（`references/02-engineering/engineering-tdd.md`）→ 代码评审（`references/02-engineering/engineering-code-review.md`）。产出根因台账 + 回归证据写入 overview。

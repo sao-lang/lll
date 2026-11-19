@@ -9,10 +9,10 @@
 |---|---|---|---|---|
 | S0 会话开始 | conductor | `scripts/preflight.py` 预检 → `handoff`（读上次交接）、建 overview md | 禁止直接写代码 | 预检完成 + overview 文件已建 |
 | S1 场景路由 | conductor | 声明 skill 组 + 禁止项 + 下一站 | 禁止跳过声明 | 路由已向用户声明 |
-| S2 设计计划 | conductor | 读 `engineering-workflow.md`（brainstorming + writing-plans）；拷问设计加挂 `grill-design`；架构/设计驱动场景加挂 `architecture-contracts.md` | 规格未确认不动手 | 设计文档 + 计划就绪 |
-| S3 TDD 实现 | conductor | 读 `engineering-tdd.md` + `engineering-workflow.md`（worktree/subagent）；加挂 `ponytail` + `caveman` + coding-rules | 无失败测试不写实现 | 红转绿、全量测试绿 |
-| S4 自省补强 | conductor | `scripts/scan_gaps.py` → `scripts/verify.py --lang` → `code-quality-review` + 缺口台账法；拷问代码加挂 `grill-me`；安全核对 `security-redlines.md`、测试核对 `test-strategy.md` | 未达标不许进 review | 遗漏/断点/覆盖率/通过率/安全五项达标 |
-| S5 review 收尾 | conductor | 读 `engineering-code-review.md` + `engineering-workflow.md`（finish）、解 bug 读 `engineering-debugging.md`；深度审查加挂 `metago-code-review-deep`；收尾 `handoff` + 写 overview | Critical 未清零不许收尾 | 全绿 + 交接文档已写 |
+| S2 设计计划 | conductor | 读 `references/02-engineering/engineering-workflow.md`（brainstorming + writing-plans）；拷问设计加挂 `grill-design`；架构/设计驱动场景加挂 `references/04-guards/architecture-contracts.md` | 规格未确认不动手 | 设计文档 + 计划就绪 |
+| S3 TDD 实现 | conductor | 读 `references/02-engineering/engineering-tdd.md` + `references/02-engineering/engineering-workflow.md`（worktree/subagent）；加挂 `ponytail` + `caveman` + coding-rules | 无失败测试不写实现 | 红转绿、全量测试绿 |
+| S4 自省补强 | conductor | `scripts/scan_gaps.py` → `scripts/verify.py --lang` → `code-quality-review` + 缺口台账法；拷问代码加挂 `grill-me`；安全核对 `references/04-guards/security-redlines.md`、测试核对 `references/04-guards/test-strategy.md` | 未达标不许进 review | 遗漏/断点/覆盖率/通过率/安全五项达标 |
+| S5 review 收尾 | conductor | 读 `references/02-engineering/engineering-code-review.md` + `references/02-engineering/engineering-workflow.md`（finish）、解 bug 读 `references/02-engineering/engineering-debugging.md`；深度审查加挂 `metago-code-review-deep`；收尾 `handoff` + 写 overview | Critical 未清零不许收尾 | 全绿 + 交接文档已写 |
 
 ### 确定性脚本（scripts/，非 skill，直接执行）
 

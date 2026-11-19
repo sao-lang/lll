@@ -21,8 +21,8 @@
 | 2 | 隔离工作区 git worktree | 设计确认后 | 独立分支/worktree 工作，不污染主分支；跑初始化、确认测试基线干净（全绿或全空） | 干净基线 + 隔离区就绪 |
 | 3 | 写实施计划 writing-plans | 有规格后 | 拆成 2-5 分钟小任务，每个含精确文件路径、完整改法、验证步骤 | 计划呈现用户确认；计划变更回头改计划，不悄悄改 |
 | 4 | 子代理驱动开发 subagent-driven | 计划就绪 | 每个任务派全新上下文子代理（任务说明+计划片段+两段式评审）；主代理只编排审查 | 两段评审都过（规格符合度 + 代码质量） |
-| 5 | 测试驱动开发 TDD | 实现中 | RED→GREEN→REFACTOR→提交，见 `engineering-tdd.md` | 每个循环测试全绿 |
-| 6 | 请求代码评审 code-review | 每任务完成、进入下一任务前 | 对照计划逐条检查，按严重度报告，见 `engineering-code-review.md` | Critical 清零才推进 |
+| 5 | 测试驱动开发 TDD | 实现中 | RED→GREEN→REFACTOR→提交，见 `references/02-engineering/engineering-tdd.md` | 每个循环测试全绿 |
+| 6 | 请求代码评审 code-review | 每任务完成、进入下一任务前 | 对照计划逐条检查，按严重度报告，见 `references/02-engineering/engineering-code-review.md` | Critical 清零才推进 |
 | 7 | 收尾 finish | 所有任务完成 | 跑完整测试套件；给用户 4 选项（合并/开 PR/保留/丢弃）说明后果；清理 worktree | 全绿 + 用户决策 + 已清理 |
 
 **备选执行模式**：`executing-plans` —— 分批执行 + 人工检查点，适合需要人在场的场景。
@@ -215,8 +215,8 @@ spike 被批准后想留着继续做 → 留着是新的请求，要重新过确
 ## 在 conductor 中的挂载
 
 本文件由 conductor 在这些阶段加载（见 SKILL.md 阶段矩阵）：
-- **S2 设计计划** → 头脑风暴 + 写实施计划 + 架构类加 `architecture-contracts.md`
+- **S2 设计计划** → 头脑风暴 + 写实施计划 + 架构类加 `references/04-guards/architecture-contracts.md`
 - **隔离工作区** → 改码类场景的设计确认后执行
 - **收尾** → S5 finish
 
-系统化调试见 `engineering-debugging.md`，TDD 见 `engineering-tdd.md`，评审见 `engineering-code-review.md`。
+系统化调试见 `references/02-engineering/engineering-debugging.md`，TDD 见 `references/02-engineering/engineering-tdd.md`，评审见 `references/02-engineering/engineering-code-review.md`。

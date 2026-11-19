@@ -1,6 +1,6 @@
 # 编码规则 · Dart
 
-> 语言特定规则，与 `coding-rules-common.md` 一起遵守。Dart 3.x / Flutter。
+> 语言特定规则，与 `references/03-coding-rules/coding-rules-common.md` 一起遵守。Dart 3.x / Flutter。
 
 ## 注释方案（dartdoc，中文）
 

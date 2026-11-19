@@ -1,6 +1,6 @@
 # 编码规则 · TypeScript
 
-> 语言特定规则，与 `coding-rules-common.md` 一起遵守。目标版本：TypeScript 5.x。
+> 语言特定规则，与 `references/03-coding-rules/coding-rules-common.md` 一起遵守。目标版本：TypeScript 5.x。
 
 ## 注释方案（TSDoc，中文）
 

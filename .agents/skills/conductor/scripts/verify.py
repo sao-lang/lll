@@ -17,7 +17,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-REFS = Path(__file__).resolve().parents[1] / "references"
+REFS = Path(__file__).resolve().parents[1] / "references" / "03-coding-rules"
 LANGS = ("python", "typescript", "react", "vue", "go", "rust", "dart")
 
 

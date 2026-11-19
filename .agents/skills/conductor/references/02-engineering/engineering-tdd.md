@@ -67,7 +67,7 @@
 ## 与 conductor 测试策略的分工
 
 - 本文件管**怎么执行 TDD 循环**（红→绿→重构的纪律）。
-- `test-strategy.md` 管**测试层级选择**（金字塔/Mock 边界/覆盖率达标口径/假绿识别）。
+- `references/04-guards/test-strategy.md` 管**测试层级选择**（金字塔/Mock 边界/覆盖率达标口径/假绿识别）。
 - 场景 13（测试补课）用 TDD 变体：只补 characterization test 锁现有行为，不写新业务实现。
 
 ## 在 conductor 中的挂载

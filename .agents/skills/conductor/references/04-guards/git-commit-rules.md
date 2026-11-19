@@ -2,7 +2,7 @@
 
 > 本文件是 conductor 的**提交纪律**，由 S3（TDD 循环）与 S5（收尾）加载。
 > 它不是 skill、不占能力链节点——提交是贯穿各阶段的动作，规则管"何时提交、怎么写、提交什么"。
-> 与 `engineering-tdd.md`（绿后提交）、`engineering-workflow.md` 的 `finish`（交付决策）正交，可同时遵守。
+> 与 `references/02-engineering/engineering-tdd.md`（绿后提交）、`references/02-engineering/engineering-workflow.md` 的 `finish`（交付决策）正交，可同时遵守。
 
 ## 1. 何时提交
 
@@ -54,7 +54,7 @@ fix(skill): 补齐 superpowers 的 git 纪律（worktree/finish 防呆细节）
    ```
 4. **发现暂存区混入无关文件** → `git restore --staged <file>` 撤出，绝不"顺手一起提交"。
 5. **对破坏性改动保持警惕**：看到删除生产代码（`D src/...`）、删独立文档而无替代，先判断是否有意；
-   无法确认就不纳入本次提交，向用户说明并等待指示（参见 `architecture-contracts.md`）。
+   无法确认就不纳入本次提交，向用户说明并等待指示（参见 `references/04-guards/architecture-contracts.md`）。
 6. **提交后核对**：`git log --oneline -1` 确认 HEAD 内容正确（不仅看消息，必要时
    `git show HEAD:<path>` 核对实际文件——避免"只改了路径没改内容"这类假提交）。
 
@@ -66,7 +66,7 @@ fix(skill): 补齐 superpowers 的 git 纪律（worktree/finish 防呆细节）
 | `git commit --no-verify` | 跳过 hooks 检查，绕过质量门禁 |
 | 擅自 `git push --force` | 覆盖他人提交；远端被拒先调查，强推需用户明确要求 |
 | 擅自 `git commit --amend` | 改写已存在的提交历史；除非用户明确要求 |
-| 提交密钥 / token / `.env` / 凭证文件 | 泄露敏感信息；提交前按 `security-redlines.md` 核对 |
+| 提交密钥 / token / `.env` / 凭证文件 | 泄露敏感信息；提交前按 `references/04-guards/security-redlines.md` 核对 |
 | 提交 `__pycache__` / `.pyc` / 构建产物 / 临时备份 | 污染仓库；用 `.gitignore` 排除 |
 | 未通过 S4 验证就提交 | 门禁形同虚设（证据优于声称） |
 | 一次提交混合多个不相关主题 | 破坏原子性，回滚困难 |

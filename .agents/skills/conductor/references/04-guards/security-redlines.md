@@ -1,7 +1,7 @@
 # 安全红线
 
 > 不可协商的安全约束。S4 自省必查；违反即 Critical，阻断收尾。
-> 与 `coding-rules-common.md` 的"显式例外"纪律一致：例外必须写进 overview 并说明理由。
+> 与 `references/03-coding-rules/coding-rules-common.md` 的"显式例外"纪律一致：例外必须写进 overview 并说明理由。
 
 ## 1. 密钥与敏感信息
 

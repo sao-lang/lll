@@ -1,6 +1,6 @@
 # 编码规则 · Python
 
-> 语言特定规则，与 `coding-rules-common.md` 一起遵守。目标版本：Python 3.12+。
+> 语言特定规则，与 `references/03-coding-rules/coding-rules-common.md` 一起遵守。目标版本：Python 3.12+。
 
 ## 注释方案（Google Style docstring，中文）
 

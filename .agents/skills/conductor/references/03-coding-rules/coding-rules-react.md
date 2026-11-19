@@ -1,6 +1,6 @@
 # 编码规则 · React
 
-> 框架特定规则，与 `coding-rules-common.md`、`coding-rules-typescript.md` 一起遵守。React 18/19。
+> 框架特定规则，与 `references/03-coding-rules/coding-rules-common.md`、`references/03-coding-rules/coding-rules-typescript.md` 一起遵守。React 18/19。
 
 ## 注释方案（TSDoc + 组件说明，中文）
 

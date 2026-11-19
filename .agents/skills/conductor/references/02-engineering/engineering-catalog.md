@@ -9,27 +9,27 @@
 
 | # | superpowers skill | 去向 | conductor 能力名 | 挂载场景 / 阶段 | 详情文件 |
 |---|---|---|---|---|---|
-| 1 | brainstorming | ✅ 整合 | `brainstorm` | 场景 1/2/3/4/5 的 S2 | engineering-workflow.md |
-| 2 | writing-plans | ✅ 整合 | `plan` | 场景 1/4/5/6 的 S2 | engineering-workflow.md |
-| 3 | using-git-worktrees | ✅ 整合 | `worktree` | 所有改码场景 S2 后 | engineering-workflow.md（含完整隔离/gitignore 纪律） |
-| 4 | subagent-driven-development | ✅ 整合 | `execute`（subagent 模式） | 场景 4/5 S3 | engineering-workflow.md + engineering-code-review.md |
-| 5 | executing-plans | ✅ 整合 | `execute`（分批模式） | 场景 4/5 S3 备选（需人在场） | engineering-workflow.md |
-| 6 | test-driven-development | ✅ 整合 | `tdd` | 场景 4/5/6/7/8/13 的 S3 | engineering-tdd.md |
-| 7 | requesting-code-review | ✅ 整合 | `review` | 所有改码场景（每任务间 + S5） | engineering-code-review.md |
-| 8 | receiving-code-review | ✅ 整合 | `receive-review` | 横切：收到反馈时 | engineering-code-review.md |
-| 9 | finishing-a-development-branch | ✅ 整合 | `finish` | 所有改码场景 S5 | engineering-workflow.md（含菜单/合并/清理红线） |
-| 10 | systematic-debugging | ✅ 整合 | `debug` | 场景 8；场景 6 接线失败时 | engineering-debugging.md |
-| 11 | verification-before-completion | ✅ 整合 | `verify` | 场景 12 门禁 + 所有改码场景收尾 | engineering-workflow.md + scripts/verify.py |
+| 1 | brainstorming | ✅ 整合 | `brainstorm` | 场景 1/2/3/4/5 的 S2 | references/02-engineering/engineering-workflow.md |
+| 2 | writing-plans | ✅ 整合 | `plan` | 场景 1/4/5/6 的 S2 | references/02-engineering/engineering-workflow.md |
+| 3 | using-git-worktrees | ✅ 整合 | `worktree` | 所有改码场景 S2 后 | references/02-engineering/engineering-workflow.md（含完整隔离/gitignore 纪律） |
+| 4 | subagent-driven-development | ✅ 整合 | `execute`（subagent 模式） | 场景 4/5 S3 | references/02-engineering/engineering-workflow.md + references/02-engineering/engineering-code-review.md |
+| 5 | executing-plans | ✅ 整合 | `execute`（分批模式） | 场景 4/5 S3 备选（需人在场） | references/02-engineering/engineering-workflow.md |
+| 6 | test-driven-development | ✅ 整合 | `tdd` | 场景 4/5/6/7/8/13 的 S3 | references/02-engineering/engineering-tdd.md |
+| 7 | requesting-code-review | ✅ 整合 | `review` | 所有改码场景（每任务间 + S5） | references/02-engineering/engineering-code-review.md |
+| 8 | receiving-code-review | ✅ 整合 | `receive-review` | 横切：收到反馈时 | references/02-engineering/engineering-code-review.md |
+| 9 | finishing-a-development-branch | ✅ 整合 | `finish` | 所有改码场景 S5 | references/02-engineering/engineering-workflow.md（含菜单/合并/清理红线） |
+| 10 | systematic-debugging | ✅ 整合 | `debug` | 场景 8；场景 6 接线失败时 | references/02-engineering/engineering-debugging.md |
+| 11 | verification-before-completion | ✅ 整合 | `verify` | 场景 12 门禁 + 所有改码场景收尾 | references/02-engineering/engineering-workflow.md + scripts/verify.py |
 | 12 | using-superpowers | ❌ 舍弃 | — | 它是 superpowers 的入口/触发说明；conductor 自己就是入口，不需要 | — |
 | 13 | diagnosing-superpowers | ❌ 舍弃 | — | superpowers 自检工具，诊断"superpowers 是否装好"；与 conductor 无关 | — |
 | 14 | writing-skills | ❌ 舍弃 | — | "怎么写 skill"元能力，非开发流程；造 skill 用 skill-creator 即可 | — |
-| 15 | dispatching-parallel-agents | ♻️ 并入 | 场景链并行算子 | 独立派单能力已由 conductor 的 `routing.md` 并行算子覆盖（语句含"分别/同时"→多实例） | routing.md §1.5 |
+| 15 | dispatching-parallel-agents | ♻️ 并入 | 场景链并行算子 | 独立派单能力已由 conductor 的 `references/01-routing/routing.md` 并行算子覆盖（语句含"分别/同时"→多实例） | references/01-routing/routing.md §1.5 |
 
 **结论**：11 个整合为具名能力，1 个并入已有机制，3 个舍弃——没有遗漏，也没有无理由丢弃。
 
 ## 2. 具名工程能力契约（conductor 流程的节点）
 
-这些能力是 conductor 场景链里真正被调用的节点。每个都有输入/输出契约——场景衔接时按契约传递，与 `scenarios.md` 的场景 I/O 契约表同构。
+这些能力是 conductor 场景链里真正被调用的节点。每个都有输入/输出契约——场景衔接时按契约传递，与 `references/01-routing/scenarios.md` 的场景 I/O 契约表同构。
 
 | 能力名 | 一句话职责 | 输入契约 | 输出契约 | 入口阶段 |
 |---|---|---|---|---|
@@ -46,7 +46,7 @@
 
 ## 3. 能力编排规则
 
-1. **场景即能力链**：每个场景在 `scenarios.md` 里写成 `能力A → 能力B → ...`，能力名必须在本表可查。
+1. **场景即能力链**：每个场景在 `references/01-routing/scenarios.md` 里写成 `能力A → 能力B → ...`，能力名必须在本表可查。
 2. **契约传递**：前一能力的输出契约必须满足后一能力的输入契约；不满足则停下问用户（与 routing 的 I/O 校验同构）。
 3. **按需裁剪**：只读/文档/验证路径的场景只调用子集（如场景 9/10 不调用 `tdd`/`review` 的改码变体）。
 4. **外部工具 ≠ 工程能力**：grill-design / graphify / code-quality-review 等是被能力调用的工具，

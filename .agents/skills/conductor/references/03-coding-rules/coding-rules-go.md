@@ -1,6 +1,6 @@
 # 编码规则 · Go
 
-> 语言特定规则，与 `coding-rules-common.md` 一起遵守。目标版本：Go 1.22+。
+> 语言特定规则，与 `references/03-coding-rules/coding-rules-common.md` 一起遵守。目标版本：Go 1.22+。
 
 ## 注释方案（Go Doc Comment，中文）
 

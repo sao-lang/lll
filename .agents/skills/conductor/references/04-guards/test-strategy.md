@@ -1,6 +1,6 @@
 # 测试策略
 
-> TDD 的执行循环（RED-GREEN-REFACTOR）见本目录 `engineering-tdd.md`。
+> TDD 的执行循环（RED-GREEN-REFACTOR）见本目录 `references/02-engineering/engineering-tdd.md`。
 > 本文件只补它没覆盖的：**测什么、测到哪层、怎么算达标、什么算假绿**。
 
 ## 1. 测试金字塔（按成本与稳定性分配）

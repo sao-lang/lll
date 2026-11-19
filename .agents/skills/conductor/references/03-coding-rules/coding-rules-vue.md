@@ -1,6 +1,6 @@
 # 编码规则 · Vue
 
-> 框架特定规则，与 `coding-rules-common.md`、`coding-rules-typescript.md` 一起遵守。Vue 3。
+> 框架特定规则，与 `references/03-coding-rules/coding-rules-common.md`、`references/03-coding-rules/coding-rules-typescript.md` 一起遵守。Vue 3。
 
 ## 注释方案（TSDoc + SFC 说明，中文）
 

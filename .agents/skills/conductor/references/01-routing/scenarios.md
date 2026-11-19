@@ -3,18 +3,18 @@
 > 每个场景是一段"主控归属 + 加载项 + 禁止项 + 下一步"的明确指令。
 > S0（会话开始）与收尾的 overview 写入对所有场景通用。
 > **主控统一为 conductor 自己**：下文每个场景写成一条**工程能力链**（如 `brainstorm` → `plan` → `tdd`）。
-> 能力是 conductor 内化的工程节点，逐个来源/去向/契约见 `engineering-catalog.md`；
+> 能力是 conductor 内化的工程节点，逐个来源/去向/契约见 `references/02-engineering/engineering-catalog.md`；
 > 方法论详情见 `engineering-{workflow,tdd,debugging,code-review}.md`。
 > 能力名是流程节点，不是外部 skill——不再加载任何外部流程 skill。
 
 ## 通用前置（所有场景必做）
 
 1. 依赖预检：运行 `python .agents/skills/conductor/scripts/preflight.py --project-root .`，缺失项先解决或显式登记例外。
-2. 建 overview：`overviews/YYYY-MM-DD/YYYYMMDD-HHMM-主题.md`（见 `overview.md`）。
+2. 建 overview：`overviews/YYYY-MM-DD/YYYYMMDD-HHMM-主题.md`（见 `references/01-routing/overview.md`）。
 3. 读上次 handoff（若有）：定位上次 suggested skills 与未完成项。
 4. 场景路由声明：向用户说清"本轮场景 / 加载哪些 skill / 禁止项 / 下一站"。
-5. 若识别为**场景链**（多动作，见 routing.md §3.5）：按链声明每段场景+路径+闸门，逐段执行，每段完成单独声明进度。
-6. **样例补全识别**：用户举例（比如/例如/参考 X 那样/改这里）时，按 `examples-to-spec.md` 判断是否启用——
+5. 若识别为**场景链**（多动作，见 references/01-routing/routing.md §3.5）：按链声明每段场景+路径+闸门，逐段执行，每段完成单独声明进度。
+6. **样例补全识别**：用户举例（比如/例如/参考 X 那样/改这里）时，按 `references/04-guards/examples-to-spec.md` 判断是否启用——
    启用则在声明中说明，设计/实现阶段按四步法补全"样例之外覆盖"，补全项分类确认后再落地。
 
 ### 场景链执行纪律
@@ -66,8 +66,8 @@
 
 - **工程能力链**：`brainstorm`（架构版：设计树展开），**止步于架构规格，不写实现代码**——不进 `plan`/`execute`。
 - **契约传递**：产出架构文档 + 未决清单，作为后续"补充设计/项目开发"的输入。
-- **工具**：`brainstorm` 调 `grill-design` 逐层拷问架构决策（每分支必须有结论、不许静默假设）；加载 `architecture-contracts.md` 作设计约束。
-- **样例补全**：若用户用举例描述功能/模块，按 `examples-to-spec.md` 归纳共同意图、外推未列举的同类项与边界，
+- **工具**：`brainstorm` 调 `grill-design` 逐层拷问架构决策（每分支必须有结论、不许静默假设）；加载 `references/04-guards/architecture-contracts.md` 作设计约束。
+- **样例补全**：若用户用举例描述功能/模块，按 `references/04-guards/examples-to-spec.md` 归纳共同意图、外推未列举的同类项与边界，
   设计文档**显式列"样例之外覆盖"节**；补全项交用户确认，禁止只按列举的做。
 - **产出**：架构文档（分层/模块/契约/数据流/装配入口）+ 未决假设清单（已解决的勾销，未解决的显式登记）。
 - **禁止**：禁止在架构未确认前写实现；禁止用"通用框架"掩盖未定的技术选型；禁止遗漏装配层设计（composition root）。
@@ -91,7 +91,7 @@
   `verify`（声明→证据，S4）→ `review`（终审）→ `finish`（全绿→交付决策）。
 - **契约传递**：设计文档→计划→任务产出→评审结论→验证证据→全绿变更，逐级喂给下一能力；任一环断裂停下。
 - **工具**：S0 预检 + S4 自省脚本；`execute`/`tdd` 阶段加挂 ponytail + caveman + coding-rules。
-- **样例补全**：`brainstorm`/`plan` 阶段按 `examples-to-spec.md` 把用户举例补全为完整规格（含异常/边界/同类项）；
+- **样例补全**：`brainstorm`/`plan` 阶段按 `references/04-guards/examples-to-spec.md` 把用户举例补全为完整规格（含异常/边界/同类项）；
   `execute` 阶段按补全清单实现，别只做用户点名的那几个例子。
 - **禁止**：无失败测试不写实现；魔法字符串不具名不提交；S4 未过不进 review。
 - **下一站**：全绿后 finish → 写 overview + handoff。
@@ -111,7 +111,7 @@
   `review`（逐条核对接线）→ `verify` → `finish`。若接线断裂触发 `debug` 定位。
 - **契约传递**：新设计→差异清单→行为测试→实现→接线核对证据。
 - **工具**：
-  1. 加载 `architecture-contracts.md`，先做**设计差异清单**：逐条列出"新设计 vs 现状"的契约变化（新增/删除/改签名/改数据流）。
+  1. 加载 `references/04-guards/architecture-contracts.md`，先做**设计差异清单**：逐条列出"新设计 vs 现状"的契约变化（新增/删除/改签名/改数据流）。
   2. 对每条差异，先写"行为测试"锁定新契约（红），再改实现（绿）。
   3. 改完后按差异清单逐条核对接线（谁调用、谁消费、信号有人接），写入 overview。
 - **禁止**：
@@ -151,7 +151,7 @@
 - **工程能力链**：无（本场景不改代码）。
 - **本外壳主导**：
   1. 加载 `graphify`：若项目已有图，用 `graphify query` 问调用链/影响面/god nodes；若无图且为跨文件大项目，先 `/graphify .` 建图（冷启动有成本，小项目跳过）。
-  2. 加载 `architecture-contracts.md` 的接线四问逐模块核。
+  2. 加载 `references/04-guards/architecture-contracts.md` 的接线四问逐模块核。
   3. 跑 `scan_gaps.py` 拿断点线索（弱信号，需核实）。
 - **产出**：模块职责 + 调用链 + 断点清单 + 理解笔记 → 写入 overview，供后续场景引用。
 - **禁止**：禁止改任何代码；禁止只看单文件下结论；禁止把 graphify 的 INFERRED 边当已验证事实（打开源码核对）。
@@ -163,7 +163,7 @@
 - **工程能力链**：局部 `brainstorm`（只核差异）→ 改文档 → `verify`（核签名，不跑新功能 tdd）。
 - **契约传递**：代码签名+现有文档→差异清单→同步后文档。
 - **工具**：`grill-design` 拷问文档完整性 + `architecture-contracts` 核契约一致性；差异逐条勾销拿行号证据。
-- **样例补全**：用户点名改一处时，按 `examples-to-spec.md` §4B **全文搜同概念的其他出现**
+- **样例补全**：用户点名改一处时，按 `references/04-guards/examples-to-spec.md` §4B **全文搜同概念的其他出现**
   （其他章节/其他文档/索引/目录/示例代码），列清单确认后一次改全——只改明说的那处会留不一致。
 - **禁止**：禁止只改用户点的那一处留同概念其他表述不一致（G07/G13/G15 类问题）；禁止只改代码不改文档；禁止静默改历史结论。
 - **下一站**：差异清单全部勾销 + 签名核对通过 → S5 收尾。
@@ -182,7 +182,7 @@
 - **路径**：验证路径 —— S2(锁行为) → S3'(只补测试，不写新实现) → S4(跑覆盖率) → S5。
 - **工程能力链**：`tdd` 变体——先补 characterization test 锁定现有行为（红），但**不新增业务实现**（绿来自已有代码）→ `verify`（跑覆盖率）。
 - **契约传递**：已有代码→行为测试→覆盖率证据。
-- **工具**：`test-strategy.md`；按达标口径核对覆盖率与通过率；识别假绿信号。
+- **工具**：`references/04-guards/test-strategy.md`；按达标口径核对覆盖率与通过率；识别假绿信号。
 - **禁止**：禁止为凑覆盖率写无断言测试；禁止借机改实现行为（除非测试暴露真 bug 且用户确认）。
 - **下一站**：覆盖率达阈值 + 全绿 → S5 收尾。
 
@@ -207,13 +207,13 @@ python .agents/skills/conductor/scripts/verify.py --lang <lang>    # 验证命�
 
 逐条核对（每项需拿证据：文件:行号 / 测试输出 / 覆盖率），拿不出证据不得标完成：
 
-1. **功能遗漏**：设计文档 / 需求清单的每条承诺，代码里是否有对应实现？（对照 `architecture-contracts.md`）
+1. **功能遗漏**：设计文档 / 需求清单的每条承诺，代码里是否有对应实现？（对照 `references/04-guards/architecture-contracts.md`）
 2. **功能断点**：模块"接口就绪"是否真被装配层调用？（composition root、dispatch/call 接线、hook 触发者——scan_gaps 的 install 无调用者/协议无实现是弱信号线索，需人工确认）
-3. **测试覆盖率**：是否达到阈值？按 `test-strategy.md` 的达标口径核对，警惕假绿。
+3. **测试覆盖率**：是否达到阈值？按 `references/04-guards/test-strategy.md` 的达标口径核对，警惕假绿。
 4. **通过率**：测试全绿？有无 flaky / skip / xfail 掩盖？
 5. **规则符合**：魔法字符串、注释完整性、类型明确、长度基线——以 `verify.py` 退出码为证据。
-6. **安全红线**：按 `security-redlines.md` 核对密钥/注入/危险路由/成本闸门。
-7. **样例补全**：用户举例启动 `examples-to-spec.md` 时，其补全项是否都落地、有无证据？
+6. **安全红线**：按 `references/04-guards/security-redlines.md` 核对密钥/注入/危险路由/成本闸门。
+7. **样例补全**：用户举例启动 `references/04-guards/examples-to-spec.md` 时，其补全项是否都落地、有无证据？
    逐条核"样例之外覆盖"清单，禁止只做列举项就宣称完成。
 
 台账写入 overview 的"验证结果"一节，失败项列"未完成项与下一步"。
