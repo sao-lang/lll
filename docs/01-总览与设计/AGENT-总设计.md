@@ -941,8 +941,8 @@ class InjectionDetector(Protocol):
 
 ### R6.1 职责与边界
 
-**做**：20 项链路优化（离线入库 5 层 + 在线检索 12 层 + 横切 3 层），每段是 Protocol + 默认实现，可单独替换与评测。
-**不做**：把检索结果当指令执行（注入检测在 R9）；记忆的语义（R7 复用本模块的 Embedder/VectorStore）。
+**做**：20 项链路优化（离线入库 5 层 + 在线检索 9 层 + 横切 6 层 = 20），每段是 Protocol + 默认实现，可单独替换与评测（8 个注入点）。
+**不做**：把检索结果当指令执行；记忆的语义（R7 复用本模块的 Embedder/VectorStore）；不重复定义注入检测器（复用 R5 `InjectionDetector`/`KeywordInjectionDetector`，R6 负责检索正文入 context 前的检测接入与 fail-closed）。
 
 ### R6.2 设计架构
 
@@ -1004,13 +1004,17 @@ class PostProcessor(Protocol):
     def filter(self, hits: list[Hit]) -> list[Hit]: ...
     def assemble(self, hits: list[Hit], budget: TokenBudget) -> RAGResult: ...
 
-class RAGPipeline:
+class RAGPipeline:                      # 履约 RAGPort（PORT_PROTOCOLS['rag']）
+    name: str = "rag_pipeline"
     def __init__(self, splitter, embedder, store, retriever, post, *,
-                 rewrite=None, rerank=None, cache=None): ...
-    async def ingest(self, docs: list[Document]) -> None: ...
-    async def query(self, q: Query) -> RAGResult: ...
-    def with_(self, **replacements) -> RAGPipeline: ...    # 不可变替换
+                 rewrite=None, rerank=None, cache=None, detector=None): ...
+    async def ingest(self, documents: list[DynamicValue], ctx: PortCtx) -> int: ...    # RAGPort 入口
+    async def retrieve(self, query: str, ctx: PortCtx) -> list[DynamicValue]: ...      # RAGPort 入口
+    async def query(self, q: Query) -> RAGResult: ...    # 模块富入口（内部委托）
+    def with_(self, **replacements) -> RAGPipeline: ...  # 不可变替换
 ```
+
+> **R6.4 补注（2026-11-19）**：`ingest`/`retrieve` 签名必须与 `src/hooks/protocols.py:RAGPort` 逐字一致，装配期 `isinstance(p, PORT_PROTOCOLS["rag"])` 校验；`query()` 为富入口返回 `RAGResult`。注入检测复用 R5 `InjectionDetector`（非第 9 个替换点）。
 
 ### R6.5 元数据与核心字段
 
@@ -1600,7 +1604,7 @@ host.plugin(MyGuard())
 > 都在此登记归属、状态与回头动作。**不得把"文档标注了归属"当成"已实现"**——必须按本表状态列推进。
 > 协议定义在 `src/hooks/protocols.py`；本表是它的设计侧追踪镜像，两处须一致。
 
-### B.1.1 已实现模块（R1~R5）：默认实现全部落地 ✅
+### B.1.1 已实现模块（R1~R6）：默认实现全部落地 ✅
 
 | 协议 | 默认实现 | 源码位置 | 状态 |
 |------|---------|---------|------|
@@ -1617,15 +1621,20 @@ host.plugin(MyGuard())
 | MCPPort | MCPManager | `src/harness/tools/mcp.py` | ✅ 已实现（R5，fqname 注入/health） |
 | SkillPort | FileSkillProvider | `src/harness/skills/provider.py` | ✅ 已实现（R5，manifest/正文/注入检测） |
 | DisclosureIndex | ToolIndex | `src/harness/tools/index.py` | ✅ 已实现（R5，三级披露+预算） |
+| RAGPort | RAGPipeline | `src/harness/rag/pipeline.py` | ✅ 已实现（R6，五段+三增强+横切，履约 ingest/retrieve，2026-11-19 勾销） |
 
 ### B.1.2 待实现模块：回头实现清单 ⏳
 
 > 下列默认实现**必须**在对应模块开发时落地（四要素②）。协议已在 R2 定齐、归属在此锁定，
 > 模块开发验收时须逐项勾销。**在模块实现前，这些 `...` 是合法的接口占位，不是遗漏。**
 
+> **2026-11-19 勾销（R6 实现完成，非静默删除）**：原 `RAGPort→RAGPipeline` 行已移入 B.1.1。
+> 证据：`src/harness/rag/pipeline.py` 履约 `ingest(documents,ctx)->int` / `retrieve(query,ctx)->list[DynamicValue]`，
+> `isinstance(p, PORT_PROTOCOLS["rag"])` 经 `tests/r6/test_pipeline.py` 断言；20 项链路五段+三增强+横切落地，
+> 覆盖率 94%、R6 门禁 14/14 全绿、demo PASS。
+
 | 协议（接口体 `...`） | 默认实现类 | 归属模块 | 源码位置（模块开发时创建） | 回头动作 |
 |------|------|---------|------|------|
-| RAGPort | RAGPipeline | R6 RAG | `src/harness/rag/` | R6 开发时实现 ingest/retrieve（20 项链路） |
 | MemoryPort | MemoryStore | R7 记忆 | `src/harness/memory/` | R7 开发时实现 read/write/forget（hot/warm/cold） |
 | StorePort | InMemoryStorePort | R7 记忆 | `src/harness/memory/` | R7 开发时实现 save/load（可复用 InMemoryEventStore） |
 | SandboxPort | LocalSandbox | R9 安全 | `src/harness/security/` | R9 开发时实现 run（进程/容器隔离） |

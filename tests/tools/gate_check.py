@@ -38,6 +38,7 @@ DEFAULT_IMPL_CONTRACTS: dict[str, tuple[str, str]] = {
     "disclosure": ("ToolIndex", "harness/tools/index.py"),
     "mcp": ("HttpMCPTransport", "ports/adapters/mcp.py"),
     "webfetch": ("HttpFetcher", "ports/adapters/webfetch.py"),
+    "rag": ("RAGPipeline", "harness/rag/pipeline.py"),
 }
 
 
@@ -101,6 +102,21 @@ MODULES = {
             "disclosure": DEFAULT_IMPL_CONTRACTS["disclosure"],
             "mcp": DEFAULT_IMPL_CONTRACTS["mcp"],
             "webfetch": DEFAULT_IMPL_CONTRACTS["webfetch"],
+        },
+    },
+    "r6": {
+        "title": "R6 RAG 检索增强", "pkg": "harness.rag", "path": "harness/rag",
+        "doc": "docs/02-模块详设/Agent/R6-RAG检索增强.md", "demo": "tests/demos/demo_r6.py", "coverage": 85,
+        "symbols": ["RAGPipeline", "Document", "Chunk", "Hit", "Query", "RAGResult",
+                    "TokenBudget", "Vector", "Splitter", "RecursiveSplitter",
+                    "Embedder", "HashEmbedder", "VectorStore", "InMemoryVectorStore",
+                    "Retriever", "VectorRetriever", "HybridRetriever",
+                    "PostProcessor", "DefaultPostProcessor", "QueryRewriter",
+                    "Reranker", "LexicalReranker"],
+        "behavior": ["test_pipeline.py", "test_budget.py", "test_hybrid.py"],
+        "integration": ["test_fallback.py", "test_injection.py", "test_cache.py"],
+        "required_defaults": {
+            "rag": DEFAULT_IMPL_CONTRACTS["rag"],
         },
     },
 }

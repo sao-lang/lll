@@ -6,6 +6,8 @@ R3：降级阶梯装配期强校验（无环/末级拒答）+ 副作用重试幂
 R4：网关必须做结构化校验（未过 schema 不进业务）+ 成本闸（路由/重试不得绕过 Budgets）。
 R5：danger 四路路由齐全（CRITICAL 审批/HIGH 沙盒/LOW 审计缺席降级）+ L1 披露脱 schema
     + 异常折叠 + MCP fqname 同 Registry 合并 + 编码规则 5/6 防回归。
+R6：RAGPort 履约（ingest/retrieve 签名）+ 注入检测 fail-closed（复用 R5 检测器）
+    + 预算拼接不超 + 引用溯源 + RAG 层不 import 网络/系统 IO SDK。
 
 扫描真实源码，不做运行时推断；任一红线命中退出码 1。
 """
@@ -26,6 +28,8 @@ TARGETS = {
     "r4": [SRC / "harness" / "model", ROOT / "tests" / "demos" / "demo_r4.py", ROOT / "tests" / "r4"],
     "r5": [SRC / "harness" / "tools", SRC / "harness" / "skills",
            ROOT / "tests" / "demos" / "demo_r5.py", ROOT / "tests" / "r5"],
+    "r6": [SRC / "harness" / "rag", ROOT / "tests" / "demos" / "demo_r6.py",
+           ROOT / "tests" / "r6"],
 }
 
 FORBIDDEN_IN_PROGRAM = (
@@ -321,7 +325,51 @@ def scan_r5(files: list[Path]) -> list[str]:
     return violations
 
 
-SCANNERS = {"r1": scan_r1, "r2": scan_r2, "r3": scan_r3, "r4": scan_r4, "r5": scan_r5}
+def scan_r6(files: list[Path]) -> list[str]:
+    """R6 红线：RAGPort 履约 + 注入 fail-closed + 预算/引用 + 无 IO SDK 直连。
+
+    检查生产源码中的结构性承诺，不依赖运行时。测试与 demo 文件跳过 IO 检查
+    （demo 可能显式 sys.path 操作）。
+    """
+    violations: list[str] = []
+    rag_dir = SRC / "harness" / "rag"
+
+    # RAGPort 履约：pipeline 必须声明 name 与 ingest/retrieve 两个 Port 方法。
+    pipeline = rag_dir / "pipeline.py"
+    ptext = pipeline.read_text(encoding="utf-8") if pipeline.exists() else ""
+    for token in ("name: str", "async def ingest", "async def retrieve", "async def query"):
+        if token not in ptext:
+            violations.append(f"pipeline.py 缺 RAGPort 履约要素 {token}")
+
+    # 注入 fail-closed：后处理必须复用 R5 检测器且对 INJECTED 裁决剔除。
+    post = rag_dir / "post.py"
+    post_text = post.read_text(encoding="utf-8") if post.exists() else ""
+    if "InjectionDetector" not in post_text or "InjectionVerdict.INJECTED" not in post_text:
+        violations.append("post.py 缺注入检测接入或 fail-closed 剔除")
+    if "EMPTY_CONTEXT" not in post_text:
+        violations.append("post.py 缺空结果固定提示 EMPTY_CONTEXT")
+
+    # 预算与引用：后处理拼装必须引用 TokenBudget 且产出 citations。
+    if "TokenBudget" not in post_text or "citations" not in post_text:
+        violations.append("post.py 缺预算拼接或引用溯源")
+
+    # RAG 层不直接 import 网络/系统 IO SDK（外部系统须可注入 client）。
+    io_tokens = ("import httpx", "import requests", "import socket", "import aiohttp",
+                 "import subprocess", "import os")
+    for path in files:
+        if path.suffix != ".py" or "tests" in path.parts:
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for token in io_tokens:
+            if token in text:
+                violations.append(f"{path.name} 直接 import IO SDK: {token}")
+    return violations
+
+
+SCANNERS = {
+    "r1": scan_r1, "r2": scan_r2, "r3": scan_r3,
+    "r4": scan_r4, "r5": scan_r5, "r6": scan_r6,
+}
 
 
 def main() -> int:
