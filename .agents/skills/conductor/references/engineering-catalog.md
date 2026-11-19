@@ -11,13 +11,13 @@
 |---|---|---|---|---|---|
 | 1 | brainstorming | ✅ 整合 | `brainstorm` | 场景 1/2/3/4/5 的 S2 | engineering-workflow.md |
 | 2 | writing-plans | ✅ 整合 | `plan` | 场景 1/4/5/6 的 S2 | engineering-workflow.md |
-| 3 | using-git-worktrees | ✅ 整合 | `worktree` | 所有改码场景 S2 后 | engineering-workflow.md |
+| 3 | using-git-worktrees | ✅ 整合 | `worktree` | 所有改码场景 S2 后 | engineering-workflow.md（含完整隔离/gitignore 纪律） |
 | 4 | subagent-driven-development | ✅ 整合 | `execute`（subagent 模式） | 场景 4/5 S3 | engineering-workflow.md + engineering-code-review.md |
 | 5 | executing-plans | ✅ 整合 | `execute`（分批模式） | 场景 4/5 S3 备选（需人在场） | engineering-workflow.md |
 | 6 | test-driven-development | ✅ 整合 | `tdd` | 场景 4/5/6/7/8/13 的 S3 | engineering-tdd.md |
 | 7 | requesting-code-review | ✅ 整合 | `review` | 所有改码场景（每任务间 + S5） | engineering-code-review.md |
 | 8 | receiving-code-review | ✅ 整合 | `receive-review` | 横切：收到反馈时 | engineering-code-review.md |
-| 9 | finishing-a-development-branch | ✅ 整合 | `finish` | 所有改码场景 S5 | engineering-workflow.md |
+| 9 | finishing-a-development-branch | ✅ 整合 | `finish` | 所有改码场景 S5 | engineering-workflow.md（含菜单/合并/清理红线） |
 | 10 | systematic-debugging | ✅ 整合 | `debug` | 场景 8；场景 6 接线失败时 | engineering-debugging.md |
 | 11 | verification-before-completion | ✅ 整合 | `verify` | 场景 12 门禁 + 所有改码场景收尾 | engineering-workflow.md + scripts/verify.py |
 | 12 | using-superpowers | ❌ 舍弃 | — | 它是 superpowers 的入口/触发说明；conductor 自己就是入口，不需要 | — |

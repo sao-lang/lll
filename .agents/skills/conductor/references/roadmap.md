@@ -101,6 +101,17 @@
   纯只读场景（9/10/12）明确"能力链：无"。
 - 效果：回答了"superpowers 的 skill 去哪了"和"怎么按它的流程工作"——场景链即答案。
 
+## 二·终3、补齐 git 相关纪律（🟢 已激活 2026-11-19）
+
+- 背景：用户指出遗漏 git 提交相关 skill。核查：superpowers 无独立 "git commit" skill，
+  但 git 纪律藏在 `using-git-worktrees` 与 `finishing-a-development-branch`，
+  上一轮整合时压成了一句话，丢失了全部防呆细节。
+- 补进 `engineering-workflow.md`：
+  - `worktree` 详解——检测已有隔离(含 submodule 陷阱)、原生工具优先、
+    gitignore 先验并提交、目录优先级、沙箱 fallback、征求同意。
+  - `finish` 详解——验当前树测试、探环境三态、确认 base branch、精确菜单、
+    discard 需输入确认、禁擅自 force-push、清理所有权判断、6 条 git 红线。
+
 ## 三、P2 候选（🟡，有真实需求再加）
 
 - 安全审计（只读，加载 `security-redlines.md`）

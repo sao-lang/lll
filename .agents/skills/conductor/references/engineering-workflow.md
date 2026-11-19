@@ -27,6 +27,72 @@
 
 **备选执行模式**：`executing-plans` —— 分批执行 + 人工检查点，适合需要人在场的场景。
 
+## `worktree` 能力详解（隔离工作区，提取自 using-git-worktrees）
+
+**核心原则**：先检测已有隔离 → 用原生工具 → 无原生工具才回退 git → 不与宿主环境对抗。
+
+### 步骤
+
+0. **先检测是否已隔离**（不要凭肉眼判断）：
+   ```bash
+   GIT_DIR=$(cd "$(git rev-parse --git-dir)" 2>/dev/null && pwd -P)
+   GIT_COMMON=$(cd "$(git rev-parse --git-common-dir)" 2>/dev/null && pwd -P)
+   ```
+   - `GIT_DIR != GIT_COMMON` → 已在 linked worktree，跳过创建。
+   - **submodule 陷阱**：submodule 里 `GIT_DIR != GIT_COMMON` 也成立，需先排除：
+     `git rev-parse --show-superproject-working-tree` 有输出则是 submodule，按普通仓库处理。
+1. **优先原生 worktree 工具**（`EnterWorktree`/`/worktree`/`--worktree` flag）——原生工具自动管目录、
+   分支、清理；绕过它用 `git worktree add` 会产生宿主看不见的 phantom state（头号错误）。
+   无原生工具才用 `git worktree add "$path" -b "$BRANCH"` 回退。
+2. **目录选择优先级**：用户显式声明 > 项目内已有 `.worktrees/`/`worktrees/`（`.worktrees` 优先）> 默认 `.worktrees/`。
+3. **必须先验 gitignore**：`git check-ignore -q .worktrees` —— 未忽略则先加 `.gitignore` **并提交**再建 worktree，
+   否则会把整个工作树误提交进仓库。
+4. **项目初始化 + 干净基线**：按语言自动装依赖（package.json→npm install / Cargo.toml→cargo build /
+   requirements.txt→pip / pyproject.toml→poetry / go.mod→go mod download），跑测试确认基线（全绿或全空）。
+5. **权限被沙箱拒绝**：告知用户并改为在当前目录工作，跑 setup 和基线测试。
+
+> 创建前若用户未表态是否要隔离，先征求同意："要建隔离 worktree 吗？它保护当前分支不受改动影响。"
+
+## `finish` 能力详解（收尾，提取自 finishing-a-development-branch）
+
+**核心原则**：验测试 → 探环境 → 给选项 → 执行选择 → 清理。
+
+### 步骤
+
+1. **验测试**：跑**即将集成的那棵树**的完整测试套件（"本会话早些时候绿过"不算数）。失败则停下报告，菜单在绿灯之后。
+2. **探环境**（在切目录前先抓 `GIT_DIR`/`GIT_COMMON`/`WORKTREE_PATH`，清理时要用）：
+   | 状态 | 菜单 | 清理 |
+   |---|---|---|
+   | 普通仓库（GIT_DIR==GIT_COMMON） | 3 选项 | 无 worktree 可清 |
+   | worktree + 命名分支 | 3 选项 | 按来源判断（见下） |
+   | worktree + detached HEAD | 2 选项（无合并） | 宿主管理，原地保留 |
+3. **确认 base branch**：从计划/对话/upstream 推断后**向用户确认**——合并到错误分支代价极高。
+4. **给菜单**（普通仓库与命名分支给 exactly 这 3 个；detached HEAD 给 2 个）：
+   ```
+   1. 本地合并回 <base>
+   2. 推送并创建 PR
+   3. 保留分支（我之后自己处理）
+   ```
+   丢弃**只在用户明确要求时**才提供，且要求输入 `discard` 精确确认。
+5. **执行选择**：本地合并先合并→验合并结果绿→再清理 worktree 和删分支；push 用 `git push -u`；
+   **push 被拒先调查远端变化，绝不擅自 force-push**（仅用户明确要求才强推）。
+6. **清理**（仅合并与确认丢弃时）：
+   - `GIT_DIR==GIT_COMMON` → 普通仓库，无需清理。
+   - worktree 在 `.worktrees/`/`worktrees/` 下 → superpowers 建的，可 `git worktree remove` + `git worktree prune`。
+   - 其他位置 → 宿主环境拥有，**原地保留**，有 workspace-exit 工具就用它。
+   - **移除被拒**（含未提交文件）→ 绝不擅自 `--force`，展示 `git status` 让用户选：提交/移走/删除。
+
+### git 操作红线（防呆）
+
+| 借口 | 真相 |
+|---|---|
+| "测试刚才绿过" | 绿只证明跑测试的那棵树；集成前必须在当前树重跑 |
+| "显然想合并" | 集成是用户的决定，给菜单并等待 |
+| "PR 提了，worktree 是垃圾" | PR feedback 在那个 worktree 里改，保留到落地 |
+| "清理被拒，--force 就行" | 拒绝意味着文件只存在于该 worktree，force 会永久销毁 |
+| "base 显然是 main" | 确认分叉点，"显然"合并错代价极高 |
+| "push 被拒，强推修复" | 被拒说明远端变了，先调查，强推需用户明确要求 |
+
 ## 写实施计划（writing-plans）硬约束
 
 计划是给"热情但品味差、没判断力、没项目上下文、且讨厌写测试"的初级工程师看的——必须清楚到照做不跑偏。
