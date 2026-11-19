@@ -1,6 +1,6 @@
 # R5：工具·MCP·技能（tools）
 
-> **实现状态**：v2.1 代码已实现（R5 v1.0）。`src/harness/tools/` + `src/harness/skills/` 已落地；测试 `tests/r5/`、demo `tests/demos/demo_r5.py`、门禁 key `r5`（13/13）全部就绪。
+> **实现状态**：v2.2 代码已实现（R5 v1.0 + 装配期自动注册）。`src/harness/tools/` + `src/harness/skills/` 已落地；测试 `tests/r5/`、demo `tests/demos/demo_r5.py`、门禁 key `r5`（15/15）全部就绪。
 
 
 > **权威来源**：[《AGENT 总设计》](../../01-总览与设计/AGENT-总设计.md) §R5 D+E 域 §3~§6。本文为模块级拆分详设。
@@ -105,6 +105,21 @@ class ToolRegistry:                      # ToolPort 默认实现
     def schema_of(self, name: str) -> dict[str, DynamicValue]: ...
     def static_check(self) -> list[str]: ...   # 返回问题列表；空表示通过
     def freeze(self) -> Self: ...              # 冻结注册表，之后 register 被拒
+    def register_pending(self) -> list[str]: ...   # 【v2.2 增量】装配期批量注册 @tool 待注册项，返回注册名；成功即清空
+
+# ---- 【v2.2 增量 · 2026-11-19】装配期自动注册（pending + flush）----
+# tool() 除返回 ToolFn 外，把该 ToolFn 追加进模块级待注册容器（@tool 调用签名不变）。
+# 装配期由 ToolRegistry.register_pending() 全量预检后批量注册，成功即清空；install() 自动调用。
+# 配套公共 API：pending_tools() -> tuple[ToolFn,...]（快照）、clear_pending() -> None（测试隔离）。
+#
+# 硬契约（不变量）：
+# 1. 时序：注册仍在装配期，不改"注册→披露→调用"顺序；运行期 call() 永不自动注册
+#    （ToolCall 无 fn，且会破坏 freeze 与 danger 防伪造）。
+# 2. 原子性：先全量预检（freeze 状态 + 全部重名），通过后才逐个 register；
+#    预检覆盖 register 的全部失败条件，批量阶段不会抛，无半注册状态。
+# 3. 重名：沿用 register 的 ValueError，一个冲突整体失败（fail-closed），不静默跳过。
+# 4. 清空：成功注册后清空 pending；失败则保留，便于修正后重试。
+# 5. 测试隔离：tests/r5/conftest.py 以 autouse fixture 每用例前 clear_pending()，防跨测试污染。
 
 # ---- R9 依赖的四级路由（构造注入 + 缺席即拒绝）----
 # SAFE     → 直接执行
@@ -229,6 +244,7 @@ class KeywordInjectionDetector:          # 默认实现：关键词/正则启发
 | 构造注入缺席拒绝 | R5-T07 | `pytest tests/r5/test_routing.py -q` | HIGH 缺 sandbox / CRITICAL 缺 human 或 sandbox → ToolResult 失败；LOW 缺 audit → meta.audit_missing |
 | ToolsCapability 装配 | R5-T08 | `pytest tests/r5/test_capability.py -q` | registry()/manager()/index()/disclose() 可访问，闭环可测 |
 | WebFetchTool（D13） | R5-T09 | `pytest tests/r5/test_webfetch.py -q` | 抓取正文过注入检测，命中即拒载 |
+| 装配期自动注册（v2.2） | R5-T10 | `pytest tests/r5/test_pending.py -q` | @tool 入列/pending_tools 快照/register_pending 原子注册+清空+重名报错/freeze 拒绝/install 自动 flush |
 | 独立闭环 | R5-D01 | `make demo-r5` + gate_check r5 | demo+门禁全绿 |
 
 ## 10. 门禁清单
@@ -238,6 +254,7 @@ class KeywordInjectionDetector:          # 默认实现：关键词/正则启发
 | R5-G1 | 覆盖 | 注册/披露/调用三期 ≥95%（tools+skills 双包强制，当前 100%） | G1 |
 | R5-G2 | 合并/披露 | 本地与 MCP 同一 Registry；L1 不含 schema | G2 |
 | R5-G3 | 路由 | danger 四级各有用例；coerce 未知→CRITICAL | G3 |
+| R5-G4 | 自动注册（v2.2） | pending 原子注册 + 重名报错 + 清空 + install 自动 flush；运行期 call 不注册 | G4 |
 | R5-红线 | 安全 | CRITICAL 未审批执行/HIGH 缺 sandbox 放行；MCP schema 全量进 L1→拒绝 | 红线 |
 
 ## 11. 装配类 ToolsCapability
@@ -260,7 +277,7 @@ class ToolsCapability:
         human: HumanPort | None = None,
         audit: AuditPort | None = None,
     ) -> None: ...   # 构造注入；R9 三 Port 的缺席拒绝在 ToolRegistry.call 兑现
-    def install(self, bus, reg) -> None: ...   # 注册各 Port/协议实例（R2 Capability 契约）
+    def install(self, bus, reg) -> None: ...   # 注册各 Port/协议实例（R2 Capability 契约）；【v2.2】先调 self._registry.register_pending() 再注册各 Port
     def registry(self) -> ToolRegistry: ...
     def manager(self) -> MCPManager: ...
     def index(self) -> DisclosureIndex: ...
@@ -270,4 +287,4 @@ class ToolsCapability:
 > **披露触发**：v5 hooks 无 `before_model` 标准 hook。披露由装配层/R12 在调用模型前显式调用 `disclose(names)`；R5 自身闭环可独立测试，不擅自改 R2 hooks 定义。
 
 ---
-*R5 模块详设 v2.1 · 派生自 AGENT-总设计 · 门禁 key=r5（13/13 全绿）*
+*R5 模块详设 v2.2 · 派生自 AGENT-总设计 · 门禁 key=r5（15/15 全绿）*

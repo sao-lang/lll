@@ -12,7 +12,7 @@ import pytest
 
 import hooks
 from hooks import PortCtx, ToolSpec
-from harness.tools import MCPTransport
+from harness.tools import MCPTransport, clear_pending
 
 
 class FakeSandbox:
@@ -111,6 +111,12 @@ class FakeTransport:
 
     async def ping(self, server: str) -> bool:
         return server == "alive"
+
+
+@pytest.fixture(autouse=True)
+def clean_pending_tools() -> None:
+    """每用例前清空 @tool 待注册容器（v2.2），防全局状态跨测试污染。"""
+    clear_pending()
 
 
 @pytest.fixture

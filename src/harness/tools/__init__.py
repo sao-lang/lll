@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from .capability import ToolsCapability
-from .decorator import ToolFn, tool
+from .decorator import ToolFn, clear_pending, pending_tools, tool
 from .execution import CodeExecTool, FileExecTool, ShellExecTool
 from .index import ToolIndex
 from .mcp import MCPManager, MCPTransport
@@ -27,5 +27,7 @@ __all__ = [
     "ToolsCapability",
     "WebFetcher",
     "WebFetchTool",
+    "clear_pending",
+    "pending_tools",
     "tool",
 ]

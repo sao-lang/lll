@@ -20,7 +20,26 @@ from runtime import DynamicValue
 
 from .types import SandboxPolicy, ToolSource
 
-__all__ = ["ToolFn", "tool"]
+__all__ = ["ToolFn", "tool", "pending_tools", "clear_pending"]
+
+# 【v2.2】模块级待注册容器：@tool 装饰即入列，装配期由 registry.register_pending 批量消费。
+# 为何是模块级：零参数兼容现有全部 @tool 调用点；代价是全局状态，故提供 clear_pending 与
+# tests/r5/conftest.py 的 autouse fixture 保证测试隔离。
+_PENDING: list[ToolFn] = []
+
+
+def pending_tools() -> tuple[ToolFn, ...]:
+    """返回待注册工具的不可变快照（防外部改写内部容器）。
+
+    Returns:
+        按装饰顺序排列的 ToolFn 元组；无待注册项时为空元组。
+    """
+    return tuple(_PENDING)
+
+
+def clear_pending() -> None:
+    """清空待注册容器（供测试隔离与装配层显式重置）；不改变已注册工具。"""
+    _PENDING.clear()
 
 
 class _Named(Protocol):
@@ -116,6 +135,8 @@ def tool(
             danger=danger,
             source=ToolSource.LOCAL.value,
         )
-        return ToolFn(spec=spec, fn=fn)
+        tool_fn = ToolFn(spec=spec, fn=fn)
+        _PENDING.append(tool_fn)  # 【v2.2】装配期自动注册的入列点；签名对调用方透明。
+        return tool_fn
 
     return decorate

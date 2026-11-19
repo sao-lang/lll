@@ -80,6 +80,9 @@ class ToolsCapability:
                   故仅保留参数履约，不向宿主挂插件（披露触发属 R12，不在本能力范围）。
             reg: Provider 注册表；按 R2 规范端口名注册 tool/disclosure/mcp/skill。
         """
+        # 【v2.2】先装配期自动注册 @tool 待注册项，再注册各 Port；
+        # 为何在前：flush 可能抛重名/freeze，须在 Port 注册前暴露，避免半装配。
+        self._registry.register_pending()
         # reg 提供 register(name, provider) 现成 API，直接注册持有的四个 port。
         reg.register(_PORT_TOOL, self._registry)
         reg.register(_PORT_DISCLOSURE, self._disclosure)

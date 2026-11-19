@@ -88,7 +88,7 @@ MODULES = {
         "doc": "docs/02-模块详设/Agent/R5-工具MCP与技能.md", "demo": "tests/demos/demo_r5.py", "coverage": 95,
         "symbols": ["ToolSource", "SandboxPolicy", "ToolFn", "tool", "ToolRegistry",
                     "ToolIndex", "MCPTransport", "MCPManager", "ToolsCapability",
-                    "WebFetcher", "WebFetchTool"],
+                    "WebFetcher", "WebFetchTool", "pending_tools", "clear_pending"],
         "behavior": ["test_decorator.py", "test_routing.py", "test_index.py", "test_errors.py"],
         "integration": ["test_mcp.py", "test_skills.py", "test_capability.py", "test_webfetch.py",
                         "test_custom_mcp_client.py"],

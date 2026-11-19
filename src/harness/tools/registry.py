@@ -19,6 +19,8 @@ from hooks import (
 )
 from runtime import DynamicValue
 
+from .decorator import clear_pending, pending_tools
+
 __all__ = ["ToolRegistry"]
 
 # 稳定错误码与比较常量（规则 5：比较右侧必须是常量名而非字符串字面量）。
@@ -79,6 +81,37 @@ class ToolRegistry:
         # 不在 register 拒绝 danger=None：装配期需要先注册再由 static_check 统一报告。
         self._specs[spec.name] = spec
         self._fns[spec.name] = fn
+
+    def register_pending(self) -> list[str]:
+        """装配期批量注册 @tool 待注册项，成功即清空容器（v2.2 自动注册）。
+
+        为何先全量预检再批量注册：预检覆盖 register 的全部失败条件（freeze 状态与重名），
+        确认整批可落地后才逐个写入，避免"注册一半抛错"留下半状态；预检通过后批量阶段
+        不会再抛，故无需回滚。失败时容器保留，修正后可重试。
+
+        Returns:
+            按装饰顺序注册的工具名列表（无待注册项时为空列表）。
+
+        Raises:
+            RuntimeError: registry 已冻结，整批拒绝。
+            ValueError: 待注册项之间或与本 registry 已有工具重名，整批拒绝。
+        """
+        pending = pending_tools()
+        if not pending:
+            return []
+        if self._frozen:  # 与 register 的冻结纪律一致，先于重名检查。
+            raise RuntimeError(f"registry {self.name} is frozen")
+        seen: set[str] = set(self._specs)  # 已有工具名参与重名判定。
+        for tool_fn in pending:  # 全量预检：容器内部重名与外部重名一并暴露。
+            if tool_fn.spec.name in seen:
+                raise ValueError(f"duplicate tool: {tool_fn.spec.name}")
+            seen.add(tool_fn.spec.name)
+        names: list[str] = []
+        for tool_fn in pending:  # 预检已排除所有失败条件，批量阶段不会再抛。
+            self.register(tool_fn.spec, tool_fn)
+            names.append(tool_fn.spec.name)
+        clear_pending()  # 成功即清空；失败在上面已提前返回/抛出，不会走到这里。
+        return names
 
     def bind(self, name: str, fn: Callable[..., DynamicValue]) -> None:
         """延迟绑定/替换已注册工具的执行体；未注册则 KeyError。"""
