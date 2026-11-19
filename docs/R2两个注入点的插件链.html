@@ -1,0 +1,46 @@
+<svg viewBox="0 0 680 430" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
+  <title>R2 Host 的 dispatch 与 call 两个注入点</title>
+  <desc>dispatch 阶段串 before_invoke 守卫与 transform 改写并经 settle 裁决；call 阶段用 around_invoke 包裹真实调用，after_invoke 观察后再 settle</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+  <text x="40" y="26" font-family="var(--font-sans)" font-size="14" font-weight="500" fill="#2C2C2A">注入点 ① Host.dispatch — 调用 Port 之前</text>
+
+  <g>
+    <rect x="40" y="42" width="600" height="48" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+    <text x="340" y="59" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#0C447C">before_invoke · BAIL 守卫</text>
+    <text x="340" y="77" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="12" fill="#185FA5">killswitch · 幂等 · 舱壁 · 限流 · 熔断检查 → 首个非 CONTINUE 短路</text>
+  </g>
+  <line x1="340" y1="90" x2="340" y2="108" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <g>
+    <rect x="40" y="110" width="600" height="48" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+    <text x="340" y="127" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#0C447C">transform · WATERFALL 上下文改写</text>
+    <text x="340" y="145" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="12" fill="#185FA5">逐 tap 链式改写文本（如预算收尾提示），上次输出作下次输入</text>
+  </g>
+  <line x1="340" y1="158" x2="340" y2="176" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <g>
+    <rect x="40" y="178" width="600" height="48" rx="8" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.5"/>
+    <text x="340" y="195" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#3C3489">settle · BAIL 降级裁决</text>
+    <text x="340" y="213" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="12" fill="#534AB7">有 degrade 信号 → 选目标写 ctx.degrade_target（守卫短路也走这里）</text>
+  </g>
+
+  <text x="40" y="258" font-family="var(--font-sans)" font-size="14" font-weight="500" fill="#2C2C2A">注入点 ② Host.call — 真正调用 Port</text>
+
+  <g>
+    <rect x="40" y="274" width="600" height="48" rx="8" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.5"/>
+    <text x="340" y="291" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#3C3489">around_invoke · AROUND 洋葱包裹</text>
+    <text x="340" y="309" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="12" fill="#534AB7">timeout（内）→ retry（外）→ core = R4 网关 as_call()</text>
+  </g>
+  <line x1="340" y1="322" x2="340" y2="340" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <g>
+    <rect x="40" y="342" width="600" height="48" rx="8" fill="#E1F5EE" stroke="#1D9E75" stroke-width="0.5"/>
+    <text x="340" y="359" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#085041">after_invoke / invoke_error · PARALLEL 观察</text>
+    <text x="340" y="377" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="12" fill="#0F6E56">熔断回喂滑窗 · 异常隔离 · 再 settle 更新 sticky target</text>
+  </g>
+  <text x="40" y="416" font-family="var(--font-sans)" font-size="11" fill="#5F5E5A">RequestScope 每次调用新建：signals 协作 · target 降级目标 · last_result 观察 · releases 兜底释放</text>
+</svg>

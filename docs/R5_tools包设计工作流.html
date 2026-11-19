@@ -1,0 +1,94 @@
+<svg viewBox="0 0 680 380" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
+  <title>R5 tools 包设计工作流</title>
+  <desc>四类来源注册进统一 ToolRegistry，再分披露期三级披露与调用期 danger 四级路由两条消费路径，由 ToolsCapability 装配</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+  <text x="40" y="26" font-family="var(--font-sans)" font-size="12" fill="#5F5E5A">① 注册期 · 四类来源汇入同一合集</text>
+
+  <g>
+    <rect x="40" y="42" width="142" height="48" rx="8" fill="#E6F1FB" stroke="#378ADD" stroke-width="0.5"/>
+    <text x="111" y="61" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#0C447C">@tool 装饰器</text>
+    <text x="111" y="78" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#185FA5">函数 → ToolFn</text>
+  </g>
+  <g>
+    <rect x="192" y="42" width="142" height="48" rx="8" fill="#E6F1FB" stroke="#378ADD" stroke-width="0.5"/>
+    <text x="263" y="61" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#0C447C">MCPManager</text>
+    <text x="263" y="78" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#185FA5">外部工具 + 前缀</text>
+  </g>
+  <g>
+    <rect x="344" y="42" width="142" height="48" rx="8" fill="#E6F1FB" stroke="#378ADD" stroke-width="0.5"/>
+    <text x="415" y="61" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#0C447C">执行工具</text>
+    <text x="415" y="78" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#185FA5">D10-D12 高危</text>
+  </g>
+  <g>
+    <rect x="496" y="42" width="142" height="48" rx="8" fill="#E6F1FB" stroke="#378ADD" stroke-width="0.5"/>
+    <text x="567" y="61" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#0C447C">WebFetchTool</text>
+    <text x="567" y="78" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#185FA5">抓取 + 注入检测</text>
+  </g>
+
+  <line x1="111" y1="90" x2="230" y2="130" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="263" y1="90" x2="300" y2="130" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="415" y1="90" x2="380" y2="130" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="567" y1="90" x2="450" y2="130" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <g>
+    <rect x="180" y="132" width="320" height="50" rx="10" fill="#B5D4F4" stroke="#185FA5" stroke-width="0.5"/>
+    <text x="340" y="150" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="14" font-weight="500" fill="#042C53">ToolRegistry 统一合集</text>
+    <text x="340" y="168" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#185FA5">register · static_check · freeze · call</text>
+  </g>
+
+  <line x1="340" y1="182" x2="180" y2="222" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="340" y1="182" x2="500" y2="222" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <g>
+    <rect x="40" y="224" width="280" height="44" rx="8" fill="#E1F5EE" stroke="#1D9E75" stroke-width="0.5"/>
+    <text x="180" y="240" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#085041">② 披露期 · ToolIndex</text>
+    <text x="180" y="256" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#0F6E56">名字命中 → 分层展开</text>
+  </g>
+  <g>
+    <rect x="360" y="224" width="280" height="44" rx="8" fill="#9FE1CB" stroke="#0F6E56" stroke-width="0.5"/>
+    <text x="500" y="240" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#04342C">③ 调用期 · call()</text>
+    <text x="500" y="256" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#085041">danger 四级路由</text>
+  </g>
+
+  <line x1="180" y1="268" x2="83" y2="294" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="180" y1="268" x2="180" y2="294" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="180" y1="268" x2="277" y2="294" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="500" y1="268" x2="392" y2="294" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="500" y1="268" x2="464" y2="294" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="500" y1="268" x2="536" y2="294" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="500" y1="268" x2="608" y2="294" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <g fill="#E1F5EE" stroke="#1D9E75" stroke-width="0.5">
+    <rect x="40" y="296" width="86" height="44" rx="8"/>
+    <rect x="137" y="296" width="86" height="44" rx="8"/>
+    <rect x="234" y="296" width="86" height="44" rx="8"/>
+    <rect x="360" y="296" width="64" height="44" rx="8"/>
+    <rect x="432" y="296" width="64" height="44" rx="8"/>
+    <rect x="504" y="296" width="64" height="44" rx="8"/>
+    <rect x="576" y="296" width="64" height="44" rx="8"/>
+  </g>
+  <g font-family="var(--font-sans)" font-size="12" font-weight="500" fill="#085041" text-anchor="middle" dominant-baseline="central">
+    <text x="83" y="312">L1 目录</text>
+    <text x="180" y="312">L2 schema</text>
+    <text x="277" y="312">L3 正文</text>
+    <text x="392" y="312">SAFE</text>
+    <text x="464" y="312">LOW</text>
+    <text x="536" y="312">HIGH</text>
+    <text x="608" y="312">CRITICAL</text>
+  </g>
+  <g font-family="var(--font-sans)" font-size="11" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">
+    <text x="83" y="328">无 schema</text>
+    <text x="180" y="328">命中才给</text>
+    <text x="277" y="328">过注入检测</text>
+    <text x="392" y="328">直执行</text>
+    <text x="464" y="328">审计后执行</text>
+    <text x="536" y="328">沙盒</text>
+    <text x="608" y="328">审批+沙盒</text>
+  </g>
+
+  <text x="40" y="365" font-family="var(--font-sans)" font-size="12" fill="#5F5E5A">装配层 ToolsCapability：构造默认 Registry / ToolIndex，install 把 tool / disclosure / mcp / skill 四个 port 注册进宿主</text>
+</svg>
