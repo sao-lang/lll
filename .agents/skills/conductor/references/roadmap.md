@@ -90,6 +90,17 @@
   不再依赖用户级安装。
 - 效果：外部流程主控依赖归零；缺工具只影响该工具，不影响流程本身。
 
+## 二·终2、superpowers 能力逐项整合 + 场景能力链（🟢 已激活 2026-11-19）
+
+- 背景：上一轮只把方法论提取成 4 份 engineering 文档，未逐个盘点 skill、未编排进场景——流程是空的。
+- 新增 `engineering-catalog.md`：原始 superpowers 15 个 skill 逐个交代去向——
+  11 个整合为具名能力、1 个并入场景链并行算子（dispatching-parallel-agents）、
+  3 个舍弃（using-superpowers 入口/诊断自检/写 skill 元能力，均给理由）。
+- 10 个具名能力各有输入输出契约（`brainstorm/plan/worktree/execute/tdd/debug/review/receive-review/verify/finish`）。
+- 重写 scenarios.md：13 场景全部写成显式**工程能力链** + 契约传递；
+  纯只读场景（9/10/12）明确"能力链：无"。
+- 效果：回答了"superpowers 的 skill 去哪了"和"怎么按它的流程工作"——场景链即答案。
+
 ## 三、P2 候选（🟡，有真实需求再加）
 
 - 安全审计（只读，加载 `security-redlines.md`）

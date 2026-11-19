@@ -64,6 +64,14 @@ description: 通用的 AI 开发工作流主控 skill。当收到开发、重构
 
 确定性脚本（scripts/，非 skill）：`preflight.py`（依赖预检）、`verify.py --lang <lang>`（验证命令汇总）、`scan_gaps.py`（缺口台账草稿）。脚本输出即证据，直接写入 overview。
 
+### 工程能力目录（superpowers 整合结果）
+
+原 superpowers 的 15 个 skill 已内化为 conductor 的 10 个**具名工程能力**（`brainstorm`/`plan`/`worktree`/
+`execute`/`tdd`/`debug`/`review`/`receive-review`/`verify`/`finish`），3 个舍弃、1 个并入场景链并行算子、
+1 个被 conductor 入口取代。逐个来源、去向、输入输出契约见 `references/engineering-catalog.md`。
+**场景流程 = 能力链**：`scenarios.md` 每个场景写成 `能力A → 能力B`，按契约逐级传递——
+这就是"按 superpowers 流程工作"在 conductor 里的落地，不再加载任何外部流程 skill。
+
 ### 场景 × 阶段矩阵（S1 硬输出，决定跳过哪些阶段）
 
 | 路径 | 场景 | S0 | S1 | S2 | S3 | S4 | S5 |
