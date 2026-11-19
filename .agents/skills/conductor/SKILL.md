@@ -55,10 +55,10 @@ description: 通用的 AI 开发工作流主控 skill。当收到开发、重构
 | 阶段 | 主控 | 加载 / 调用 |
 |---|---|---|
 | S0 会话开始 | 本 skill | `scripts/preflight.py` 预检依赖 → **确认加载 `handoff` 并调用** → 建 overview md |
-| S1 场景路由 | 本 skill | 按 `routing.md` 规划执行图 + 声明 skill 组 + 禁止项 + 下一站 |
-| S2 设计计划 | 本 skill | 读 `engineering-workflow.md`（brainstorming + writing-plans）；拷问设计加挂 `grill-design`；架构类加 `architecture-contracts` |
-| S3 TDD 实现 | 本 skill | 读 `engineering-tdd.md`（RED-GREEN-REFACTOR）+ `engineering-workflow.md`（worktree/subagent）；加挂 `ponytail` + `caveman` + coding-rules；每个绿循环按 `git-commit-rules.md` 提交 |
-| S4 自省补强（改码变体） | 本 skill | `scripts/scan_gaps.py` 生成台账 → `scripts/verify.py` 拿退出码 → `code-quality-review`；拷问代码加挂 `grill-me` |
+| S1 场景路由 | 本 skill | 按 `routing.md` 规划执行图 + 声明 skill 组 + 禁止项 + 下一站；**识别样例触发信号**（用户举例/参考X那样），命中则声明启用 `examples-to-spec.md` |
+| S2 设计计划 | 本 skill | 读 `engineering-workflow.md`（brainstorming + writing-plans）；拷问设计加挂 `grill-design`；架构类加 `architecture-contracts`；**按 `examples-to-spec.md` 四步法补全样例外覆盖** |
+| S3 TDD 实现 | 本 skill | 读 `engineering-tdd.md`（RED-GREEN-REFACTOR）+ `engineering-workflow.md`（worktree/subagent）；加挂 `ponytail` + `caveman` + coding-rules；**按补全清单核关联项/同模式代码**；每个绿循环按 `git-commit-rules.md` 提交 |
+| S4 自省补强（改码变体） | 本 skill | `scripts/scan_gaps.py` 生成台账 → `scripts/verify.py` 拿退出码 → `code-quality-review`；拷问代码加挂 `grill-me`；**核对样例补全项是否都落地且有证据** |
 | S4 分析（只读变体） | 本 skill | `graphify` / `scan_gaps.py` / review，**不跑 verify**（无代码改动可验） |
 | S5 review 收尾 | 本 skill | 读 `engineering-code-review.md` + `engineering-workflow.md`（finish）；解 bug 读 `engineering-debugging.md`；深度审查加挂 `metago-code-review-deep`；按 `git-commit-rules.md` 提交；收尾 `handoff` + 写 overview |
 
@@ -93,6 +93,10 @@ description: 通用的 AI 开发工作流主控 skill。当收到开发、重构
 4. S4 是本 skill 真正"用"规则的环节：跑验证命令拿退出码。
 
 规则文件：`references/coding-rules-common.md` + `references/coding-rules-{python,typescript,react,vue,go,rust,dart}.md`。
+
+**样例补全规则**（`references/examples-to-spec.md`）同属知识文档：用户举例只覆盖部分时，
+按"归纳意图→推导覆盖面→分类确认→落地核对"四步补全，防止"用户举 3 个就只做 3 个"。
+命中触发信号（比如/例如/参考 X 那样/改这里但同模块有同类位置）时启用，补全项先分类确认再落地。
 
 ## 强制机制（规则从建议变门禁）
 
