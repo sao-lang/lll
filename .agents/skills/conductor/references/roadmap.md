@@ -128,6 +128,21 @@
 - 关键平衡：补全 ≠ 擅自扩大——同类项可补并记录依据，判断项先问用户；禁止只做列举项、禁止假补全。
 - SKILL.md 挂 S1 识别/S2 补全/S3 关联核/S4 核对；scenarios 通用前置+设计/文档/开发场景+缺口台账第 7 项。
 
+## 二·终6、补全提取细节 + references 索引（🟢 已激活 2026-11-19）
+
+- 背景：用户质疑压成能力后丢失细节是否影响功能。逐条对比原文（原始 11 skill ~4400 行 vs 提取 245 行，压 95%）。
+- 修正上一轮误判：subagent-driven 不是"废了"（通用 agent 会派子代理），而是缺三条护栏；
+  brainstorming 真正致命的是"先调查再开口/别问已回答的"，不是 Red Flags。
+- 补进细节（不简化、对照原文）：
+  - engineering-tdd.md：Verify RED（fail vs error）/Verify GREEN（跑全项目套件，漏报即失真）/
+    5 条最狠借口/红旗清单
+  - engineering-workflow.md：brainstorm 先调查再开口+首条消息+回述+两条红旗；
+    writing-plans 的 Interfaces(Consumes/Produces)+计划头+Self-Review 五问
+  - engineering-code-review.md：subagent 派单契约(brief 唯一需求源/记 BASE/不许自派 reviewer/
+    显式选 model)+fix-loop+完成台账+借口表
+- 整理 references：新增 README.md 索引（25 份按五类导航、加载优先级、冲突规则）；
+  来源致谢里的上游文件名加限定词避免误当本地引用；SKILL.md 挂索引指针。
+
 ## 三、P2 候选（🟡，有真实需求再加）
 
 - 安全审计（只读，加载 `security-redlines.md`）

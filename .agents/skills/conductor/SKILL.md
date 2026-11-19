@@ -48,6 +48,9 @@ description: 通用的 AI 开发工作流主控 skill。当收到开发、重构
 
 详细步骤见 `references/scenarios.md`（十三场景）。路径与阶段的对应关系见下节矩阵。
 
+> **references 导航**：25 份知识文档的"何时读哪份"索引见 `references/README.md`（按流程/工程纪律/编码规则/门禁/元信息分五类）——
+> 不要一次性全读，按索引指定的阶段与触发条件渐进加载。
+
 ## 阶段 → skill 加载矩阵
 
 每一步都先声明主控，再声明加载项与禁止项。完整表见 `references/skill-matrix.md`（含各 skill 仓库地址与跨 agent 安装方式）。摘要：

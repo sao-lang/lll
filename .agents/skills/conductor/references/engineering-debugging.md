@@ -1,6 +1,6 @@
 # 系统化调试（conductor 内置工程纪律）
 
-> 来源致谢：提取自 obra/superpowers 的系统化调试方法论（04-systematic-debugging.md），本地化重述。
+> 来源致谢：提取自 obra/superpowers 上游的 `systematic-debugging/SKILL.md`，本地化重述。
 
 不靠猜。用 4 阶段根因流程定位问题，再修。
 
