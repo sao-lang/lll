@@ -78,6 +78,18 @@
 - 已写入 routing.md（§1 五层管线/§1.5 结构算子/§4 假设/§5 重规划/§6 降级纪律）、
   scenarios.md（I/O 契约表）、SKILL.md S1。
 
+## 二·终、superpowers 内化 + 项目自包含（🟢 已激活 2026-11-19）
+
+- 目标：消除"治理外壳 + 外部工程内核"两套工作流，让 conductor 成为唯一流程主控。
+- 工程纪律内化：superpowers 的 7 步工作流 / 写计划 / TDD / 系统化调试 / 代码评审 / 4 理念，
+  提取为 conductor 自己的 `engineering-{workflow,tdd,debugging,code-review}.md`（含来源致谢）。
+- 全文改造：SKILL.md（定位/阶段矩阵/铁律）、skill-matrix.md（加载表/清单/加载原则）、
+  scenarios.md（委托内核→本 skill 执行）、test-strategy.md、overview.md、preflight.py
+  （移除 superpowers 依赖检查）。
+- 项目自包含：conductor 用到的全部外部工具 skill 搬进 `.agents/skills/`，
+  不再依赖用户级安装。
+- 效果：外部流程主控依赖归零；缺工具只影响该工具，不影响流程本身。
+
 ## 三、P2 候选（🟡，有真实需求再加）
 
 - 安全审计（只读，加载 `security-redlines.md`）

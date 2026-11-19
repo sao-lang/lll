@@ -30,7 +30,7 @@ overviews/
 ## 场景与 skill
 - 场景：<初始化/开发/迭代/重构/解bug/拷问>
 - 加载的 skill：<列表>
-- 主控：<superpowers / conductor>
+- 主控：conductor（唯一流程主控）
 
 ## 会话摘要（≤10 条要点）
 1. ...

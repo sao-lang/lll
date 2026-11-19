@@ -1,20 +1,23 @@
 ---
 name: conductor
-description: 通用的 AI 开发工作流治理外壳。当收到开发、重构、修 bug、项目初始化、迭代、或"拷问代码/设计"类需求时，本 skill 应被加载：它负责场景路由、会话记录、缺口台账自省、代码规则约束与收尾交接，并显式声明每个阶段应加载哪些其他 skill。它以 superpowers 等工程方法论为流程主控，本身不重述工程步骤，只做治理与补强。适用于 Claude Code、Codex、OpenCode、Droid 等支持 SKILL.md 的通用 agent。
+description: 通用的 AI 开发工作流主控 skill。当收到开发、重构、修 bug、项目初始化、迭代、架构设计、或"拷问代码/设计"类需求时，本 skill 应被加载：它是唯一的流程主控，内置完整工程纪律（头脑风暴/写计划/worktree/子代理/TDD/系统化调试/代码评审/收尾，提取自 superpowers），并负责场景路由、会话记录、缺口台账自省、代码规则约束、精简治理与收尾交接。适用于 Claude Code、Codex、OpenCode、Droid 等支持 SKILL.md 的通用 agent。
 ---
 
-# conductor · 开发工作流治理外壳
+# conductor · 开发工作流主控
 
-> 名字取自"指挥家"：本 skill 不亲自演奏工程步骤，而是编排 superpowers、grill-design、
-> code-quality-review、handoff 等一众 skill 各司其职——编排而不亲自动手，正是治理外壳的职责。
+> 名字取自"指挥家"：本 skill 亲自执棒整条开发流程——从场景路由、工程纪律、
+> 到自省门禁与收尾交接，一个主控贯穿始终。需要专门工具时，它调用 grill-design、
+> code-quality-review、graphify、handoff 等一众 skill 各司其职。
 
 ## 定位（必读）
 
-本 skill 是**治理外壳**，不是第二个工程流程。
+本 skill 是**唯一流程主控**（不再有"治理外壳 + 外部工程内核"两套工作流）。
 
-- **工程流程主控**交给 `superpowers`（或等价方法论）：头脑风暴 → 计划 → worktree → TDD → code-review → finish。本 skill **不重述**这些步骤细节。
-- 本 skill 只做四件 superpowers 不管的事：**场景路由、会话记录（overviews）、自省补强、规则与精简治理**。
-- 冲突时以工程内核（superpowers）的判断为准：它管正确性，本 skill 管治理与补充。
+- **工程纪律已内化**：头脑风暴 → 计划 → worktree → 子代理 → TDD → 系统化调试 → code-review → finish，
+  这些步骤提取自 superpowers，固化在本 skill 的 `references/engineering-*.md`，由 conductor 自己执行。
+- **一体化职责**：场景路由 + 工程纪律 + 会话记录（overviews）+ 自省门禁 + 规则与精简治理，全在本 skill。
+- **外部 skill 只是工具**：grill-design / code-quality-review / handoff 等是被调用的专业工具，
+  不是另一个流程主控；它们不定义阶段，只在 conductor 指定的阶段被加载。
 
 ## 触发后必须先做的两件事
 
@@ -27,7 +30,7 @@ description: 通用的 AI 开发工作流治理外壳。当收到开发、重构
 
 ## 十三场景与流程裁剪
 
-| 场景 | 交给工程内核的阶段 | 本外壳额外负责 |
+| 场景 | 走的工程阶段（均本 skill 主控） | 额外加载的工具 |
 |---|---|---|
 | 项目初始化 | brainstorming → writing-plans（止步） | overviews 建库、技术选型拷问 |
 | 架构设计 | brainstorming + 设计树（止步于架构规格） | `grill-design` 拷问 + `architecture-contracts` 约束，产出架构文档 |
@@ -37,10 +40,10 @@ description: 通用的 AI 开发工作流治理外壳。当收到开发、重构
 | 设计驱动重构 | 先核设计差异 → TDD 锁行为 → review → finish | 对照新/补充设计逐条改接线，禁夹带 |
 | 项目重构 | TDD 锁行为 → review → finish | ponytail 砍复杂度、禁止夹带新功能 |
 | 解 bug | systematic-debugging → TDD 复现 → review | 根因台账、回归证据 |
-| 拷问代码/设计 | 不委托（纯只读） | grill-design / grill-me / code-quality-review，出清单不改码 |
-| 代码库理解 | 不委托（纯只读） | `graphify` 查图 + scan_gaps + architecture-contracts，出代码地图/调用链 |
+| 拷问代码/设计 | 不跑工程阶段（纯只读） | grill-design / grill-me / code-quality-review，出清单不改码 |
+| 代码库理解 | 不跑工程阶段（纯只读） | `graphify` 查图 + scan_gaps + architecture-contracts，出代码地图/调用链 |
 | 文档同步 | 局部（只核差异，不跑代码 TDD） | grill-design + architecture-contracts，出文档-代码差异清单 |
-| 门禁验收/发布 | 不委托（只验证） | preflight + verify + scan_gaps + review 全套，出门禁报告 |
+| 门禁验收/发布 | 不跑工程阶段（只验证） | preflight + verify + scan_gaps + review 全套，出门禁报告 |
 | 测试补课 | TDD 变体（只补测试，不写新实现） | test-strategy.md，出新增测试 + 覆盖率证据 |
 
 详细步骤见 `references/scenarios.md`（十三场景）。路径与阶段的对应关系见下节矩阵。
@@ -52,12 +55,12 @@ description: 通用的 AI 开发工作流治理外壳。当收到开发、重构
 | 阶段 | 主控 | 加载 / 调用 |
 |---|---|---|
 | S0 会话开始 | 本 skill | `scripts/preflight.py` 预检依赖 → **确认加载 `handoff` 并调用** → 建 overview md |
-| S1 场景路由 | 本 skill | 声明 skill 组 + 禁止项 + 下一站 |
-| S2 设计计划 | 工程内核 | `brainstorming` → `writing-plans`；拷问设计加挂 `grill-design`；架构类加 `architecture-contracts` |
-| S3 TDD 实现 | 工程内核 | `TDD`、`subagent-driven`；加挂 `ponytail` + `caveman` + coding-rules |
+| S1 场景路由 | 本 skill | 按 `routing.md` 规划执行图 + 声明 skill 组 + 禁止项 + 下一站 |
+| S2 设计计划 | 本 skill | 读 `engineering-workflow.md`（brainstorming + writing-plans）；拷问设计加挂 `grill-design`；架构类加 `architecture-contracts` |
+| S3 TDD 实现 | 本 skill | 读 `engineering-tdd.md`（RED-GREEN-REFACTOR）+ `engineering-workflow.md`（worktree/subagent）；加挂 `ponytail` + `caveman` + coding-rules |
 | S4 自省补强（改码变体） | 本 skill | `scripts/scan_gaps.py` 生成台账 → `scripts/verify.py` 拿退出码 → `code-quality-review`；拷问代码加挂 `grill-me` |
 | S4 分析（只读变体） | 本 skill | `graphify` / `scan_gaps.py` / review，**不跑 verify**（无代码改动可验） |
-| S5 review 收尾 | 工程内核 | `requesting-code-review`、`finish`；深度审查加挂 `metago-code-review-deep`；收尾 `handoff` + 写 overview |
+| S5 review 收尾 | 本 skill | 读 `engineering-code-review.md` + `engineering-workflow.md`（finish）；解 bug 读 `engineering-debugging.md`；深度审查加挂 `metago-code-review-deep`；收尾 `handoff` + 写 overview |
 
 确定性脚本（scripts/，非 skill）：`preflight.py`（依赖预检）、`verify.py --lang <lang>`（验证命令汇总）、`scan_gaps.py`（缺口台账草稿）。脚本输出即证据，直接写入 overview。
 
@@ -78,7 +81,7 @@ description: 通用的 AI 开发工作流治理外壳。当收到开发、重构
 
 1. S1 时本 skill 在会话中种下一条**常驻约束**："任何写码动作前，先读 `references/coding-rules-common.md` 与当前语言的 `coding-rules-<lang>.md`"。
 2. 常驻的是**一句话指针**（省 token），规则**正文**直到写码那一刻才读取——与渐进式披露同构。
-3. 工程内核（superpowers）**无需感知**该规则：它管"先写测试再写实现"，规则管"实现写成什么样"，两者正交。
+3. 工程纪律（`engineering-tdd.md`）与规则**正交**：前者管"先写测试再写实现"，规则管"实现写成什么样"，两者同时遵守。
 4. S4 是本 skill 真正"用"规则的环节：跑验证命令拿退出码。
 
 规则文件：`references/coding-rules-common.md` + `references/coding-rules-{python,typescript,react,vue,go,rust,dart}.md`。
@@ -109,7 +112,7 @@ description: 通用的 AI 开发工作流治理外壳。当收到开发、重构
 1. **先确认存在**：S0 跑 `preflight.py`，它检查外部 skill 是否安装。缺失项必须显式处理。
 2. **失败要出声**：若某 skill 加载失败（未安装 / 工具不可用），**禁止静默跳过**——必须在 overview 写"缺失：X，影响：Y，已降级为 Z"，并向用户声明降级方案。
 3. **不可假装加载**：没实际调用就不得声称"已加载 handoff"。证据是 skill 的调用动作，不是文字声明。
-4. **关键依赖缺失要问**：`handoff`（S0）与 `superpowers`（工程主控）若缺失，必须先告知用户并给出安装命令，不可直接开跑。
+4. **关键依赖缺失要问**：`handoff`（S0）若缺失，必须先告知用户并给出安装命令，不可直接开跑。工程纪律已内置（`engineering-*.md`），不再有外部主控依赖。
 5. **路径相关**：只读路径（9/10）不强依赖 handoff——无上次交接也能做理解/拷问，但需在 overview 标注"无交接上下文"。
 
 ## 铁律（贯穿全程）
@@ -119,7 +122,7 @@ description: 通用的 AI 开发工作流治理外壳。当收到开发、重构
 3. 自省未过不进 review。
 4. 拿不出证据（测试行号 / linter 退出码 / 覆盖率）不得标完成。
 5. 禁魔法字符串：语义字符串一律用枚举或具名常量（见 common 规则 §2）。
-6. 只补空白：superpowers 已有的能力直接复用，不重复造流程。
+6. 工程纪律已内置：S2/S3/S5 读 `engineering-*.md` 执行，不加载外部流程 skill。
 
 ## 会话记录（overviews）
 

@@ -16,7 +16,6 @@ from pathlib import Path
 
 # 外部 skill：名称 → 仓库/安装提示（与 references/skill-matrix.md 对齐）
 EXTERNAL_SKILLS: dict[str, str] = {
-    "superpowers": "已装用户级则跳过；否则 https://github.com/obra/superpowers",
     "ponytail": "npx skills add DietrichGebert/ponytail --skill ponytail",
     "caveman": "npx skills add DietrichGebert/ponytail --skill caveman",
     "handoff": "npx skills add mattpocock/skills --skill handoff",
