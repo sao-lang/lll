@@ -112,6 +112,14 @@
   - `finish` 详解——验当前树测试、探环境三态、确认 base branch、精确菜单、
     discard 需输入确认、禁擅自 force-push、清理所有权判断、6 条 git 红线。
 
+## 二·终4、新增 git 提交规则（🟢 已激活 2026-11-19）
+
+- 新增 `git-commit-rules.md`：提交时机（TDD 绿后/任务完成/收尾前）、Conventional Commits + 中文格式、
+  暂存纪律（禁 `git add -A` 盲加、只 add 本次文件、两步核对 status/diff --cached、破坏性改动警惕）、
+  8 条红线、提交前检查清单、提交后核对 HEAD。
+- SKILL.md 挂载：S3/S5 阶段加载；强制机制从三道锁扩为四道锁（新增锁 4 提交前门禁）。
+- 动机：项目反复出现"工作区混入其他会话改动"，此前提交靠人工小心，现固化为规则。
+
 ## 三、P2 候选（🟡，有真实需求再加）
 
 - 安全审计（只读，加载 `security-redlines.md`）

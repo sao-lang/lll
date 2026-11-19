@@ -57,10 +57,10 @@ description: 通用的 AI 开发工作流主控 skill。当收到开发、重构
 | S0 会话开始 | 本 skill | `scripts/preflight.py` 预检依赖 → **确认加载 `handoff` 并调用** → 建 overview md |
 | S1 场景路由 | 本 skill | 按 `routing.md` 规划执行图 + 声明 skill 组 + 禁止项 + 下一站 |
 | S2 设计计划 | 本 skill | 读 `engineering-workflow.md`（brainstorming + writing-plans）；拷问设计加挂 `grill-design`；架构类加 `architecture-contracts` |
-| S3 TDD 实现 | 本 skill | 读 `engineering-tdd.md`（RED-GREEN-REFACTOR）+ `engineering-workflow.md`（worktree/subagent）；加挂 `ponytail` + `caveman` + coding-rules |
+| S3 TDD 实现 | 本 skill | 读 `engineering-tdd.md`（RED-GREEN-REFACTOR）+ `engineering-workflow.md`（worktree/subagent）；加挂 `ponytail` + `caveman` + coding-rules；每个绿循环按 `git-commit-rules.md` 提交 |
 | S4 自省补强（改码变体） | 本 skill | `scripts/scan_gaps.py` 生成台账 → `scripts/verify.py` 拿退出码 → `code-quality-review`；拷问代码加挂 `grill-me` |
 | S4 分析（只读变体） | 本 skill | `graphify` / `scan_gaps.py` / review，**不跑 verify**（无代码改动可验） |
-| S5 review 收尾 | 本 skill | 读 `engineering-code-review.md` + `engineering-workflow.md`（finish）；解 bug 读 `engineering-debugging.md`；深度审查加挂 `metago-code-review-deep`；收尾 `handoff` + 写 overview |
+| S5 review 收尾 | 本 skill | 读 `engineering-code-review.md` + `engineering-workflow.md`（finish）；解 bug 读 `engineering-debugging.md`；深度审查加挂 `metago-code-review-deep`；按 `git-commit-rules.md` 提交；收尾 `handoff` + 写 overview |
 
 确定性脚本（scripts/，非 skill）：`preflight.py`（依赖预检）、`verify.py --lang <lang>`（验证命令汇总）、`scan_gaps.py`（缺口台账草稿）。脚本输出即证据，直接写入 overview。
 
@@ -96,11 +96,13 @@ description: 通用的 AI 开发工作流主控 skill。当收到开发、重构
 
 ## 强制机制（规则从建议变门禁）
 
-三道锁，缺一不可：
+四道锁，缺一不可：
 
 - **锁 1 · 写码前**：未读规则文件禁止产生代码；违反则该步无效、回退重做。
 - **锁 2 · 写码中**：每写一个函数/类/循环，边写边对照注释模板、类型原则、禁魔法字符串、长度基线。
 - **锁 3 · 写码后**：跑 formatter/linter/type-checker/注释检查，**退出码非 0 → 禁止进 review、禁止标完成**（客观强制，不靠自觉）。
+- **锁 4 · 提交前**：按 `references/git-commit-rules.md` 核对——测试绿、暂存区只有本次文件、commit message 合规；
+  **禁止 `git add -A`/`git add .` 盲加混入他人改动**（本项目反复踩过的坑），提交后核对 HEAD 内容。
 
 例外必须显式声明并记入 overview（如生成代码、第三方文件、vendor 边界），禁止以"技术债"名义静默放行。
 
