@@ -47,3 +47,27 @@
 ## 交接
 - handoff 文档路径：无（本轮为设计会话）
 - 脱敏声明：本文件不含密钥 / token / PII
+
+---
+
+## 追加 · 2026-11-19 16:30（P0/P1 扩展 + 三新场景）
+
+### 摘要
+1. 落地 P0 三个确定性脚本：preflight.py（依赖预检）、verify.py（验证命令退出码汇总）、scan_gaps.py（缺口台账草稿）。
+2. 落地 P1 三个契约：architecture-contracts.md（接线审计）、security-redlines.md（安全红线）、test-strategy.md（测试策略）。
+3. 新增三场景：架构设计、补充设计、设计驱动重构（依新/补充设计改代码）。
+4. 六场景扩为九场景；脚本接入 S0（preflight）与 S4（scan_gaps + verify）。
+5. 冒烟测试：三个脚本均可运行；verify dry-run 正确提取 5 条 Python 命令；scan_gaps 在 src 命中 36 条草稿信号。
+
+### 变更文件
+- `.agents/skills/dev-workflow/scripts/{preflight,verify,scan_gaps}.py` — 新增
+- `.agents/skills/dev-workflow/references/{architecture-contracts,security-redlines,test-strategy}.md` — 新增
+- `SKILL.md` / `scenarios.md` / `skill-matrix.md` — 更新场景与脚本接入
+
+### 验证结果
+- 脚本冒烟：preflight 正确报 4 项缺失工具；verify dry-run 输出 5 条命令；scan_gaps 输出 36 条草稿（弱信号需人工核实）
+- quick_validate：待复验
+
+### 未完成项
+- 外部 skill 仍未安装（仅仓库地址 + 安装命令）；preflight 会持续报缺失直至安装。
+- 建议下一步：安装核心外部 skill（superpowers/ponytail/caveman/handoff）后重跑 preflight。

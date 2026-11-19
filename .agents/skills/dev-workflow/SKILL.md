@@ -23,13 +23,16 @@ description: 通用的 AI 开发工作流治理外壳。当收到开发、重构
 | 场景 | 交给工程内核的阶段 | 本外壳额外负责 |
 |---|---|---|
 | 项目初始化 | brainstorming → writing-plans（止步） | overviews 建库、技术选型拷问 |
+| 架构设计 | brainstorming + 设计树（止步于架构规格） | `grill-design` 拷问 + `architecture-contracts` 约束，产出架构文档 |
+| 补充设计 | 局部 brainstorm（只补缺口） | 定位已有设计 → 只补未决分支，禁止重写既有结论 |
 | 项目开发 | 全程（brainstorm→plan→TDD→review→finish） | S0/S4 + ponytail/caveman/coding-rules |
 | 项目迭代 | brainstorm（轻）→ plan → TDD → review | 影响面分析、回归检查 |
+| 设计驱动重构 | 先核设计差异 → TDD 锁行为 → review → finish | 对照新/补充设计逐条改接线，禁夹带 |
 | 项目重构 | TDD 锁行为 → review → finish | ponytail 砍复杂度、禁止夹带新功能 |
 | 解 bug | systematic-debugging → TDD 复现 → review | 根因台账、回归证据 |
 | 拷问代码/设计 | 不委托（纯只读） | grill-design / grill-me / code-quality-review，出清单不改码 |
 
-详细步骤见 `references/scenarios.md`。
+详细步骤见 `references/scenarios.md`（九场景）。
 
 ## 阶段 → skill 加载矩阵
 
@@ -37,12 +40,14 @@ description: 通用的 AI 开发工作流治理外壳。当收到开发、重构
 
 | 阶段 | 主控 | 加载 / 调用 |
 |---|---|---|
-| S0 会话开始 | 本 skill | `handoff`（读上次）→ 建 overview md |
+| S0 会话开始 | 本 skill | `scripts/preflight.py` 预检依赖 → `handoff`（读上次）→ 建 overview md |
 | S1 场景路由 | 本 skill | 声明 skill 组 + 禁止项 + 下一站 |
-| S2 设计计划 | 工程内核 | `brainstorming` → `writing-plans`；拷问设计加挂 `grill-design` |
+| S2 设计计划 | 工程内核 | `brainstorming` → `writing-plans`；拷问设计加挂 `grill-design`；架构类加 `architecture-contracts` |
 | S3 TDD 实现 | 工程内核 | `TDD`、`subagent-driven`；加挂 `ponytail` + `caveman` + coding-rules |
-| S4 自省补强 | 本 skill | `code-quality-review` + 缺口台账法；拷问代码加挂 `grill-me` |
+| S4 自省补强 | 本 skill | `scripts/scan_gaps.py` 生成台账 → `scripts/verify.py` 拿退出码 → `code-quality-review`；拷问代码加挂 `grill-me` |
 | S5 review 收尾 | 工程内核 | `requesting-code-review`、`finish`；深度审查加挂 `metago-code-review-deep`；收尾 `handoff` + 写 overview |
+
+确定性脚本（scripts/，非 skill）：`preflight.py`（依赖预检）、`verify.py --lang <lang>`（验证命令汇总）、`scan_gaps.py`（缺口台账草稿）。脚本输出即证据，直接写入 overview。
 
 ## 代码规则如何生效（关键机制）
 

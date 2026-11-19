@@ -7,12 +7,20 @@
 
 | 阶段 | 主控 | 加载 / 调用 | 本步禁止 | 出口条件 |
 |---|---|---|---|---|
-| S0 会话开始 | dev-workflow | `handoff`（读上次交接）、建 overview md | 禁止直接写代码 | overview 文件已建 |
+| S0 会话开始 | dev-workflow | `scripts/preflight.py` 预检 → `handoff`（读上次交接）、建 overview md | 禁止直接写代码 | 预检完成 + overview 文件已建 |
 | S1 场景路由 | dev-workflow | 声明 skill 组 + 禁止项 + 下一站 | 禁止跳过声明 | 路由已向用户声明 |
-| S2 设计计划 | superpowers | `brainstorming` → `writing-plans`；拷问设计加挂 `grill-design` | 规格未确认不动手 | 设计文档 + 计划就绪 |
+| S2 设计计划 | superpowers | `brainstorming` → `writing-plans`；拷问设计加挂 `grill-design`；架构/设计驱动场景加挂 `architecture-contracts.md` | 规格未确认不动手 | 设计文档 + 计划就绪 |
 | S3 TDD 实现 | superpowers | `TDD`、`subagent-driven`；加挂 `ponytail` + `caveman` + coding-rules | 无失败测试不写实现 | 红转绿、全量测试绿 |
-| S4 自省补强 | dev-workflow | `code-quality-review` + 缺口台账法；拷问代码加挂 `grill-me` | 未达标不许进 review | 遗漏/断点/覆盖率/通过率四项达标 |
+| S4 自省补强 | dev-workflow | `scripts/scan_gaps.py` → `scripts/verify.py --lang` → `code-quality-review` + 缺口台账法；拷问代码加挂 `grill-me`；安全核对 `security-redlines.md`、测试核对 `test-strategy.md` | 未达标不许进 review | 遗漏/断点/覆盖率/通过率/安全五项达标 |
 | S5 review 收尾 | superpowers | `requesting-code-review`、`finish`；深度审查加挂 `metago-code-review-deep`；收尾 `handoff` + 写 overview | Critical 未清零不许收尾 | 全绿 + 交接文档已写 |
+
+### 确定性脚本（scripts/，非 skill，直接执行）
+
+| 脚本 | 用途 | 调用 |
+|---|---|---|
+| `preflight.py` | 预检外部 skill + 语言验证工具是否就位，缺失给安装命令 | `python scripts/preflight.py --project-root .` |
+| `verify.py` | 执行 `coding-rules-<lang>.md` 的验证命令，汇总退出码为证据 | `python scripts/verify.py --lang <lang>` |
+| `scan_gaps.py` | 扫 TODO/pass/fake/协议无实现/install 无调用，生成缺口台账草稿 | `python scripts/scan_gaps.py --path src` |
 
 ## 2. Skill 清单与仓库地址
 
