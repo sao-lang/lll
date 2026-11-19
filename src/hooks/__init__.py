@@ -16,7 +16,7 @@ from .protocols import (
 )
 from .types import (
     Capability, Decision, DecisionAction, HookBusError, HookCtx,
-    LifecycleEvent, Matcher, Provider, Registry, RetrySpec,
+    LifecycleEvent, Matcher, Provider, ProviderRegistry, Registry, RetrySpec,
 )
 from .v5 import (
     BailHook, AroundHook, HookKind, Host, LoopHook, ParallelHook, Plugin,
@@ -27,7 +27,7 @@ __all__ = [
     "HookKind", "Host", "RequestScope", "Signal", "SignalKind", "Plugin",
     "BailHook", "WaterfallHook", "ParallelHook", "LoopHook", "AroundHook",
     "HookCtx", "Decision", "DecisionAction", "RetrySpec", "Matcher",
-    "Capability", "Provider", "Registry", "HookBusError", "LifecycleEvent",
+    "Capability", "Provider", "ProviderRegistry", "Registry", "HookBusError", "LifecycleEvent",
     "LLMPort", "ToolPort", "SkillPort", "RAGPort", "MemoryPort", "StorePort",
     "SandboxPort", "AuditPort", "AuditStore", "DisclosureIndex", "EvalPort", "TelemetryPort", "TelemetryExporter", "HumanPort",
     "MCPPort", "EventStreamPort", "PORT_PROTOCOLS",

@@ -217,7 +217,7 @@ class KeywordInjectionDetector:          # 默认实现：关键词/正则启发
 | 条件 | 实现 | 证据 |
 |------|------|------|
 | CL-1 契约自足 | 依赖 R1 types + R2 Hook + Port | import 扫描 |
-| CL-2 自带 fake | tests/r5/fakes.py + fake transport | fake 用例 |
+| CL-2 自带 fake | tests/r5/conftest.py（FakeSandbox/Human/Audit/Injection/Fetcher/Transport）+ fake transport | fake 用例 |
 | CL-3 自带测试 | tests/r5/ 覆盖门禁 | 覆盖率报告 |
 | CL-4 独立 demo | `make demo-r5` | demo 冒烟 |
 | CL-5 文档自足 | 本文 + AGENT-总设计对应章节 | 文档评审 |

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Callable
+from typing import NoReturn
 
 from harness._ctxview import as_port_ctx, coerce_port_ctx
 from hooks import (
@@ -26,11 +27,16 @@ from .router import NO_DEFAULT, ModelRouter, RuleRouter
 from .stream import has_stream_events, wrap_text_stream
 from .structured import SchemaValidator, StructuredOutputValidator
 from .types import (
+    REFUSED_CODE,
+    TARGET_UNRESOLVED_CODE,
+    BackendResolution,
     CostAttributor,
     CostGuard,
     CostRecord,
+    RefuseExecution,
     Reservation,
     StructuredOutputSpec,
+    TargetUnresolved,
     cache_key_string,
 )
 
@@ -101,19 +107,26 @@ class ModelGateway:
         # 避免击穿（40 并发 → 真调 40 次）、重复记账。
         self._inflight: dict[str, asyncio.Future[LLMResponse]] = {}
 
+    @property
+    def registry(self) -> ModelRegistry | None:
+        """装配核对用：网关解析降级目标所用的注册表（与 host.registry 同源）。"""
+        return self._registry
+
     def _resolve_llm(
         self, request: LLMRequest, ctx: PortCtx, *, degrade_target: str | None = None
-    ) -> LLMPort:
-        """解析本次调用的真实后端：router 选模型 → registry 映射实例（v1.5 接通）。
+    ) -> BackendResolution:
+        """降级执行唯一决策点（R4 §2.2/§5.5）：返回三态，任何分支不回退默认模型。
 
         参数：
             request: LLM 请求。ctx: Port 上下文。
             degrade_target: 降级目标名（优先于 router 结果；来自 dispatch 回传）。
         返回：
-            目标 LLMPort 实例；未注册/无路由目标时回退默认 llm。
+            LLMPort（切后端）/ RefuseExecution（拒答）/ TargetUnresolved（未注册显式失败）。
         说明：
             - router 总是被调用（修复 _router 空转），路由理由进 ctx.meta 供 trace。
-            - 注册表缺省（None）时 router 仍调用但不切实例——兼容旧行为。
+            - REFUSE 优先于一切：不解析、不缓存、不调后端。
+            - 非空未注册 target → TargetUnresolved（不再 raise ValueError 折叠成 PORT_CRASHED）。
+            - registry 缺省时：无 target 走默认后端（兼容）；有 target 则 TargetUnresolved（不回退）。
         """
         # 构造 router 需要的 Effect：task_hint 来自请求（E4 修复，原来恒空导致路由空转）
         effect = Effect(
@@ -129,14 +142,35 @@ class ModelGateway:
         ctx.meta.setdefault("model_route", []).append(
             f"{decision.reason}->{target or 'default'}"
         )
-        if target is None or self._registry is None:
-            # 无目标或未接注册表时无法映射实例，回退默认后端——兼容未装配注册表的旧行为。
+        if target == REFUSE_TARGET:
+            return RefuseExecution(reason="degraded to refusal; no backend invoked")
+        if target is None:
+            # 无目标：router 未显式指定 → 默认后端（设计允许的唯一下沉情形）。
             return self._llm
-        resolved = self._registry.resolve_llm(target)
+        resolved = self._registry.resolve_llm(target) if self._registry is not None else None
         if resolved is None:
-            # 降级目标必须可解析；静默回退默认模型会让熔断/降级形同虚设（ARCH-v5 红线）。
-            raise ValueError(f"degrade target not registered: {target!r}")
+            # 非空未注册目标：显式失败，绝不静默回退（ARCH-v5 红线）。
+            return TargetUnresolved(target=target)
         return resolved
+
+    @staticmethod
+    def _resolution_error_response(resolution: RefuseExecution | TargetUnresolved) -> LLMResponse:
+        """把终止型三态折叠为带稳定错误码前缀的 LLMResponse（as_call 再折为 Result）。
+
+        error 的前缀即稳定码（REFUSED / TARGET_UNRESOLVED），与三态 to_result() 同源常量。
+        """
+        code = REFUSED_CODE if isinstance(resolution, RefuseExecution) else TARGET_UNRESOLVED_CODE
+        return LLMResponse(
+            content="", tool_calls=[], usage=Usage(),
+            error=f"{code}: {resolution.reason if isinstance(resolution, RefuseExecution) else resolution.target}",
+        )
+
+    @staticmethod
+    def _raise_resolution_error(resolution: RefuseExecution | TargetUnresolved) -> NoReturn:
+        """流路径的终止型三态：抛带稳定码的 ValueError（经 runner 折叠为失败信封）。"""
+        code = REFUSED_CODE if isinstance(resolution, RefuseExecution) else TARGET_UNRESOLVED_CODE
+        detail = resolution.reason if isinstance(resolution, RefuseExecution) else resolution.target
+        raise ValueError(f"{code}: {detail}")
 
     def as_call(self) -> Callable[[Effect, object], object]:
         """给 R1 Runner 的 call 适配器：Effect→LLMRequest→complete→Result。
@@ -145,14 +179,14 @@ class ModelGateway:
         REFUSE → 真拒答 Result.failure("REFUSED")，绝不调后端、绝不回退默认模型。
         """
         async def adapter(effect: Effect, ctx: object) -> Result:
-            """R1 call 适配器：读降级目标 → 构造请求 → complete → 折叠 error 为 Result。"""
+            """R1 call 适配器：读降级目标 → 唯一决策点解析 → 折叠为 Result。"""
             # 规则 6 例外：degrade_target 是 RuntimeCtx 的声明字段（具名桥接，非裸 meta key），
             # 鸭子读取兼容测试用简单 ctx。
             target = getattr(ctx, "degrade_target", None)
 
             if target == REFUSE_TARGET:
-                # 拒答优先于一切：不解析、不缓存、不调用后端。
-                return Result.failure("REFUSED", "degraded to refusal; no backend invoked")
+                # 拒答优先于缓存与后端：在 as_call 层直接折叠，零解析零调用。
+                return RefuseExecution("degraded to refusal; no backend invoked").to_result()
 
             payload = effect.payload
             request = LLMRequest(
@@ -189,8 +223,13 @@ class ModelGateway:
             返回带 error="SCHEMA_INVALID: ..." 的响应（N3：不抛 ValueError 穿透成
             PORT_CRASHED；由 as_call 折叠为 Result.failure("SCHEMA_INVALID")）。
         """
+        # 拒答优先于缓存：先过唯一决策点，非 LLMPort 三态直接折叠，绝不读缓存或调后端。
+        resolution = self._resolve_llm(request, ctx, degrade_target=degrade_target)
+        if not isinstance(resolution, LLMPort):
+            return self._resolution_error_response(resolution)
+
         cached = await self._cache.get(request, version=self._prompt_version)
-        if cached is not None:  # 命中即短路：不再路由、不再调后端、不再记成本（usage 已随条目存好）
+        if cached is not None:  # 命中即短路：不再调后端、不再记成本（usage 已随条目存好）
             return cached
 
         # P2a singleflight：相同 key 的并发 miss 共享一次完整调用（含记账/校验/缓存），
@@ -207,7 +246,7 @@ class ModelGateway:
             )
             self._inflight[key] = inflight
             try:  # owner 独占后端调用；异常/取消必须广播给等待者，避免它们各自重试再次击穿
-                response = await self._complete_miss(request, ctx, degrade_target)
+                response = await self._complete_miss(request, ctx, resolution)
                 inflight.set_result(response)
             except BaseException as exc:
                 # 异常/取消传播给所有等待者（避免它们各自重试再次击穿）。
@@ -220,10 +259,11 @@ class ModelGateway:
         return await asyncio.shield(inflight)
 
     async def _complete_miss(
-        self, request: LLMRequest, ctx: PortCtx, degrade_target: str | None,
+        self, request: LLMRequest, ctx: PortCtx, llm: LLMPort,
     ) -> LLMResponse:
-        """一次未命中请求的完整链路：预留→路由→调用→记账→校验→缓存（singleflight 内执行一次）。
+        """一次未命中请求的完整链路：预留→调用→记账→校验→缓存（singleflight 内执行一次）。
 
+        llm 由调用方 complete() 经唯一决策点解析后传入（避免重复路由）；
         P2b：调用前按预估成本 reserve（并发硬闸），成功后 commit 按实际结算，
         失败/异常 cancel 释放预留——彻底消除"先调用后扣费"的并发击穿。
         """
@@ -238,7 +278,6 @@ class ModelGateway:
                 )
 
         try:  # 包住整条调用链：任何异常/取消都必须走到下面释放预留，不留悬空额度
-            llm = self._resolve_llm(request, ctx, degrade_target=degrade_target)
             response = await llm.complete(request, ctx)
             if response.error:  # 错误响应提前返回：不校验、不缓存；预留必须在此释放而非拖到结算
                 # 后端失败：释放预留、照实记账（usage 为零由响应自带）。
@@ -290,6 +329,11 @@ class ModelGateway:
         说明：
             流式路径禁用结构化校验（无法校验半截流），不经过 R1 Effect 循环。
         """
+        # 拒答优先于缓存：流路径先过唯一决策点；终止型三态抛稳定码错误，不吐缓存。
+        resolution = self._resolve_llm(request, ctx, degrade_target=degrade_target)
+        if not isinstance(resolution, LLMPort):
+            self._raise_resolution_error(resolution)
+
         cached = await self._cache.get(request, version=self._prompt_version)
         if cached is not None:  # 命中直接吐缓存文本，跳过预留/后端/结算（usage 已随条目存好）
             # 流式是 Port 层，ctx 是 PortCtx（无 hook trace）；缓存命中信息随响应走。
@@ -305,7 +349,7 @@ class ModelGateway:
                 raise ValueError("cost budget exceeded (CostGuard) before stream")
 
         chunks: list[str] = []
-        llm = self._resolve_llm(request, ctx, degrade_target=degrade_target)
+        llm = resolution
         try:  # 断流/取消也从这里传播；只有正常流末才结算，异常一律释放预留
             # LLMPort.stream 返回 AsyncIterator（PEP 525 签名），直接 async for 迭代。
             async for chunk in llm.stream(request, ctx):
@@ -347,6 +391,11 @@ class ModelGateway:
         self, request: LLMRequest, ctx: PortCtx, *, degrade_target: str | None = None
     ) -> AsyncIterator[StreamEvent]:
         """实现体：透传/包装后端事件，遇 USAGE 或流末 last_usage 结算，断流释放预留。"""
+        # 拒答优先于缓存：事件流先过唯一决策点；终止型三态抛稳定码错误。
+        resolution = self._resolve_llm(request, ctx, degrade_target=degrade_target)
+        if not isinstance(resolution, LLMPort):
+            self._raise_resolution_error(resolution)
+
         cached = await self._cache.get(request, version=self._prompt_version)
         if cached is not None:
             yield StreamEvent(kind=StreamEventKind.TEXT_DELTA, data=cached.content or "")
@@ -363,7 +412,7 @@ class ModelGateway:
 
         chunks: list[str] = []
         settled: Usage | None = None
-        llm = self._resolve_llm(request, ctx, degrade_target=degrade_target)
+        llm = resolution
         try:  # 同 stream：仅正常流末结算；异常/取消取消预留，绝不留半途账单
             # 后端有 stream_events 直接用；旧后端用帮助函数把文本流包成事件流。
             # 规则 6 例外：stream_events 是可选能力探测（具名固定字符串），不在 LLMPort 强制协议内。

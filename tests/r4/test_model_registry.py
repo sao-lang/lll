@@ -8,8 +8,6 @@ from __future__ import annotations
 
 import asyncio
 
-import pytest
-
 from hooks import HookCtx, LLMPort, LLMRequest, LLMResponse, PortCtx, Usage
 from runtime import AgentState, Effect, EffectKind
 
@@ -114,14 +112,19 @@ class TestDegradeTargetSwitchesEndpoint:
         assert r.content == "backup", "降级 target 未切到备用端点"
         assert backup.calls == 1 and primary.calls == 0
 
-    def test_unknown_target_raises_no_silent_fallback(self) -> None:
-        """未注册降级目标抛错，绝不静默回退默认模型（ARCH-v5 红线）。"""
+    def test_unknown_target_yields_target_unresolved_no_silent_fallback(self) -> None:
+        """未注册降级目标 → TARGET_UNRESOLVED 显式失败，绝不静默回退默认模型（ARCH-v5 红线）。
+
+        v5.3：原契约"抛 ValueError 折叠为 PORT_CRASHED"被三态设计取代——
+        TargetUnresolved.to_result() 产出稳定码 TARGET_UNRESOLVED（见 test_refuse.py）。
+        """
         primary = FakeLLM("primary")
         reg = InMemoryModelRegistry()
         reg.register_llm("primary", primary)
         gw = ModelGateway(llm=primary, registry=reg)
-        with pytest.raises(ValueError, match="not registered"):
-            asyncio.run(gw.complete(req(), pctx(), degrade_target="ghost"))
+        result = asyncio.run(gw.as_call()(_effect(), _ctx(target="ghost")))
+        assert not result.ok
+        assert result.error is not None and result.error.code == "TARGET_UNRESOLVED"
         assert primary.calls == 0
 
 

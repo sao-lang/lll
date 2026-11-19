@@ -1651,11 +1651,9 @@ host.plugin(MyGuard())
 | 图编排 execute 代码（Graph/branch/par/race 等） | R12 设计 v1.1 已完整，代码未实现 | R12 | 按 R12 §6.1 骨架实现 `src/archs/`+`src/compose/` |
 | 群聊/swarm 多 Agent 编排 | Handoff/Supervisor/Blackboard 设计有，群聊/swarm 无 | R8 增强 | 评估是否为必备；若是则补 Arch 第 11 种（需同步总设计"10 内置"口径） |
 | OTel/OTLP 接入规范 | profile 提"OTel"字样，无规范 | R10 | 设计时补 OTel span/metric 映射与导出契约 |
-| 工具 decorator 运行期实现 | R5 设计有 `@tool`，代码未实现 | R5 | R5 开发时实现 decorator+ToolSpec 生成 |
 | output parser / prompt 模板抽象 | 无独立抽象（结构化校验已有） | R4 增强 | 评估是否需要独立协议；结构化校验已覆盖大部分场景 |
 | 7 项设计缺失（B10/B11/G9/J10/N8/Q10/D13） | 设计态待补 | R5~R11 | 各模块开发前补齐设计到可写代码深度 |
 | R5~R13 剩余能力代码（约 82 项设计充分项） | 设计有、代码无 | R5~R13 | 按模块整块推进，每次完成一个模块 100% 项 |
-| **R4→R1 接线断链**：R1 `call(Effect,ctx)->Result` 与 R4 `ModelGateway.complete(LLMRequest,PortCtx)->LLMResponse` 签名不同，缺 Effect→LLM 适配器 | 两模块各自闭环，无生产接线 | R12 装配层 | composition root 实现时补适配器；这是 R1~R4 间唯一真缺代码的一环 |
 | **R1↔R2 / R3→R2 接线未装配**：函数已就绪（ctx_factory/_bind/ResilienceCapability.install）但无生产代码调用 | 接口就绪、无人串接 | R12 装配层 | composition root（Agent 装配器）统一注册，非模块遗漏 |
 | **M1-M6 构造参数生产注入**：dimension_of/idempotency_key/pool/pools/kinds/budgets/available+add_backend/failed_target_of 在 R1-R4 已实现读取端，但无生产装配者 | 读取端就绪、注入端缺位 | R12 装配层 | `Agent.build()` 从用户后端注册表/预算/池配置投影后构造注入（详见 R12 §6.1.3 注入表）；测试手填不算生产装配，非 R1-R4 遗漏 |
 | **SandboxPort.run(fn: Callable) 不可序列化** | 签名只够同进程执行，真进程/容器隔离拿不到可序列化代码 | R9 | 实现前改签名为可序列化 spec（code+entrypoint+args），否则沙盒承诺不可达 |
@@ -1663,6 +1661,10 @@ host.plugin(MyGuard())
 | **EvalPort.score 只给 case_id** | 评测器拿不到 expected/should_refuse，需自己查库 | R10 | 实现时签名改收 `EvalCase` 具名类型 |
 | **Telemetry 归因维度藏 meta / HumanPort resume 点不显式** | agent_id/user_id 靠 coerce 边界读；ask 无挂起 id | R9/R10 | 实现时显式化到协议字段 |
 
+> **2026-11-19 勾销（拷问复核，非静默删除）**：本表原有两行经代码复核已不属待办，移出并留证——
+> ①「工具 decorator 运行期实现（R5）」：`src/harness/tools/decorator.py:60` `tool()` 已实现，`tests/r5/test_decorator.py` 覆盖，R5 详设头部已标实现状态。
+> ②「R4→R1 接线断链，缺 Effect→LLM 适配器」：`src/harness/model/gateway.py:141` `as_call()` 已提供该适配器，`tests/r4/test_e2e_wiring.py` 已接线。二者仍属 R12 装配层调用问题，已归并入上一行「R1↔R2 / R3→R2 接线未装配」，不重复列待办。
+>
 > **协议可达性纪律**：新增/修改 Port 协议时，必须自问"实现者拿到的输入够不够兑现协议承诺的能力"，
 > 避免再次出现 SemanticCache 那种"协议名承诺语义、参数只给哈希"的名实分离。
 > 详见[《协议可达性审查》](./协议可达性审查-20261118.md)。

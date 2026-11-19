@@ -24,8 +24,24 @@ __all__ = [
     "LifecycleEvent",
     "Matcher",
     "Provider",
+    "ProviderRegistry",
     "Registry",
 ]
+
+
+@runtime_checkable
+class ProviderRegistry(Protocol):
+    """最小统一注册表视图（供 Host.registry 持有）。
+
+    R4 §6 要求 hook 总线与模型网关共用一份注册表；此协议只约束 register/has，
+    避免 hooks 反向依赖 harness.model（分层：hooks 不 import harness）。
+    """
+
+    name: str
+
+    def register(self, name: str, provider: Provider) -> object: ...
+
+    def has(self, name: str) -> bool: ...
 
 
 class DecisionAction(str, Enum):

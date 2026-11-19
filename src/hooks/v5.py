@@ -17,7 +17,7 @@ from typing import Protocol, cast, runtime_checkable
 
 from runtime import Effect, Result, RuntimeCtx
 
-from .types import Decision, DecisionAction, HookCtx
+from .types import Decision, DecisionAction, HookCtx, ProviderRegistry
 
 __all__ = [
     "AroundHook",
@@ -191,6 +191,11 @@ class Hook:
         BAIL/LOOP/PARALLEL → fn(scope, effect)；WATERFALL → fn(value, effect)；
         AROUND → fn(next, scope, effect)。装配期配置由插件构造参数私有持有。
         """
+        # R2-T06 组件留名：每次扩展点调用把已 tap 的插件名记入 trace（顺序即 tap 序）。
+        # 具名留痕供审计/诊断"谁参与了本次判决"，不改变任何 tap 的返回值或短路语义。
+        for plugin_name, _ in self._taps:
+            scope.trace.append(f"{self.name}:{plugin_name}")
+
         # kind 在装配期锁定、互斥，这里仅按语义把调用路由到对应实现；
         # PARALLEL 只有观察副作用、无业务返回值，故调用后统一回 None。
         if self.kind is HookKind.BAIL:
@@ -240,15 +245,16 @@ class Hook:
         raise RuntimeError(f"hook {self.name!r} exceeded max_loops={self.max_loops}")
 
     async def _call_parallel(self, scope: RequestScope, effect: Effect | None) -> None:
-        """PARALLEL：全执行、异常隔离、无返回值。"""
-        async def guarded(fn: TapFn) -> None:
-            """单个观察 tap：异常就地隔离，不影响其余 tap 与主流程。"""
+        """PARALLEL：全执行、异常隔离、无返回值；异常隔离但留痕（R2-T04 记 trace）。"""
+        async def guarded(name: str, fn: TapFn) -> None:
+            """单个观察 tap：异常就地隔离，不影响其余 tap 与主流程，但记 trace 供诊断。"""
             try:
                 await _maybe(fn(scope, effect))
-            except Exception:  # 观察类异常隔离  # noqa: BLE001, S110
-                pass
+            except Exception as exc:  # 观察类异常隔离  # noqa: BLE001
+                # R2-T04：异常不抛穿但必须留痕，否则观察插件静默失效无法察觉。
+                scope.trace.append(f"{self.name}:observe_error:{name}:{type(exc).__name__}")
 
-        await asyncio.gather(*(guarded(fn) for _, fn in self._taps))
+        await asyncio.gather(*(guarded(name, fn) for name, fn in self._taps))
 
     async def _call_around(
         self, scope: RequestScope, effect: Effect | None, *,
@@ -299,6 +305,9 @@ class Host:
         """装配宿主：预定义 6 个标准扩展点，冻结前可 define/plugin。"""
         self._hooks: dict[str, Hook] = {}
         self._plugins: list[Plugin] = []
+        # R4 §6 两表统一：host.registry 指向统一注册表（模型网关与 hook 总线同源）。
+        # 缺省 None——R12 装配层或 ModelCapability.install() 注入；非 R2 自身职责。
+        self.registry: ProviderRegistry | None = None
         self._frozen = False
         # scope 桥接：按 id(ctx) 关联（框架内部，不写进 ctx 或 scope.meta）
         self._scope_bridge: dict[int, RequestScope] = {}

@@ -18,23 +18,29 @@ from .structured import (
     StructuredOutputValidator, validate_json_schema,
 )
 from .types import (
+    BackendResolution,
     CacheKey,
     CostAttributor,
     CostGuard,
     CostRecord,
+    RefuseExecution,
     Reservation,
     RouteDecision,
     StructuredOutputSpec,
+    TargetUnresolved,
     UsageLedger,
     build_cache_key,
     cache_key_string,
 )
 
 __all__ = [
+    "BackendResolution",
     "CacheKey",
     "CostAttributor",
     "CostGuard",
     "CostRecord",
+    "RefuseExecution",
+    "TargetUnresolved",
     "Reservation",
     "CachePort",
     "CacheStore",

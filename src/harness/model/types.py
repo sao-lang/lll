@@ -13,21 +13,58 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from hooks import LLMRequest, Usage
-from runtime import DynamicValue
+from hooks import LLMPort, LLMRequest, Usage
+from runtime import DynamicValue, Result
 
 __all__ = [
+    "BackendResolution",
     "CacheKey",
     "CostAttributor",
     "CostGuard",
     "CostRecord",
+    "RefuseExecution",
     "Reservation",
     "RouteDecision",
     "StructuredOutputSpec",
+    "TargetUnresolved",
     "UsageLedger",
     "build_cache_key",
     "cache_key_string",
 ]
+
+
+# ---- R4 §2.2 / §5.4 降级解析三态（v5 唯一决策点返回值，不回退默认模型）----
+# 稳定错误码集中为模块常量（规则 5 禁魔法串），R4-T09/T10 断言这两个 code。
+REFUSED_CODE = "REFUSED"
+TARGET_UNRESOLVED_CODE = "TARGET_UNRESOLVED"
+
+
+@dataclass(frozen=True, slots=True)
+class RefuseExecution:
+    """降级末级拒答：产出 REFUSED 失败，绝不调用任何 LLMPort。"""
+
+    reason: str
+
+    def to_result(self) -> Result:
+        """折叠为稳定失败信封（ok=False，retryable=False）。"""
+        return Result.failure(REFUSED_CODE, self.reason)
+
+
+@dataclass(frozen=True, slots=True)
+class TargetUnresolved:
+    """降级目标非空但未注册：显式失败，绝不静默回退默认模型。"""
+
+    target: str
+
+    def to_result(self) -> Result:
+        """折叠为稳定失败信封（带未解析 target 便于诊断）。"""
+        return Result.failure(
+            TARGET_UNRESOLVED_CODE, f"degrade target not registered: {self.target}"
+        )
+
+
+# 三态联合：LLMPort（切后端）/ RefuseExecution（拒答）/ TargetUnresolved（显式失败）。
+type BackendResolution = LLMPort | RefuseExecution | TargetUnresolved
 
 
 class StructuredOutputSpec(BaseModel):
