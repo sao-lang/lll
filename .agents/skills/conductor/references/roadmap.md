@@ -42,7 +42,7 @@
 - 纪律：只给带源码位置的上下文非验证答案；冷启动有成本，短任务不用；不替代 scan_gaps。
 
 ### 依赖安装 + skill 加载纪律（2026-11-19）
-- 背景：其他会话用 dev-workflow 时 AI 未加载 handoff。根因是 handoff 当时未安装（只给了仓库地址）。
+- 背景：其他会话用 conductor 时 AI 未加载 handoff。根因是 handoff 当时未安装（只给了仓库地址）。
 - 已装齐 11 个 skill：superpowers / grill-design / grill-me / code-quality-review /
   handoff / metago-code-review-deep / graphify（市场）+ ponytail / ponytail-review /
   caveman / caveman-compress（从 GitHub 仓库复制到用户级目录）。

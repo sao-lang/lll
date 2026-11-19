@@ -5,7 +5,7 @@
 
 ## 通用前置（所有场景必做）
 
-1. 依赖预检：运行 `python .agents/skills/dev-workflow/scripts/preflight.py --project-root .`，缺失项先解决或显式登记例外。
+1. 依赖预检：运行 `python .agents/skills/conductor/scripts/preflight.py --project-root .`，缺失项先解决或显式登记例外。
 2. 建 overview：`overviews/YYYY-MM-DD/YYYYMMDD-HHMM-主题.md`（见 `overview.md`）。
 3. 读上次 handoff（若有）：定位上次 suggested skills 与未完成项。
 4. 场景路由声明：向用户说清"本轮场景 / 加载哪些 skill / 禁止项 / 下一站"。
@@ -174,8 +174,8 @@
 先用脚本生成草稿，再人工逐条核实——脚本给线索，判断归 AI，两者都不省：
 
 ```bash
-python .agents/skills/dev-workflow/scripts/scan_gaps.py --path src     # 缺口台账草稿
-python .agents/skills/dev-workflow/scripts/verify.py --lang <lang>    # 验证命令退出码
+python .agents/skills/conductor/scripts/scan_gaps.py --path src     # 缺口台账草稿
+python .agents/skills/conductor/scripts/verify.py --lang <lang>    # 验证命令退出码
 ```
 
 逐条核对（每项需拿证据：文件:行号 / 测试输出 / 覆盖率），拿不出证据不得标完成：

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """会话预检：检查外部 skill 与验证工具是否就位，缺失即给安装命令。
 
-用途：dev-workflow 的 S0 阶段运行。skill-matrix.md 声明的依赖若未安装，
+用途：conductor 的 S0 阶段运行。skill-matrix.md 声明的依赖若未安装，
 流程会形同虚设——本脚本把"依赖是否真的可用"变成可执行检查。
 
 退出码：0 = 全部就位；1 = 有缺失（缺失项已在输出中列出并附安装方式）。
@@ -61,7 +61,7 @@ def tool_present(cmd: str) -> bool:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="dev-workflow 会话预检")
+    ap = argparse.ArgumentParser(description="conductor 会话预检")
     ap.add_argument("--project-root", default=".", help="项目根路径，默认当前目录")
     ap.add_argument("--langs", nargs="*", default=None,
                     help="只检查这些语言的工具；默认检查全部语言工具（仅报告，不强制全装）")

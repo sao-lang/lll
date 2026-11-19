@@ -1,9 +1,12 @@
 ---
-name: dev-workflow
+name: conductor
 description: 通用的 AI 开发工作流治理外壳。当收到开发、重构、修 bug、项目初始化、迭代、或"拷问代码/设计"类需求时，本 skill 应被加载：它负责场景路由、会话记录、缺口台账自省、代码规则约束与收尾交接，并显式声明每个阶段应加载哪些其他 skill。它以 superpowers 等工程方法论为流程主控，本身不重述工程步骤，只做治理与补强。适用于 Claude Code、Codex、OpenCode、Droid 等支持 SKILL.md 的通用 agent。
 ---
 
-# dev-workflow · 开发工作流治理外壳
+# conductor · 开发工作流治理外壳
+
+> 名字取自"指挥家"：本 skill 不亲自演奏工程步骤，而是编排 superpowers、grill-design、
+> code-quality-review、handoff 等一众 skill 各司其职——编排而不亲自动手，正是治理外壳的职责。
 
 ## 定位（必读）
 
@@ -126,9 +129,9 @@ description: 通用的 AI 开发工作流治理外壳。当收到开发、重构
 
 本 skill 目录为通用结构，各 agent 按自身约定纳入即可：
 
-- Claude Code：将本目录放到 `.claude/skills/dev-workflow/`，或用 skills CLI `npx skills add <repo> --skill dev-workflow`。
-- Codex：放到 `.codex/skills/dev-workflow/`。
-- OpenCode：放到 `.opencode/skill/dev-workflow/` 或 `.config/opencode/skill/`。
+- Claude Code：将本目录放到 `.claude/skills/conductor/`，或用 skills CLI `npx skills add <repo> --skill conductor`。
+- Codex：放到 `.codex/skills/conductor/`。
+- OpenCode：放到 `.opencode/skill/conductor/` 或 `.config/opencode/skill/`。
 - 其他：只要 agent 支持读取 SKILL.md 的 `name`/`description` 作为触发元数据，即可加载本目录。
 
 本 skill 不依赖任何特定 agent 的内置工具名；"加载 skill""读文件""跑命令"等动作在所有 agent 中等价表达。

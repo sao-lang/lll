@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """规则验证：按语言执行 coding-rules-<lang>.md 中的验证命令，汇总退出码。
 
-用途：dev-workflow 的 S4 自省阶段。把"AI 声称遵守规则"变成"工具退出码为证据"。
+用途：conductor 的 S4 自省阶段。把"AI 声称遵守规则"变成"工具退出码为证据"。
 输出可直接贴进 overview 的"验证结果"一节。
 
 退出码：0 = 全部命令通过；1 = 有失败或命令缺失。
@@ -62,7 +62,7 @@ def run_one(cmd: str, cwd: Path, timeout: int) -> Result:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="dev-workflow 规则验证汇总")
+    ap = argparse.ArgumentParser(description="conductor 规则验证汇总")
     ap.add_argument("--lang", required=True, choices=LANGS, help="要验证的语言")
     ap.add_argument("--cwd", default=".", help="命令执行目录（项目根）")
     ap.add_argument("--timeout", type=int, default=300, help="单命令超时秒数")

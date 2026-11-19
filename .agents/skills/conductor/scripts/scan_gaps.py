@@ -82,7 +82,7 @@ def scan(root: Path, exts: set[str]) -> list[Hit]:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="dev-workflow 缺口扫描（草稿）")
+    ap = argparse.ArgumentParser(description="conductor 缺口扫描（草稿）")
     ap.add_argument("--path", default=".", help="源码根路径")
     ap.add_argument("--exts", default=".py,.ts,.tsx,.vue,.go,.rs,.dart",
                     help="扫描扩展名，逗号分隔")

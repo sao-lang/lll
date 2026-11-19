@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""把项目内的 dev-workflow skill 同步到 WorkBuddy 全局 skills 目录。
+"""把项目内的 conductor skill 同步到 WorkBuddy 全局 skills 目录。
 
 背景：Windows 无符号链接权限，全局安装采用复制，两份独立。
-本项目 .agents/skills/dev-workflow 是唯一真相源；改完跑本脚本同步到 ~/.workbuddy/skills/。
+本项目 .agents/skills/conductor 是唯一真相源；改完跑本脚本同步到 ~/.workbuddy/skills/。
 
 用法：
     python scripts/sync-global.py              # 同步（覆盖全局副本）
@@ -16,8 +16,8 @@ import shutil
 import sys
 from pathlib import Path
 
-SKILL_ROOT = Path(__file__).resolve().parents[1]          # .agents/skills/dev-workflow
-GLOBAL_ROOT = Path.home() / ".workbuddy" / "skills" / "dev-workflow"
+SKILL_ROOT = Path(__file__).resolve().parents[1]          # .agents/skills/conductor
+GLOBAL_ROOT = Path.home() / ".workbuddy" / "skills" / "conductor"
 
 
 def rel_files(root: Path) -> list[Path]:
@@ -25,7 +25,7 @@ def rel_files(root: Path) -> list[Path]:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="同步 dev-workflow 到全局 skills 目录")
+    ap = argparse.ArgumentParser(description="同步 conductor 到全局 skills 目录")
     ap.add_argument("--dry-run", action="store_true", help="只列出差异，不复制")
     args = ap.parse_args()
 
