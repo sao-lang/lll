@@ -6,7 +6,9 @@ from __future__ import annotations
 
 import asyncio
 
-from aop import AOPContainer, FaultRecord, Invocation, Verdict, Warden
+from compose.context import FaultRecord, Invocation, Verdict
+
+from compose import AOPContainer, Warden
 from runtime import Invoke, Result, Runner, Session, Terminate
 
 from harness.model import ModelCapability
@@ -21,7 +23,7 @@ class _FakeLLM2:
 
     async def complete(self, request, ctx):
         self.calls += 1
-        from hooks.dto import LLMResponse, Usage
+        from compose import LLMResponse, Usage
         return LLMResponse(content=self.name, usage=Usage(prompt_tokens=1, completion_tokens=1))
 
     async def stream(self, request, ctx):
@@ -29,7 +31,7 @@ class _FakeLLM2:
 
     @property
     def last_usage(self):
-        from hooks.dto import Usage
+        from compose import Usage
         return Usage(prompt_tokens=1, completion_tokens=1)
 
 
@@ -95,7 +97,7 @@ class _ErrorLLM:
 
     async def complete(self, request, ctx):
         self.calls += 1
-        from hooks.dto import LLMResponse, Usage
+        from compose import LLMResponse, Usage
         if self.fail:
             return LLMResponse(content="", error="500:backend down", usage=Usage())
         return LLMResponse(content=self.name, usage=Usage(prompt_tokens=1))
@@ -105,7 +107,7 @@ class _ErrorLLM:
 
     @property
     def last_usage(self):
-        from hooks.dto import Usage
+        from compose import Usage
         return Usage(prompt_tokens=1)
 
 

@@ -1,7 +1,7 @@
 """R4-T4 成本归因测试：per-run/user/model 正确累计 + 预算硬强制（红线：路由/重试不得绕过 Budgets）。"""
 from __future__ import annotations
 
-from hooks import LLMResponse, Usage
+from compose import LLMResponse, Usage
 
 from harness.model import CostAttributor, CostGuard, CostRecord
 from tests.r4.conftest import pctx

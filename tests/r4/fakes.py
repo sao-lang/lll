@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
-from hooks import LLMRequest, LLMResponse, PortCtx, StreamEvent, Usage
+from compose import LLMRequest, LLMResponse, PortCtx, StreamEvent, Usage
 
 __all__ = ["RecordingLLM", "StreamLLM", "EventStreamLLM"]
 
@@ -82,7 +82,7 @@ class EventStreamLLM:
 
     async def complete(self, req: LLMRequest, ctx: PortCtx) -> LLMResponse:
         """一次性补全：拼接所有 TEXT_DELTA。"""
-        from hooks import StreamEventKind
+        from compose import StreamEventKind
         text = "".join(
             e.data for e in self._events
             if e.kind is StreamEventKind.TEXT_DELTA and isinstance(e.data, str)
@@ -91,11 +91,11 @@ class EventStreamLLM:
 
     def stream(self, req: LLMRequest, ctx: PortCtx) -> AsyncIterator[str]:
         """文本视图：只产出 TEXT_DELTA 的 data。"""
-        from hooks import StreamEventKind
+        from compose import StreamEventKind
         return self._text_stream()
 
     async def _text_stream(self) -> AsyncIterator[str]:
-        from hooks import StreamEventKind
+        from compose import StreamEventKind
         for e in self._events:
             if e.kind is StreamEventKind.TEXT_DELTA and isinstance(e.data, str):
                 yield e.data

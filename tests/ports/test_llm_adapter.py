@@ -9,7 +9,7 @@ import json
 
 import httpx
 
-from hooks import LLMPort, LLMRequest, PortCtx
+from compose import LLMPort, LLMRequest, PortCtx
 from ports.adapters.llm import OpenAICompatLLM
 
 

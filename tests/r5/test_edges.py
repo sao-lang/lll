@@ -10,7 +10,7 @@ from tempfile import TemporaryDirectory
 
 import pytest
 
-from hooks import DangerLevel, DisclosurePacket, PortCtx, ToolSpec, make_call
+from compose import DangerLevel, DisclosurePacket, PortCtx, ToolSpec, make_call
 from harness.skills import FileSkillProvider, KeywordInjectionDetector
 from harness.tools import (
     MCPManager, ToolIndex, ToolRegistry, ToolsCapability, WebFetchTool, tool,

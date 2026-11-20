@@ -1,15 +1,17 @@
-"""R3 AOP 角色方法覆盖：CircuitBreaker guard/observe/wrap、BudgetGuard.refine、
+"""R3 AOP 角色方法覆盖：CircuitBreaker guard/observe/wrap、
 extra 插件各角色分派。这些方法在 P4 插件迁入 AOP 后承担核心语义。
 """
 from __future__ import annotations
 
 import asyncio
 
-from aop import Envelope, Invocation, Prelude, Refiner, Verdict, Warden
+from compose.context import Invocation, Verdict
+
+from compose import Envelope, Prelude, Refiner, Warden
 from runtime import AgentState, Budgets, Invoke, Result
 
 from harness.resilience import (
-    BreakerStatus, BudgetGuard, CircuitBreaker, InMemoryBreakerStore,
+    BreakerStatus, CircuitBreaker, InMemoryBreakerStore,
     ResilienceCapability,
 )
 from tests.r3.conftest import err_result, make_ctx, ok_result
@@ -79,32 +81,10 @@ class TestBreakerRoles:
         assert cb._dimension(make_ctx()) is None
 
 
-class TestBudgetGuardRefine:
-    def test_refine_writes_meta_hint(self) -> None:
-        """Refiner.refine：达软阈值且 ctx.state.budgets 投影存在时写 meta hint。"""
-        tight = Budgets(max_turns=10, used_turns=9)
-        guard = BudgetGuard(soft=0.8, budgets=tight)
-        # 构造带 state.budgets 的 ctx（Refiner 从 RuntimeCtx.state.budgets 取投影）
-        ctx = type("Ctx", (), {"state": AgentState(budgets=tight), "meta": {}})()
-        inv = Invocation(
-            effect=Invoke(port="llm", payload={}), ctx=ctx,
-            session=type("S", (), {"session_id": "bg"})(), meta={},
-        )
-        out = asyncio.run(guard.refine(inv))
-        assert "budget_hint" in out.meta
-
-    def test_refine_noop_below_threshold(self) -> None:
-        """未达阈值：Refiner 原样返回，不写 meta。"""
-        guard = BudgetGuard(soft=0.8, budgets=Budgets(max_turns=10, used_turns=1))
-        inv = make_ctx()
-        out = asyncio.run(guard.refine(inv))
-        assert "budget_hint" not in out.meta
-
-
 class TestExtraPluginRoleDispatch:
     def test_extra_roles_dispatched(self) -> None:
         """extra_plugins 中的五角色实例按角色分派（覆盖鸭子分派分支）。"""
-        from aop import AOPContainer
+        from compose import AOPContainer
         class CW(Warden):
             name = "cw"
             async def guard(self, inv): return Verdict(allowed=True)
@@ -131,7 +111,7 @@ class TestExtraPluginRoleDispatch:
 
     def test_multi_envelope_composition_no_breakpoint(self) -> None:
         """多 Envelope（Bulkhead/Retry/Timeout）+ Salvage 组合执行无断点。"""
-        from aop import AOPContainer
+        from compose import AOPContainer
         from harness.resilience import (
             Bulkhead, DegradeLadder, DegradeMode, DegradeStep, Degradation, RetryPolicy, Timeout,
         )

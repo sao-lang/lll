@@ -14,7 +14,7 @@ import pytest
 
 from harness.skills import KeywordInjectionDetector
 from harness.tools import WebFetcher, WebFetchTool
-from hooks import PortCtx
+from compose import PortCtx
 from ports.adapters.webfetch import HttpFetcher
 
 _Handler = Callable[[httpx.Request], httpx.Response]

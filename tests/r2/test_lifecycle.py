@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import pytest
 
-from aop import Invocation
-from hooks import LifecycleBus, LifecyclePhase, Notice, PHASE_COUNT
+from compose import Invocation
+from compose import LifecycleBus, LifecyclePhase, Notice, PHASE_COUNT
 from runtime import AgentState, Invoke, Session
 
 

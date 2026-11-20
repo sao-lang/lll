@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
-from hooks import LLMPort, LLMRequest, PortCtx, StreamEvent, StreamEventKind
+from compose import LLMPort, LLMRequest, PortCtx, StreamEvent, StreamEventKind
 
 __all__ = ["has_stream_events", "wrap_text_stream"]
 

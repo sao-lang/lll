@@ -24,7 +24,7 @@ SRC = ROOT / "src"
 
 TARGETS = {
     "r1": [SRC / "runtime", ROOT / "tests" / "demos" / "demo_r1.py", ROOT / "tests" / "r1"],
-    "r2": [SRC / "hooks", ROOT / "tests" / "demos" / "demo_r2.py", ROOT / "tests" / "r2"],
+    "r2": [SRC / "compose", ROOT / "tests" / "demos" / "demo_r2.py", ROOT / "tests" / "r2"],
     "r3": [SRC / "harness" / "resilience", ROOT / "tests" / "demos" / "demo_r3.py", ROOT / "tests" / "r3"],
     "r4": [SRC / "harness" / "model", ROOT / "tests" / "demos" / "demo_r4.py", ROOT / "tests" / "r4"],
     "r5": [SRC / "harness" / "tools", SRC / "harness" / "skills",
@@ -33,6 +33,7 @@ TARGETS = {
            ROOT / "tests" / "r6"],
     "r7": [SRC / "harness" / "context", SRC / "harness" / "memory",
            ROOT / "tests" / "demos" / "demo_r7.py", ROOT / "tests" / "r7"],
+    "r12": [SRC / "compose", ROOT / "tests" / "demos" / "demo_r12.py", ROOT / "tests" / "r12"],
 }
 
 FORBIDDEN_IN_PROGRAM = (
@@ -108,30 +109,34 @@ def _declares_name(cls_node: ast.ClassDef) -> bool:
 
 
 def scan_r2(files: list[Path]) -> list[str]:
-    """R2 红线：四要素留名 + 共用 Registry + AOP/Lifecycle 具名契约。
+    """R2 红线：算子核心就位 + 内部编排槽位协议具名契约（规格 P2/D-3）。
 
-    三体系（Port/AOP/Lifecycle）后，扩展点不再是单一 Hook 族：
-    - AOP 五角色增强器（Warden/Envelope/Refiner/Salvage/Prelude）须声明 name；
-    - Lifecycle 插件须 name + register(bus)；
-    - 共用 Registry 是唯一 Provider 注册容器。
+    算子核心架构后，call 链内部编排槽位（原五角色归位）定义为类型协议，须存在；
+    AOP 五角色框架概念已取消（src/aop/ 删除）。
     """
     violations: list[str] = []
-    # AOP 包与五角色协议必须真实存在（declared in aop/protocols.py）。
-    protocols = SRC / "aop" / "protocols.py"
+    # call 链内部编排槽位协议必须在组合层真实存在（declared in compose/chain_roles.py）。
+    protocols = SRC / "compose" / "chain_roles.py"
     if not protocols.exists():
-        violations.append("AOP 五角色协议缺失（src/aop/protocols.py）")
+        violations.append("call 链编排槽位协议缺失（src/compose/chain_roles.py）")
     else:
         text = protocols.read_text(encoding="utf-8")
         for role in ("class Prelude", "class Warden", "class Envelope", "class Refiner", "class Salvage"):
             if role not in text:
-                violations.append(f"AOP 角色协议缺失: {role}")
+                violations.append(f"编排槽位协议缺失: {role}")
+    # AOP 包已删除（D-3/ D-10）：不得残留。
+    if (SRC / "aop").exists():
+        violations.append("残留 src/aop/（规格 D-10 要求删除，不留兼容层）")
     # 对外 API 里不应残留旧 Hook 工厂/Host 注册 API。
-    init = SRC / "hooks" / "__init__.py"
+    init = SRC / "compose" / "__init__.py"
     if init.exists():
         text = init.read_text(encoding="utf-8")
         for banned in ("Host", "HookKind", "RequestScope", "HookCtx", "Decision"):
             if re.search(rf"\b{banned}\b", text):
-                violations.append(f"hooks/__init__.py 残留旧符号: {banned}")
+                violations.append(f"compose/__init__.py 残留旧符号: {banned}")
+    # hooks 包已整包删除（R2 取消，规格 P2）：不得复辟。
+    if (SRC / "hooks").exists():
+        violations.append("残留 src/hooks/（R2 取消，规格 P2 要求资产归位后删除）")
     # 增强器/插件类须声明 name（具名留名纪律）。
     for path in files:
         if not (path.is_relative_to(ROOT / "tests")):
@@ -435,9 +440,61 @@ def scan_r7(files: list[Path]) -> list[str]:
     return violations
 
 
+def scan_r12(files: list[Path]) -> list[str]:
+    """R12 算子核心红线（规格 §2/D-4）：10 算子齐全 + AOP 无残留 + 算子纯度。
+
+    检查：
+        - src/compose/program.py 定义 10 个 A 类算子；
+        - 无 src/aop/（D-10 不留兼容层）；
+        - 算子不持有实例流程状态（禁 self.<进度> 赋值，D-8）。
+    """
+    violations: list[str] = []
+    program = SRC / "compose" / "program.py"
+    if not program.exists():
+        violations.append("算子核心缺失：src/compose/program.py")
+    else:
+        text = program.read_text(encoding="utf-8")
+        for op in ("seq", "par", "branch", "race", "loop", "map_state",
+                   "map_effect", "fallback", "gate", "retry"):
+            if f"def {op}(" not in text:
+                violations.append(f"A 类算子缺失: {op}")
+    if (SRC / "aop").exists():
+        violations.append("残留 src/aop/（D-10 要求删除）")
+    # P6：10 内置架构齐全（A 类算子预设配方）
+    archs = SRC / "archs" / "recipes.py"
+    if not archs.exists():
+        violations.append("内置架构缺失：src/archs/（P6）")
+    else:
+        at = archs.read_text(encoding="utf-8")
+        for arch in ("ToolUse", "ReAct", "PlanExecute", "Reflection", "Router",
+                     "RouterSkill", "Supervisor", "Handoff", "Blackboard", "Graph"):
+            if f"class {arch}" not in at:
+                violations.append(f"内置架构缺失: {arch}（P6）")
+    # P4/P5/P7/P8：ToolLayer build() 外壳齐全
+    for cap, module in (("model", "src/harness/model/capability.py"),
+                        ("tools", "src/harness/tools/capability.py"),
+                        ("rag", "src/harness/rag/pipeline.py"),
+                        ("context", "src/harness/context/manager.py")):
+        cp = SRC.parent / module
+        if cp.exists() and "def build(self)" not in cp.read_text(encoding="utf-8"):
+            violations.append(f"ToolLayer build() 缺失: {cap}（P4-P8）")
+    # P4/P8：领域字段不进 R2 基础 Port
+    proto = SRC / "compose" / "ports.py"
+    if proto.exists():
+        pt = proto.read_text(encoding="utf-8")
+        # 宽松检查：LLMPort/MemoryPort 类体内不应声明 last_usage/recall 成员
+        import re as _re
+        for cls, field in (("LLMPort", "last_usage"), ("MemoryPort", "recall")):
+            m = _re.search(rf"class {cls}\(.*?\n(?=class |\Z)", pt, _re.S)
+            if m and _re.search(rf"^\s+(?:{field}\s*:|def\s+{field}\b)", m.group(0), _re.M):
+                violations.append(f"{field} 未归位，仍在 R2 {cls} 基础 Port（P4/P8）")
+    return violations
+
+
 SCANNERS = {
     "r1": scan_r1, "r2": scan_r2, "r3": scan_r3,
     "r4": scan_r4, "r5": scan_r5, "r6": scan_r6, "r7": scan_r7,
+    "r12": scan_r12,
 }
 
 

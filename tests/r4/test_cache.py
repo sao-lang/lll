@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 
-from hooks import LLMRequest
+from compose import LLMRequest
 
 from harness.model import CachePort, ExactCache, SimilarityCache
 from tests.r4.conftest import resp

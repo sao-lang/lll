@@ -8,8 +8,8 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from aop import AOPContainer
-from hooks import HookBusError, LLMPort, LLMRequest, LLMResponse, PortCtx, Registry, Usage
+from compose import AOPContainer
+from compose import HookBusError, LLMPort, LLMRequest, LLMResponse, PortCtx, Registry, Usage
 
 from harness.model import InMemoryModelRegistry, ModelCapability, RuleRouter
 from tests.r4.conftest import pctx

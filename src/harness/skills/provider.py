@@ -4,7 +4,7 @@
 并给出可替换的注入检测器协议 ``InjectionDetector`` 与内置默认 ``KeywordInjectionDetector``。
 关键纪律：正文加载是 L3 披露的最后一环，命中注入必须 fail closed（规则 5 用 Enum 表达裁决，
 禁止魔法串）；manifest 的磁盘形态用 TypedDict 显式声明（规则 4），动态 JSON 只在解析一处 cast（规则 6）。
-公共 API 见 docs/02-模块详设/Agent/R5-渐进式披露.md；协议契约见 src/hooks/protocols.py::SkillPort。
+公共 API 见 docs/02-模块详设/Agent/R5-渐进式披露.md；协议契约见 src/compose/ports.py::SkillPort。
 """
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Protocol, TypedDict, cast, runtime_checkable
 
-from hooks import SkillManifest
+from compose import SkillManifest
 
 __all__ = [
     "InjectionVerdict",

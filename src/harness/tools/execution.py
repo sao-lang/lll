@@ -14,7 +14,9 @@ import os
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from hooks import DangerLevel, PortCtx, SandboxPort, ToolSpec
+from compose import PortCtx, SandboxPort, ToolSpec
+
+from .types import DangerLevel
 from runtime import DynamicValue
 
 __all__ = ["CodeExecTool", "FileExecTool", "ShellExecTool"]

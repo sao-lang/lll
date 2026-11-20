@@ -20,7 +20,7 @@ import math
 from difflib import SequenceMatcher
 from typing import Protocol, TypedDict, cast, runtime_checkable
 
-from hooks import LLMRequest, LLMResponse
+from compose import LLMRequest, LLMResponse
 
 from .types import build_cache_key
 

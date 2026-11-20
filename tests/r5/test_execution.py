@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 
-from hooks import DangerLevel, PortCtx, ToolResult
+from compose import DangerLevel, PortCtx, ToolResult
 from harness.tools import CodeExecTool, FileExecTool, ShellExecTool
 
 from .conftest import FakeSandbox

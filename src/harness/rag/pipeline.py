@@ -28,7 +28,9 @@ from harness.rag.types import (
     TokenBudget,
 )
 from harness.skills import InjectionDetector
-from hooks import PortCtx
+from compose.tool_layer import layer_program
+from compose import PortCtx
+from runtime import Program
 
 __all__ = ["PIPELINE_NAME", "CachePort", "InMemoryCache", "RAGPipeline"]
 
@@ -237,6 +239,14 @@ class RAGPipeline:
             # S4：登记本实例写入的 key，供 ingest 后逐 key 失效（FR-2）。
             self._cache_keys.add(cache_key)
         return result
+
+    def build(self) -> Program:
+        """ToolLayer 外壳（规格 P7）：产出"用 RAG"的 Program 工厂。
+
+        九注入点内部不改（query 链照旧）；外壳只给 R1 领域无知的 Program，
+        供"挑选 + A 类组合 + R1 只认 Program"试点验证（tests/r12/test_r6_pilot.py）。
+        """
+        return layer_program("rag", payload={"layer": "rag"})()
 
     def with_(self, **replacements: object) -> RAGPipeline:
         """不可变替换：返回注入点被替换的新实例，原实例不变（S1）。

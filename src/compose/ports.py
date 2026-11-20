@@ -1,4 +1,4 @@
-"""R2 Port 协议族：全部外部能力的接口契约，一次定齐。
+"""Port 协议族：全部外部能力的接口契约（原 R2 hooks/protocols.py 归位组合层，规格 P2）。
 
 运行时只认 Protocol 不认实现；替换实现 = registry.register(name, adapter)。
 所有适配器公共契约：无会话状态（ctx 传递）、异常折叠为 Result、带 name。
@@ -30,23 +30,19 @@
     EventStreamPort  InMemoryEventStream    R10 src/harness/observability/（待实现）
 
 "待实现"指对应模块尚未开发；装配层（R12/R13）在用户未注入时注册这些默认实例。
-公共 API 见 docs/02-模块详设/Agent/R2-插件总线与协议.md §4。
+公共 API 见 docs/02-模块详设/Agent/R13-可插拔与协议契约.md。
 """
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractContextManager
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from runtime import DynamicValue
 
-if TYPE_CHECKING:
-    # R7 记忆召回 DTO：仅在类型检查期引用，避免 R2 协议层反向依赖 harness 能力层。
-    from harness.memory.types import MemoryItem, MemoryQuery
-
 from .dto import (
     DisclosurePacket, LLMRequest, LLMResponse, PortCtx, SkillManifest,
-    ToolCall, ToolResult, ToolSpec, Usage,
+    ToolCall, ToolResult, ToolSpec,
 )
 
 __all__ = [
@@ -72,14 +68,12 @@ __all__ = [
 
 @runtime_checkable
 class LLMPort(Protocol):
-    """LLM 能力：一次性补全与流式补全。"""
-    name: str
-    last_usage: Usage | None
-    """最近一次调用的 token/成本结算数据；流式路径结束后由网关读取并记账。
+    """LLM 能力：一次性补全与流式补全（R2 基础 Port，领域字段不进）。
 
-    为何是协议成员：SSE 流的文本块不携带 usage，真实后端（OpenAI 需 stream_options.include_usage）
-    必须在末块收齐后写入本属性，否则成本无法结算。网关不估算、不兜零。
+    last_usage（流式 usage 结算）已归位到 R4 扩展协议 LLMPortWithUsage
+    （src/harness/model/ports.py，规格 P4）；基础 Port 不反向依赖模型领域。
     """
+    name: str
 
     async def complete(self, req: LLMRequest, ctx: PortCtx) -> LLMResponse:
         """一次性补全：返回结构化响应（含 tool_calls 与 usage）；同时写 last_usage。"""
@@ -166,7 +160,11 @@ class DisclosureIndex(Protocol):
 
 @runtime_checkable
 class MemoryPort(Protocol):
-    """记忆能力：按命名空间读写。"""
+    """记忆能力：按命名空间读写（R2 基础 Port，领域字段不进）。
+
+    recall（语义召回）已归位到 R7 扩展协议 MemoryPortWithRecall
+    （src/harness/context/ports.py，规格 P8）；DTO 由 R7 自有类型承载。
+    """
     name: str
 
     async def read(self, namespace: str, key: str, ctx: PortCtx) -> DynamicValue:
@@ -179,14 +177,6 @@ class MemoryPort(Protocol):
 
     async def forget(self, namespace: str, key: str, ctx: PortCtx) -> None:
         """遗忘指定记忆（TTL 或显式删除）。"""
-        ...
-
-    async def recall(self, query: MemoryQuery, ctx: PortCtx) -> list[MemoryItem]:
-        """语义召回：按查询返回相关记忆项（R7 additive，2026-11-20）。
-
-        DTO 由 R7 自有类型承载（不复用 R6 Query），经 TYPE_CHECKING 前向引用，
-        保持 R2 协议层不反向依赖 harness 能力层。
-        """
         ...
 
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 
-from hooks import PORT_PROTOCOLS
+from compose import PORT_PROTOCOLS
 
 from harness.rag.pipeline import RAGPipeline
 from harness.rag.post import DefaultPostProcessor

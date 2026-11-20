@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from hooks import DisclosureIndex, PortCtx, Registry, ToolPort
+from compose import DisclosureIndex, PortCtx, Registry, ToolPort
 from harness.tools import MCPManager, ToolIndex, ToolRegistry, ToolsCapability, tool
 from harness.skills import FileSkillProvider
 
@@ -45,7 +45,7 @@ def test_capability_with_injected_parts(tmp_path: Path) -> None:
 def test_static_check_flags_missing_danger(tmp_path: Path) -> None:
     """装配期 static_check：danger 缺失/重名/高危无沙盒 全被列出。"""
     reg = ToolRegistry()
-    from hooks import ToolSpec
+    from compose import ToolSpec
     # danger=None 的 spec 直接构造（绕过装饰器的必填）
     bad = ToolSpec(name="bad", description="x", parameters_schema={}, danger=None)
     reg.register(bad, lambda **k: None)

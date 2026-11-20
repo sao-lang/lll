@@ -1,6 +1,6 @@
 """R4 模型与推理能力：多 Provider / 模型路由 / 缓存 / 结构化输出 / 成本归因。
 
-全部基于 R1（runtime）+ R2（hooks，复用其 LLMRequest/LLMResponse/Usage/LLMPort）构建。
+全部基于 R1（runtime）+ 组合层 compose（复用其 LLMRequest/LLMResponse/Usage/LLMPort DTO）构建。
 公共 API 见 docs/02-模块详设/Agent/R4-模型与推理.md §4。
 """
 from __future__ import annotations

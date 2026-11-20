@@ -1,7 +1,7 @@
 """R2-T07：Registry 缺 provider 报错、重名报错、替换、freeze。"""
 import pytest
 
-from hooks import Registry, HookBusError
+from compose import Registry, HookBusError
 
 
 class P:

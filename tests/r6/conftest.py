@@ -1,7 +1,7 @@
 """R6 测试夹具：五段 fake 实现，全模块内闭环，不联网、不依赖真实模型。"""
 from __future__ import annotations
 
-from hooks import PortCtx
+from compose import PortCtx
 
 from harness.rag.retriever import Retriever
 from harness.rag.types import Chunk, Document, Hit, Query, Vector

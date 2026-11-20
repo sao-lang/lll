@@ -7,11 +7,11 @@ from __future__ import annotations
 
 import pytest
 
-from aop import AOPContainer
+from compose import AOPContainer
 from runtime import Result
 
 from harness.resilience import (
-    BudgetGuard, Bulkhead, CircuitBreaker, DegradeLadder, DegradeMode, DegradeStep,
+    Bulkhead, CircuitBreaker, DegradeLadder, DegradeMode, DegradeStep,
     Degradation, Idempotency, KillSwitch, RateLimit, ResilienceCapability,
     RetryPolicy, Timeout, Watchdog,
 )
@@ -51,7 +51,7 @@ class TestCapabilityAssembly:
             killswitch=KillSwitch(flag_store={}), watchdog=Watchdog(),
             idempotency=Idempotency(), bulkhead=Bulkhead(), rate_limit=RateLimit(),
             breaker=CircuitBreaker(), retry=RetryPolicy(), timeout=Timeout(),
-            degradation=Degradation(_ladder()), budget_guard=BudgetGuard(),
+            degradation=Degradation(_ladder()),
         )
         c = AOPContainer(lambda inv: Result.success("x"))
         assert cap.install(c) is c  # 链式返回同一容器
@@ -59,14 +59,16 @@ class TestCapabilityAssembly:
         assert "r3_killswitch" in w and "r3_watchdog" in w and "r3_idempotency" in w
         assert "r3_ratelimit" in w and "r3_breaker" in w
         assert set(_names(c._envelopes)) == {"r3_bulkhead", "r3_breaker", "r3_retry", "r3_timeout"}
-        assert _names(c._refiners) == ["r3_budgetguard"]
+        # BudgetGuard 已删除（规格 P3）：软限由 A 类 map_effect 注入，硬限在 R1；
+        # call 装配器不再有 refiner 角色承载预算策略。
+        assert _names(c._refiners) == []
         assert _names(c._salvages) == ["r3_degrade"]
         # CircuitBreaker 拆 check(Warden) + observe(Envelope) 两角色，仍算一个插件。
 
     def test_warden_chain_blocks_via_verdict(self) -> None:
         """killswitch 置位时 Warden.guard 返回 allowed=False。"""
         import asyncio
-        from aop import Invocation
+        from compose.context import Invocation
         from runtime import Invoke
         kill = KillSwitch(flag_store={})
         kill.flag_store["kill:session"] = True
@@ -86,13 +88,6 @@ class TestCustomPlugins:
         c = ResilienceCapability(degradation=custom).install(AOPContainer(lambda inv: Result.success("x")))
         assert _names(c._salvages) == ["custom_degrade"]
 
-    def test_custom_budget_guard_injected(self) -> None:
-        """注入自定义 BudgetGuard：Refiner 分组含该插件。"""
-        custom = BudgetGuard(soft=0.5)
-        c = ResilienceCapability(budget_guard=custom).install(AOPContainer(lambda inv: Result.success("x")))
-        assert _names(c._refiners) == ["r3_budgetguard"]
-        assert custom in ResilienceCapability(budget_guard=custom).plugins()
-
     def test_no_args_installs_no_defaults(self) -> None:
         """不传即空：不隐式装默认插件。"""
         assert ResilienceCapability().plugins() == ()
@@ -101,7 +96,8 @@ class TestCustomPlugins:
 class TestExtraPlugins:
     def test_extra_warden_reaches_role(self) -> None:
         """extra_plugins 注入 Warden 角色实例：install 后进入 warden 分组。"""
-        from aop import Verdict, Warden
+        from compose.context import Verdict
+        from compose import Warden
         class AuditWarden(Warden):
             name = "custom_audit"
             async def guard(self, inv): return Verdict(allowed=True)
@@ -112,7 +108,8 @@ class TestExtraPlugins:
 
     def test_extra_plugin_in_plugins(self) -> None:
         """extra_plugins 原样进 plugins()。"""
-        from aop import Verdict, Warden
+        from compose.context import Verdict
+        from compose import Warden
         class AuditWarden(Warden):
             name = "custom_audit"
             async def guard(self, inv): return Verdict(allowed=True)

@@ -11,8 +11,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from aop import AOPContainer, FaultRecord, Invocation, Verdict, Warden  # noqa: E402
-from hooks import LLMRequest, LLMResponse, Usage  # noqa: E402
+from compose.context import FaultRecord, Invocation, Verdict
+
+from compose import AOPContainer, Warden
+from compose import LLMRequest, LLMResponse, Usage  # noqa: E402
 from runtime import Result, Runner, Session, Invoke, Terminate  # noqa: E402
 
 from harness.model import ModelCapability  # noqa: E402

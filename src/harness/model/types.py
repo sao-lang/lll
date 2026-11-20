@@ -13,7 +13,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from hooks import LLMPort, LLMRequest, Usage
+from compose import LLMPort, LLMRequest, Usage
 from runtime import DynamicValue, Result
 
 __all__ = [

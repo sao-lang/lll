@@ -4,7 +4,6 @@
 AOP 角色：
 - Warden：KillSwitch / Watchdog / Idempotency / RateLimit（guard → Verdict）。
 - Envelope：Bulkhead（acquire + try/finally release）。
-- Refiner：BudgetGuard（改 Invocation，不写 State）。
 - Salvage：Degradation（唯一降级裁决者，保 B1/B2/R3-6/R3-7 四坑）。
 
 时钟/存储显式注入，墙钟/随机不隐式进入，保证可测试、可回放。内核零策略。
@@ -15,13 +14,12 @@ import time
 from collections.abc import Callable, Collection, MutableMapping
 from enum import Enum
 
-from aop import FaultRecord, Invocation, RoutingTarget, Verdict
+from compose.context import FaultRecord, Invocation, RoutingTarget, Verdict
 from runtime import Budgets, Invoke, Result
 
 from .types import DegradeLadder, DegradeMode, DegradeStep, validate_ladder
 
 __all__ = [
-    "BudgetGuard",
     "Bulkhead",
     "Degradation",
     "Idempotency",
@@ -371,59 +369,3 @@ class KillSwitch:
         if any(self.flag_store.get(k, False) for k in keys):
             return Verdict(allowed=False, reason="killswitch")
         return Verdict(allowed=True)
-
-
-class BudgetGuard:
-    """软预算守卫（Refiner）：达软阈值时给 Invocation.meta 注入收尾提示。
-
-    与 R1 硬限分工：R1 Budgets.exceeded() 硬拒答；BudgetGuard 在硬限前给模型软提示。
-    不写 State（回放/指纹前提），只产新 Invocation。
-    """
-    name = "r3_budgetguard"
-
-    _HINT = "Budget is running low. Wrap up and give a final answer; do not start new tasks."
-
-    def __init__(self, *, soft: float = 0.8, budgets: Budgets | None = None) -> None:
-        """装配软阈值与预算投影。
-
-        异常：
-            ValueError: soft 不在 (0, 1]。
-        """
-        if not 0.0 < soft <= 1.0:
-            raise ValueError("soft must be in (0, 1]")
-        self._soft = soft
-        self._budgets = budgets
-
-    def check(self, budgets: Budgets | None = None) -> bool:
-        """任一维度用量/上限 ≥ soft 且未到硬限时，返回 True。"""
-        current = budgets if budgets is not None else self._budgets
-        if current is None:
-            return False
-        return (
-            (current.max_turns > 0 and current.used_turns / current.max_turns >= self._soft)
-            or (current.max_hops > 0 and current.used_hops / current.max_hops >= self._soft)
-            or (current.max_rounds > 0 and current.used_rounds / current.max_rounds >= self._soft)
-            or (current.max_cost_usd > 0 and current.used_cost_usd / current.max_cost_usd >= self._soft)
-            or (current.max_tokens > 0 and current.used_tokens / current.max_tokens >= self._soft)
-            or (current.max_parallel_children > 0
-                and current.used_parallel_children / current.max_parallel_children >= self._soft)
-        )
-
-    def refine_hint(self, value: str) -> str:
-        """达软阈值时把收尾提示追加到文本（供测试直接验证领域逻辑）。"""
-        if not self.check():
-            return value
-        return f"{value}\n{self._HINT}" if value else self._HINT
-
-    async def refine(self, inv: Invocation) -> Invocation:
-        """Refiner.refine：达软阈值时产新 Invocation（meta 注入提示，不写 State）。"""
-        if not self.check():
-            return inv
-        ctx = inv.ctx
-        # 规则 6 例外：RuntimeCtx 是装配期注入的鸭子上下文，按具名字段读取预算投影。
-        budget = getattr(ctx, "state", None)
-        budgets = getattr(budget, "budgets", None) if budget is not None else None
-        if not self.check(budgets):
-            return inv
-        inv.meta["budget_hint"] = self._HINT
-        return inv

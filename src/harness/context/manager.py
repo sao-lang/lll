@@ -9,11 +9,13 @@ from __future__ import annotations
 
 from harness.memory import MemoryStore
 from harness.rag.types import TokenBudget
-from hooks import PortCtx
-from runtime import AgentState, Message
+from compose import PortCtx
+from compose.tool_layer import layer_program
+from runtime import AgentState, Message, Program
 
 from .assembler import ContextAssembler, DefaultContextAssembler
 from .compaction import CompactionPolicy, DefaultCompactionPolicy, SUMMARY_ROLE
+from .observability import CacheTelemetry
 from .offloader import BlobPort, DefaultOffloader, InMemoryBlobStore, Offloader
 from .reinjector import DefaultReinjector, Reinjector
 from .token_counter import DefaultTokenCounter, TokenCounter
@@ -75,6 +77,24 @@ class ContextMemoryManager:
             else DefaultReinjector(counter=self.token_counter)
         )
         self.trace: list[str] = []
+        # R7 新增方案 D5：KV cache 命中率一等观测面（可进 R10 trace、可按 label 归因）。
+        self.cache_telemetry = CacheTelemetry()
+
+    def record_cache_hit(self, label: str = "default") -> None:
+        """记录一次 KV cache 命中（一等观测，纯替换不可变指标）。"""
+        self.cache_telemetry = self.cache_telemetry.with_label(label).record_hit()
+
+    def record_cache_miss(self, label: str = "default") -> None:
+        """记录一次 KV cache 未命中。"""
+        self.cache_telemetry = self.cache_telemetry.with_label(label).record_miss()
+
+    def build(self) -> Program:
+        """ToolLayer 外壳（规格 P8）：产出"用上下文记忆"的 Program 工厂。
+
+        内部四链（组装/压缩/重注入/卸载）保持显式编排不变；外壳只给 R1 领域无知
+        的 Program。上下文四链属 ⑥组件 + ④notify，不是算子。
+        """
+        return layer_program("memory", payload={"layer": "context"})()
 
     def assemble(
         self, sections: list[ContextSection], budget: TokenBudget
@@ -203,4 +223,5 @@ class ContextMemoryManager:
             if reinjector is None and isinstance(self.reinjector, DefaultReinjector):
                 new.reinjector = DefaultReinjector(counter=token_counter)
         new.trace = list(self.trace)
+        new.cache_telemetry = self.cache_telemetry  # 保留 KV cache 一等观测历史（不可变 DTO 直接共享）
         return new

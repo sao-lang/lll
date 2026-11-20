@@ -10,11 +10,12 @@ from .execution import CodeExecTool, FileExecTool, ShellExecTool
 from .index import ToolIndex
 from .mcp import MCPManager, MCPTransport
 from .registry import ToolRegistry
-from .types import SandboxPolicy, ToolSource
+from .types import DangerLevel, SandboxPolicy, ToolSource
 from .webfetch import WebFetcher, WebFetchTool
 
 __all__ = [
     "CodeExecTool",
+    "DangerLevel",
     "FileExecTool",
     "MCPManager",
     "MCPTransport",

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from random import Random
 
-from aop import Invocation
+from compose.context import Invocation
 from runtime import Invoke, Result
 
 from harness.resilience import RetrySpec

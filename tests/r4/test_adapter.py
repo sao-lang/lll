@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 
-from hooks import LLMPort, LLMRequest, LLMResponse, PortCtx, Usage
+from compose import LLMPort, LLMRequest, LLMResponse, PortCtx, Usage
 
 from harness.model import ModelCapability, ModelGateway
 from tests.r4.conftest import pctx, resp

@@ -1,7 +1,7 @@
 """R4 测试夹具：fake LLM / 样本 schema / 请求构造器（模块内闭环，不联网）。"""
 from __future__ import annotations
 
-from hooks import LLMRequest, LLMResponse, PortCtx, Usage
+from compose import LLMRequest, LLMResponse, PortCtx, Usage
 
 
 def sample_schema() -> dict:

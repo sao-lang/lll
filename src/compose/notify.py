@@ -1,4 +1,4 @@
-"""Lifecycle 通知体系：16 个相位的纯通知总线。
+"""通知体系：16 个相位 + 通知总线（原 R2 hooks/lifecycle.py 归位组合层，规格 P2）。
 
 三体系正交中的 "when" 维度：回答"发生了什么"，订阅者收到 Notice 只做事，
 返回值框架不消费——不能拦截、不能改写、异常就地隔离。与 AOP Enhancer（how，
@@ -16,7 +16,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:  # 仅类型检查期引用，运行期不依赖 aop（避免循环）。
-    from aop.invocation import Invocation
+    from compose import Invocation
 
 __all__ = [
     "PHASE_COUNT",

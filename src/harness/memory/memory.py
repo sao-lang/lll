@@ -18,7 +18,7 @@ from harness.rag.embedder import Embedder
 from harness.rag.store import VectorStore
 from harness.rag.types import Chunk, Vector
 from harness.skills import InjectionDetector, InjectionVerdict, KeywordInjectionDetector
-from hooks import PortCtx
+from compose import PortCtx
 from runtime import DynamicValue
 
 from .types import (

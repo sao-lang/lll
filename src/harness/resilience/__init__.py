@@ -8,7 +8,7 @@ from __future__ import annotations
 from .breaker import BreakerStore, CircuitBreaker, InMemoryBreakerStore
 from .capability import ResilienceCapability
 from .defenses import (
-    BudgetGuard, Bulkhead, Degradation, Idempotency,
+    Bulkhead, Degradation, Idempotency,
     KillSwitch, RateLimit, Watchdog,
 )
 from .retry import RetryPolicy
@@ -41,6 +41,6 @@ __all__ = [
     "BreakerStatus", "BreakerState", "BreakerStore", "InMemoryBreakerStore",
     # 插件（RetryPolicy 是重试策略配置，非状态 Policy）
     "RetryPolicy", "CircuitBreaker", "Degradation", "RateLimit", "Bulkhead",
-    "Idempotency", "Watchdog", "KillSwitch", "BudgetGuard", "ResilienceCapability",
+    "Idempotency", "Watchdog", "KillSwitch", "ResilienceCapability",
     "Timeout",
 ]

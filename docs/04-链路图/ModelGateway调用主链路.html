@@ -6,7 +6,7 @@
       <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
     </marker>
   </defs>
-  <text x="40" y="26" font-family="var(--font-sans)" font-size="14" font-weight="500" fill="#2C2C2A">R4 ModelGateway · as_call 适配层（AOP 中心调用）</text>
+  <text x="40" y="26" font-family="var(--font-sans)" font-size="14" font-weight="500" fill="#2C2C2A">R4 ModelGateway · as_call 适配层（dispatch 中心调用）</text>
 
   <rect x="40" y="42" width="600" height="256" rx="12" fill="#E1F5EE" stroke="#1D9E75" stroke-width="0.5"/>
   <text x="56" y="62" font-family="var(--font-sans)" font-size="12" font-weight="500" fill="#085041">as_call(inv) · 注入 Runner 的 call 槽 · typed 降级路径</text>
@@ -86,5 +86,5 @@
     <text x="340" y="646" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#185FA5">CostGuard.commit 按实结清 · ledger 记账 · 非法输出不写缓存</text>
   </g>
 
-  <text x="40" y="682" font-family="var(--font-sans)" font-size="11" fill="#5F5E5A">ModelCapability 为生产装配入口：install 注册 llm/router/cache，container() 构造共用 Registry 的 AOP 容器（core=gateway.as_call）</text>
+  <text x="40" y="682" font-family="var(--font-sans)" font-size="11" fill="#5F5E5A">ModelCapability 为生产装配入口：install 注册 llm/router/cache，gateway() 构造共用 Registry 的 ModelGateway（as_call 为 dispatch 形态）</text>
 </svg>

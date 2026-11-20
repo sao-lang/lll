@@ -5,8 +5,9 @@
 > **v2.1 修订说明（只补矛盾缺口，不推翻 20 项能力/五段架构）**：① `RAGPipeline` 履约 `RAGPort` 签名（`name`/`ingest(documents, ctx)->int`/`retrieve(query, ctx)->list[DynamicValue]`），保留 `query(q)->RAGResult` 为模块内部富入口；② 澄清注入检测职责——检测器协议与默认实现复用 R5 已落地的 `InjectionDetector`/`KeywordInjectionDetector`（`src/harness/skills/provider.py`），R6 只在检索正文进入 context 前接入检测并 fail-closed，不重复定义检测器；③ 20 项分解口径统一为「入库 5 + 检索 9 + 横切 6」；④ 可插拔契约明确为 8 个注入点。
 
 
-> **权威来源**：[《AGENT 总设计》](../../01-总览与设计/AGENT-总设计.md) §R6（20 项逐项参数/算法/边界/指标）。本文为模块级拆分详设。
-> 层：L1 能力插件 · 依赖：R1+R2（+ 复用 R5 注入检测器） · 源码包：`src/harness/rag/`（原 M5）· 测试：`tests/r6/` · 门禁 key：`r6`
+> **权威来源**：[《AGENT 总设计》](../../01-总览与设计/AGENT-总设计.md) §R6；`docs/01-总览与设计/组合式工具层重构规格-20261121.md` §3 P7。本文为模块级拆分详设。
+> 层：L1 工具层 · 依赖：R1 + 组合层（+ 复用 R5 注入检测器）· 源码包：`src/harness/rag/`（原 M5）· 测试：`tests/r6/` · 门禁 key：`r6`
+> **阶段 B 试点（规格 P7）**：R6 是唯一完全符合"复杂度在组合层吸收"的工具层——`pipeline.py` 九注入点是纯组合层（`rewrite→embed→召回→去重→重排→后处理`），R1/AOP 零渗透。阶段 B 内部**不改**，只套 ToolLayer 外壳（`RAGPipeline.build() -> Program`），作为第一个试点验证"挑选 + A 类组合 + R1 只认 Program"。**试点跑不通先回头修算子契约，不动 R1**。
 
 > **⏳ 回头实现清单**：本模块负责 RAGPort→RAGPipeline 默认实现（总设计[附录 B.1.2](../../01-总览与设计/AGENT-总设计.md)）。开发时须落地并勾销；实现 `RAGPort`（`PORT_PROTOCOLS["rag"]`）时签名必须与 `src/hooks/protocols.py` 逐方法一致。
 
@@ -141,7 +142,7 @@ class RAGPipeline:
 
 | 条件 | 实现 | 证据 |
 |------|------|------|
-| CL-1 契约自足 | 依赖 R1 types + R2 协议/Registry + 五段 Protocol + AOP/Lifecycle | import 扫描 |
+| CL-1 契约自足 | 依赖 R1 types + 组合层协议/Registry + 五段 Protocol + ④notify（无 AOP/领域渗透） | import 扫描 |
 | CL-2 自带 fake | FakeEmbedder + InMemoryVectorStore | fake 用例 |
 | CL-3 自带测试 | tests/r6/ 覆盖门禁（R6-T01~T07） | 覆盖率报告 |
 | CL-4 独立 demo | `make demo-r6` 入库→查询→带引用 | demo 冒烟 |

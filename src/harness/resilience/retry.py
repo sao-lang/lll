@@ -9,7 +9,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from random import Random
 
-from aop import FaultRecord, Invocation
+from compose.context import FaultRecord, Invocation
 from runtime import Invoke, PortName, Result
 
 from .types import Jitter, RetrySpec, backoff_delay, classify_failure, validate_retry_spec

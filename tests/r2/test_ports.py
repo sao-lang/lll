@@ -3,7 +3,7 @@ import pytest
 
 import inspect
 
-from hooks import (
+from compose import (
     PORT_PROTOCOLS, LLMPort, ToolPort, MemoryPort, StorePort, TelemetryPort,
     AuditStore, TelemetryExporter,
     LLMRequest, LLMResponse, ToolCall, ToolResult, ToolSpec, Usage, PortCtx, make_call,

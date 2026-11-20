@@ -1,75 +1,65 @@
-<svg viewBox="0 0 680 566" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
-  <title>R3 九个可靠性插件迁入 AOP 五角色 + 降级单独裁决</title>
-  <desc>可靠性插件按语义迁入 AOP 五角色固定顺序；熔断命中写 fault + Verdict(allowed=True) 走重路由（非终止短路）；Degradation 为唯一选级者，保 P9 降级四坑；故障经 Invocation.meta 具名 typed 记录传网关</desc>
+<svg viewBox="0 0 680 580" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
+  <title>R3 可靠性插件按 7 承载形态归类 + 降级四坑</title>
+  <desc>十个可靠性插件归为②有状态守卫（熔断/限流/舱壁/幂等/降级/watchdog/killswitch）、③call 装饰器（RetryPolicy/Timeout 调用级）、①A 类算子（fallback/retry 流程级）；BudgetGuard 删除（软限用 map_effect 注入）。降级守卫 Degradation 唯一裁决，四坑 B1/B2/R3-6/R3-7 语义原样保留。</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-      <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M2 1L8 5L2 9" fill="none" stroke="#64748b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
     </marker>
+    <style>
+      .t { font-family: -apple-system, "Segoe UI", sans-serif; }
+      .h { font-size: 14px; font-weight: 600; fill: #0f172a; }
+      .n { font-size: 11.5px; fill: #1e293b; }
+      .s { font-size: 10px; fill: #475569; }
+      .guard { fill: #fef2f2; stroke: #ef4444; rx: 8; }
+      .deco { fill: #eff6ff; stroke: #3b82f6; rx: 8; }
+      .op { fill: #f5f3ff; stroke: #8b5cf6; rx: 8; }
+      .pit { fill: #fffbeb; stroke: #f59e0b; rx: 6; }
+      .e { stroke: #64748b; stroke-width: 1.4; marker-end: url(#arrow); }
+    </style>
   </defs>
-  <text x="40" y="26" font-family="var(--font-sans)" font-size="14" font-weight="500" fill="#2C2C2A">R3 可靠性 · 插件 = AOP 增强器（name + 实例状态 + 构造注入，无 priority）</text>
 
-  <rect x="40" y="42" width="600" height="300" rx="12" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
-  <text x="56" y="62" font-family="var(--font-sans)" font-size="12" font-weight="500" fill="#0C447C">AOPContainer 固定顺序（Invocation 请求期上下文 · meta 具名故障记录）</text>
+  <text class="t h" x="340" y="26" text-anchor="middle">R3 可靠性 · 10 插件按承载形态归类（AOP 取消）</text>
 
-  <g>
-    <rect x="56" y="74" width="176" height="58" rx="8" fill="#B5D4F4" stroke="#185FA5" stroke-width="0.5"/>
-    <text x="144" y="92" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#042C53">Warden · 准入</text>
-    <text x="144" y="110" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#0C447C">KillSwitch / Watchdog</text>
-    <text x="144" y="125" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#0C447C">Idempotency / RateLimit / Breaker.check</text>
-  </g>
-  <line x1="232" y1="103" x2="260" y2="103" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
-  <g>
-    <rect x="262" y="74" width="176" height="58" rx="8" fill="#B5D4F4" stroke="#185FA5" stroke-width="0.5"/>
-    <text x="350" y="92" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#042C53">Envelope · 环绕</text>
-    <text x="350" y="110" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#0C447C">RetryPolicy / Timeout</text>
-    <text x="350" y="125" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#0C447C">Bulkhead / Breaker.observe</text>
-  </g>
-  <line x1="438" y1="103" x2="466" y2="103" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
-  <g>
-    <rect x="468" y="74" width="156" height="58" rx="8" fill="#B5D4F4" stroke="#185FA5" stroke-width="0.5"/>
-    <text x="546" y="92" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#042C53">Refiner · 转换</text>
-    <text x="546" y="112" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#0C447C">BudgetGuard 软预算提示</text>
-  </g>
+  <rect class="guard" x="24" y="44" width="300" height="132"/>
+  <text class="t h" x="36" y="64" fill="#b91c1c">② 有状态守卫（7，Guard.check/observe）</text>
+  <text class="t n" x="36" y="86">CircuitBreaker · RateLimit · Bulkhead</text>
+  <text class="t n" x="36" y="106">Idempotency · Watchdog · KillSwitch</text>
+  <text class="t n" x="36" y="126">Degradation（降级唯一裁决者）</text>
+  <text class="t s" x="36" y="150">状态在守卫实例（跨调用），按 session 隔离</text>
+  <text class="t s" x="36" y="166">只持策略状态，不持单次流程进度（D-8）</text>
 
-  <line x1="546" y1="132" x2="546" y2="156" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
-  <g>
-    <rect x="468" y="158" width="156" height="46" rx="8" fill="#85B7EB" stroke="#0C447C" stroke-width="0.5"/>
-    <text x="546" y="175" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#042C53">Port call</text>
-    <text x="546" y="192" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#0C447C">中心网关调用</text>
-  </g>
-  <line x1="466" y1="181" x2="440" y2="181" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
-  <g>
-    <rect x="262" y="158" width="176" height="46" rx="8" fill="#B5D4F4" stroke="#185FA5" stroke-width="0.5"/>
-    <text x="350" y="175" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#042C53">Envelope 后 / Prelude</text>
-    <text x="350" y="192" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#0C447C">observe 记数 · 外层包裹</text>
-  </g>
+  <rect class="deco" x="356" y="44" width="300" height="132"/>
+  <text class="t h" x="368" y="64" fill="#1d4ed8">③ call 装饰器（2，CallFn→CallFn）</text>
+  <text class="t n" x="368" y="86">RetryPolicy（调用级 retry）</text>
+  <text class="t n" x="368" y="106">Timeout（调用级 timeout）</text>
+  <text class="t s" x="368" y="132">内部驱动②守卫 check/observe</text>
+  <text class="t s" x="368" y="150">函数组合，无固定角色链</text>
+  <text class="t s" x="368" y="166">只覆盖 Invoke（D-7）</text>
 
-  <g>
-    <rect x="56" y="158" width="176" height="46" rx="8" fill="#FCEBEB" stroke="#A32D2D" stroke-width="0.5"/>
-    <text x="144" y="175" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#791F1F">终止类 Warden</text>
-    <text x="144" y="192" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#A32D2D">allowed=False → invoke_rejected</text>
-  </g>
+  <rect class="op" x="24" y="196" width="632" height="66"/>
+  <text class="t h" x="36" y="216" fill="#6d28d9">① A 类算子（2，Program→Program）+ 已删除项</text>
+  <text class="t n" x="36" y="238">fallback（降级选级骨架） · retry（流程级重放，program_factory 重建）</text>
+  <text class="t s" x="36" y="254">~~BudgetGuard~~ 已删除：软限用 map_effect 注入 payload['budget']，硬限在 R1</text>
 
-  <g>
-    <rect x="56" y="226" width="568" height="98" rx="8" fill="#FAEEDA" stroke="#BA7517" stroke-width="0.5"/>
-    <text x="72" y="245" font-family="var(--font-sans)" font-size="12" font-weight="500" fill="#633806">降级类故障 → 写 fault + Verdict(allowed=True) → 容器走链外 Salvage 重路由</text>
-    <text x="72" y="265" font-family="var(--font-sans)" font-size="11" fill="#854F0B">熔断命中 / Retry 耗尽 / Timeout / Bulkhead满：inv.write_fault(FaultRecord(reason, failed_target))</text>
-    <text x="72" y="284" font-family="var(--font-sans)" font-size="11" fill="#854F0B">Warden/Envelope 只报告故障、不做选级；Degradation.select(fault) 按 failed_target 剔除并选下一级</text>
-    <text x="72" y="303" font-family="var(--font-sans)" font-size="11" fill="#854F0B">重路由重跑跳过一次性 Warden（include_wardens=False），防幂等键自命中；阶梯收敛到 refuse（上限 8 轮）</text>
-  </g>
-  <text x="56" y="333" font-family="var(--font-sans)" font-size="11" fill="#0C447C">注：熔断=写 fault + 放行重路由（非 allowed=False 短路）——短路会摧毁降级切 backup 语义</text>
+  <line class="e" x1="340" y1="262" x2="340" y2="284"/>
+  <rect class="guard" x="150" y="284" width="380" height="52"/>
+  <text class="t n" x="340" y="304" text-anchor="middle">② 降级守卫 observe：读故障记录 → select 选级 → 写 typed target</text>
+  <text class="t s" x="340" y="322" text-anchor="middle">③装饰器驱动链外重跑（切 backup / REFUSE，断言不放水）</text>
 
-  <rect x="40" y="356" width="600" height="200" rx="12" fill="#E1F5EE" stroke="#1D9E75" stroke-width="0.5"/>
-  <text x="56" y="376" font-family="var(--font-sans)" font-size="12" font-weight="500" fill="#085041">Degradation · 唯一选级者 · P9 四坑（实例化状态 dict[session_id, 状态]）</text>
-  <g font-family="var(--font-sans)" font-size="11" fill="#04342C">
-    <text x="56" y="402">B1 会话隔离</text><text x="220" y="402">按 session_id 隔离目标状态，禁容器级单值</text>
-    <text x="56" y="426">B2 目标维度</text><text x="220" y="426">failed_target = 降级阶梯后端注册名，非维度二元组；未注册 → TargetUnresolved 不回退</text>
-    <text x="56" y="450">R3-6 永久剔除</text><text x="220" y="450">故障目标从本会话 available 永久剔除并写回（非局部副本）</text>
-    <text x="56" y="474">R3-7 故障带目标</text><text x="220" y="474">retry/timeout/breaker 的 fault 必带 failed_target（构造注入 failed_target_of）</text>
-    <text x="56" y="498">typed 路径</text><text x="220" y="498">select 产出写 Invocation.meta RoutingTarget → 网关按注册名切后端 / REFUSE</text>
-  </g>
-  <g>
-    <rect x="440" y="516" width="188" height="30" rx="8" fill="#9FE1CB" stroke="#0F6E56" stroke-width="0.5"/>
-    <text x="534" y="531" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#04342C">Warden/Envelope 只报故障不选级</text>
-  </g>
+  <text class="t h" x="340" y="368" text-anchor="middle">降级四坑语义（原文保留、只换宿主）</text>
+  <rect class="pit" x="24" y="382" width="308" height="58"/>
+  <text class="t n" x="36" y="404">B1 · session_id 隔离目标状态</text>
+  <text class="t s" x="36" y="424">实例内 dict[session_id, 状态]，禁容器级单值</text>
+  <rect class="pit" x="348" y="382" width="308" height="58"/>
+  <text class="t n" x="360" y="404">B2 · failed_target 是后端注册名</text>
+  <text class="t s" x="360" y="424">非维度二元组；未注册 → TargetUnresolved 不回退</text>
+  <rect class="pit" x="24" y="450" width="308" height="58"/>
+  <text class="t n" x="36" y="472">R3-6 · available 永久剔除并写回</text>
+  <text class="t s" x="36" y="492">非局部副本；backup 故障后不回选 primary</text>
+  <rect class="pit" x="348" y="450" width="308" height="58"/>
+  <text class="t n" x="360" y="472">R3-7 · 故障记录携带 failed_target</text>
+  <text class="t s" x="360" y="492">retry/timeout 耗尽必带，据此剔除</text>
+
+  <text class="t s" x="340" y="536" text-anchor="middle">四坑端到端用例（R3-E01/E02/E03 等）断言逐字不放水——只换宿主到组合层 call 链</text>
+  <text class="t s" x="340" y="556" text-anchor="middle">R1 零改动 · src/aop/ 已删除（不留兼容层）</text>
 </svg>

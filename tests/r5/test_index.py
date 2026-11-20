@@ -1,7 +1,7 @@
 """R5-T02：三级披露 ToolIndex —— L1 无 schema，超预算报错，MCP 合并无差别。"""
 from __future__ import annotations
 
-from hooks import DangerLevel, DisclosurePacket, PortCtx, SkillManifest, ToolSpec, make_call
+from compose import DangerLevel, DisclosurePacket, PortCtx, SkillManifest, ToolSpec, make_call
 from harness.tools import ToolIndex, ToolRegistry, tool
 
 

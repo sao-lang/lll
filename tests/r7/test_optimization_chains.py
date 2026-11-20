@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 
-from hooks import PortCtx
+from compose import PortCtx
 
 from harness.context.reinjector import DefaultReinjector
 from harness.context.token_counter import DefaultTokenCounter

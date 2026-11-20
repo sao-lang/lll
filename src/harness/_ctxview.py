@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from hooks import PortCtx
+from compose import PortCtx
 from runtime import DynamicValue
 
 __all__ = [

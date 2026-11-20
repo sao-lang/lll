@@ -15,7 +15,9 @@ from typing import Protocol, cast, get_type_hints
 
 from pydantic import BaseModel
 
-from hooks import DangerLevel, ToolSpec
+from compose import ToolSpec
+
+from .types import DangerLevel
 from runtime import DynamicValue
 
 from .types import SandboxPolicy, ToolSource

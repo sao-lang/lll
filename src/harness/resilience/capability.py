@@ -5,11 +5,11 @@
 """
 from __future__ import annotations
 
-from aop import AOPContainer, Envelope, Prelude, Refiner, Salvage, Warden
+from compose import AOPContainer, Envelope, Prelude, Refiner, Salvage, Warden
 
 from .breaker import CircuitBreaker
 from .defenses import (
-    BudgetGuard, Bulkhead, Degradation, Idempotency, KillSwitch, RateLimit, Watchdog,
+    Bulkhead, Degradation, Idempotency, KillSwitch, RateLimit, Watchdog,
 )
 from .retry import RetryPolicy
 from .timeout import Timeout
@@ -34,14 +34,13 @@ class ResilienceCapability:
         killswitch: KillSwitch | None = None,
         idempotency: Idempotency | None = None,
         degradation: Degradation | None = None,
-        budget_guard: BudgetGuard | None = None,
         timeout: Timeout | None = None,
         extra_plugins: tuple[object, ...] = (),
     ) -> None:
         """装配（opt-in）：传实例才装，不传即缺席。"""
         self._plugins = (
             killswitch, watchdog, idempotency, rate_limit, bulkhead,
-            breaker, retry, timeout, degradation, budget_guard,
+            breaker, retry, timeout, degradation,
         )
         self._extra = tuple(extra_plugins)
         for p in self._extra:
@@ -55,7 +54,6 @@ class ResilienceCapability:
         角色映射：
             Warden：KillSwitch/Watchdog/Idempotency/RateLimit/CircuitBreaker。
             Envelope：Bulkhead/RetryPolicy/Timeout/CircuitBreaker（观察后置）。
-            Refiner：BudgetGuard。
             Salvage：Degradation。
         CircuitBreaker 同时注册 Warden（check）与 Envelope（observe），仍算一个插件。
         """
@@ -67,8 +65,6 @@ class ResilienceCapability:
                 container.add_envelope(p)  # observe 后置
             elif isinstance(p, (Bulkhead, RetryPolicy, Timeout)):
                 container.add_envelope(p)
-            elif isinstance(p, BudgetGuard):
-                container.add_refiner(p)
             elif isinstance(p, Degradation):
                 container.add_salvage(p)
             elif isinstance(p, Prelude):

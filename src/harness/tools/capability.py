@@ -5,7 +5,10 @@ disclosure 缺则用该 registry 建 ToolIndex；mcp/skills 可缺席为 None。
 """
 from __future__ import annotations
 
-from hooks import (
+from compose.tool_layer import layer_program
+from runtime import Program
+
+from compose import (
     AuditPort,
     DisclosureIndex,
     DisclosurePacket,
@@ -70,6 +73,10 @@ class ToolsCapability:
             self._disclosure = ToolIndex(self._registry, skills=self._skills)
         else:
             self._disclosure = disclosure
+
+    def build(self) -> Program:
+        """ToolLayer 外壳（规格 P5）：产出"用工具"的 Program 工厂（内部不改）。"""
+        return layer_program("tool", payload={"layer": "tools"})()
 
     def install(self, reg: Registry) -> None:
         """把持有的 port 注册进共用 Provider 注册表。

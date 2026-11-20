@@ -1,7 +1,7 @@
 """R4-T1 结构化输出校验与修复重试：非法输出不进业务 / 超次拒答 / constrained 模式。"""
 from __future__ import annotations
 
-from hooks import LLMRequest, LLMResponse
+from compose import LLMRequest, LLMResponse
 
 from harness.model import (
     MinimalSchemaValidator,

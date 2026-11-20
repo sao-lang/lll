@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 
-from aop import Invocation
+from compose.context import Invocation
 from runtime import Invoke, Result
 
 from harness.resilience import Timeout, classify_failure

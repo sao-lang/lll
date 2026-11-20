@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import asyncio
 
-from hooks import LLMRequest, LLMResponse, PortCtx, Usage
-from aop import Invocation, RoutingTarget
+from compose import LLMRequest, LLMResponse, PortCtx, Usage
+from compose.context import Invocation, RoutingTarget
 from runtime import Invoke
 
 from harness.model import (

@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from hooks import LLMRequest, LLMResponse, PortCtx, Usage  # noqa: E402
+from compose import LLMRequest, LLMResponse, PortCtx, Usage  # noqa: E402
 
 from harness.model import (  # noqa: E402
     CacheEmbedder,

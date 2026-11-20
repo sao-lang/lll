@@ -1,13 +1,19 @@
-"""R5 工具包基础枚举：来源与沙盒策略的有限取值集合。
+"""R5 工具包基础枚举：来源、沙盒策略与风险等级的有限取值集合（规格 P5）。
 
 本模块只放"取值可枚举"的常量（编码规则 5），供装饰器默认值与各实现共用，
-避免魔法字符串散落。工具调用的风险等级另有权威定义（hooks.DangerLevel）。
+避免魔法字符串散落。DangerLevel/coerce 语义归属 R5（⑤Port 契约）；本模块作为
+R5 内部统一消费门面，从 hooks.dto 重导出（跨层 DTO 字段的物理约束使定义须留在
+hooks 底层，避免 hooks 反向依赖 harness 成环）。
 """
 from __future__ import annotations
 
 from enum import Enum
 
-__all__ = ["ToolSource", "SandboxPolicy"]
+# R5 门面：DangerLevel 权威定义在 hooks.dto（跨层 DTO 字段的物理约束），
+# 此处重导出作为 R5 内部统一消费入口（规格 P5：R5 是 danger 语义归属层）。
+from compose import DangerLevel
+
+__all__ = ["ToolSource", "SandboxPolicy", "DangerLevel"]
 
 
 class ToolSource(str, Enum):

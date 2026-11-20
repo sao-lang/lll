@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import asyncio
 
-from hooks import LLMRequest, LLMResponse
+from compose import LLMRequest, LLMResponse
 
 from harness.model import (
     CacheEmbedder,

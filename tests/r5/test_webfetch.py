@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 
-from hooks import DangerLevel, PortCtx
+from compose import DangerLevel, PortCtx
 from harness.skills import KeywordInjectionDetector
 from harness.tools import WebFetcher, WebFetchTool
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 
-from aop import FaultRecord, Invocation
+from compose.context import FaultRecord, Invocation
 from runtime import Invoke, Result
 
 __all__ = ["Timeout"]

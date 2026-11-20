@@ -1,7 +1,7 @@
 """R7 测试夹具：context + memory 的 fake 与 helper，全模块内闭环、不联网。"""
 from __future__ import annotations
 
-from hooks import PortCtx
+from compose import PortCtx
 
 from harness.rag.types import Chunk, Hit, Vector
 

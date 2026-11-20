@@ -9,7 +9,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from random import Random
 
-from aop import Invocation
+from compose.context import Invocation
 from runtime import Invoke, Result
 
 from harness.resilience import FailureClass, RetryPolicy

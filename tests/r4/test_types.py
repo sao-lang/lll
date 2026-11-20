@@ -1,7 +1,7 @@
 """R4-T1 核心类型测试：StructuredOutputSpec / 缓存键 / 成本归因维度 / 路由协议。"""
 from __future__ import annotations
 
-from hooks import LLMRequest, LLMResponse, Usage
+from compose import LLMRequest, LLMResponse, Usage
 
 from harness.model import (
     CacheKey,

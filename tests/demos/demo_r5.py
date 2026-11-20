@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from pydantic import BaseModel  # noqa: E402
 
-from hooks import DangerLevel, PortCtx, make_call  # noqa: E402
+from compose import DangerLevel, PortCtx, make_call  # noqa: E402
 from harness.skills import FileSkillProvider  # noqa: E402
 from harness.tools import ToolIndex, ToolRegistry, ToolsCapability, WebFetchTool, tool  # noqa: E402
 

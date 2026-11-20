@@ -1,4 +1,4 @@
-"""AOP 五角色增强器协议（独立命名，与 NestJS 切开）。
+"""call 链内部编排槽位协议（原 AOP 五角色归位到组合层，规格 P2）。
 
 角色（how 维度，返回值被框架消费）：
     Prelude  前导（最外层包裹，类比 Middleware）
@@ -18,7 +18,7 @@ from typing import Protocol, runtime_checkable
 
 from runtime import Result
 
-from .invocation import Invocation, Next, Verdict
+from .context import Invocation, Next, Verdict
 
 __all__ = [
     "Prelude",

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 
-from hooks import LLMRequest, PortCtx, StreamEvent, StreamEventKind, Usage
+from compose import LLMRequest, PortCtx, StreamEvent, StreamEventKind, Usage
 
 from harness.model import ModelGateway
 from harness.model.stream import wrap_text_stream
@@ -56,7 +56,7 @@ class TestStreamEvents:
             last_usage = Usage()
 
             async def complete(self, r, c):
-                from hooks import LLMResponse
+                from compose import LLMResponse
                 return LLMResponse(content="x")
 
             def stream(self, r, c):

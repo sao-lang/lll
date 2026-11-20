@@ -6,7 +6,7 @@ import asyncio
 import pytest
 from pydantic import BaseModel, ConfigDict
 
-from hooks import DangerLevel, PortCtx, Registry, make_call
+from compose import DangerLevel, PortCtx, Registry, make_call
 from harness.tools import (
     ToolsCapability,
     ToolRegistry,

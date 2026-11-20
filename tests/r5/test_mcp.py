@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 
-from hooks import PortCtx
+from compose import PortCtx
 from harness.tools import MCPManager, MCPTransport, ToolRegistry
 
 from .conftest import FakeTransport
@@ -15,7 +15,7 @@ def test_transport_protocol_satisfied() -> None:
 
 def test_mcp_manager_implements_mcp_port() -> None:
     """MCPManager 实现 R2 MCPPort（带 ctx 的三方法 + name）。"""
-    from hooks import MCPPort
+    from compose import MCPPort
     mgr = MCPManager(ToolRegistry(), FakeTransport())
     assert isinstance(mgr, MCPPort)
 
@@ -36,7 +36,7 @@ def test_mcp_call_via_registry(ctx: PortCtx) -> None:
     mgr = MCPManager(registry, transport)
     asyncio.run(mgr.connect("srv", ctx))
     # 用统一 call 入口：名字为 fqname
-    from hooks import make_call
+    from compose import make_call
     result = asyncio.run(registry.call(make_call("mcp__srv__search", {"q": "x"}), ctx))
     assert result.ok and result.value == "srv/search"
     assert transport.call_log == [("srv", "search")]

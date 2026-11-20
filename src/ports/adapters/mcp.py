@@ -22,7 +22,7 @@ from typing import Any, Protocol, runtime_checkable
 
 import httpx
 
-from hooks import DangerLevel, ToolSpec
+from compose import DangerLevel, ToolSpec
 from runtime import DynamicValue
 
 from harness.tools import MCPTransport

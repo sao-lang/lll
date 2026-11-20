@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import httpx
 
-from hooks import PortCtx
+from compose import PortCtx
 
 from harness.tools import WebFetcher
 

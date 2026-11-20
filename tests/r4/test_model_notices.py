@@ -8,8 +8,8 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from aop import Invocation
-from hooks import LifecycleBus, LifecyclePhase, LLMRequest, LLMResponse, PortCtx, Usage
+from compose.context import Invocation
+from compose import LifecycleBus, LifecyclePhase, LLMRequest, LLMResponse, PortCtx, Usage
 from runtime import Invoke
 from harness.model import ModelGateway
 
@@ -96,7 +96,7 @@ def test_error_path_also_emits_after_model_with_error_payload():
 
 def test_backend_error_after_payload_carries_error():
     """后端返回 error（非异常）时，after_model.payload.error 等于该 error 文本。"""
-    from hooks import LLMResponse as R, Usage as U
+    from compose import LLMResponse as R, Usage as U
 
     class _ErrLLM:
         name = "err"
@@ -121,7 +121,7 @@ def test_backend_error_after_payload_carries_error():
 
 def test_refuse_after_payload_marked_refused():
     """REFUSE 拒答也发 after_model（恰好一次），error 标 REFUSED 以便与成功区分。"""
-    from aop import RoutingTarget
+    from compose.context import RoutingTarget
 
     bus = LifecycleBus()
     after: list[str] = []

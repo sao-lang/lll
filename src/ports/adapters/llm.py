@@ -1,7 +1,7 @@
 """OpenAI-compatible LLM 默认适配器（R4 §6.1）。
 
 框架唯一的 LLMPort 默认实现：真发 HTTP 请求、真解析 SSE，不联网由注入 fake client 保证。
-不属于已实现模块契约（R1~R4 锁定 runtime/hooks/harness），新增为兼容扩展。
+不属于已实现模块契约（R1~R4 锁定 runtime/compose/harness），新增为兼容扩展。
 
 设计约束（R4 §6.1）：
 - complete(): POST /chat/completions，解析 content/usage，写 last_usage。
@@ -15,7 +15,7 @@ from collections.abc import AsyncIterator
 
 import httpx
 
-from hooks import LLMRequest, LLMResponse, PortCtx, ToolCall, Usage
+from compose import LLMRequest, LLMResponse, PortCtx, ToolCall, Usage
 
 __all__ = ["OpenAICompatLLM"]
 

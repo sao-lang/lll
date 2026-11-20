@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol, TypedDict, cast, runtime_checkable
 
-from hooks import PortCtx
+from compose import PortCtx
 from runtime import Effect, Invoke
 
 from .types import RouteDecision

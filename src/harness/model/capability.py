@@ -5,8 +5,12 @@
 """
 from __future__ import annotations
 
-from aop import AOPContainer
-from hooks import LifecycleBus, LLMPort, Registry
+from compose import AOPContainer
+from compose.tool_layer import layer_program
+from compose import LifecycleBus, Registry
+from runtime import CallFn, Program
+
+from .ports import LLMPortWithUsage
 
 from .cache import ExactCache, CachePort
 from .gateway import ModelGateway
@@ -30,7 +34,7 @@ class ModelCapability:
     def __init__(
         self,
         *,
-        llm: LLMPort,
+        llm: LLMPortWithUsage,
         router: RuleRouter | None = None,
         cache: CachePort | None = None,
         spec: StructuredOutputSpec | None = None,
@@ -55,6 +59,14 @@ class ModelCapability:
         self._model_registry = registry or InMemoryModelRegistry()
         self._model_registry.register_llm("primary", llm)
 
+    def build(self) -> Program:
+        """ToolLayer 外壳（规格 P4）：产出"用模型"的 Program 工厂。
+
+        内部路由/缓存/成本防护不变（由 gateway 消费），这里只给 R1 一个
+        领域无知的 Program（yield Invoke(port="llm") + Terminate）。
+        """
+        return layer_program("llm", payload={"layer": "model"})()
+
     def install(self, container: AOPContainer | None = None, reg: Registry | None = None) -> Registry:
         """统一装配：把 llm/router/cache 注册进共用 Provider 注册表。
 
@@ -75,7 +87,7 @@ class ModelCapability:
         return registry  # type: ignore[return-value]
 
     @property
-    def llm(self) -> LLMPort:
+    def llm(self) -> LLMPortWithUsage:
         """默认后端实例（装配核对用）。"""
         return self._llm
 
@@ -93,6 +105,15 @@ class ModelCapability:
             cost_guard=self._cost_guard,
         )
 
+    def dispatch(self) -> CallFn:
+        """P4 dispatch 入口（§2.5 形态）：直接吃 (effect, ctx)，不构造 Invocation。
+
+        模型能力只有 llm 一个 port，故 gateway.as_dispatch() 本身即为该 port 的
+        dispatch 实现；组合层可直接注入 R1 Runner（不经 CompositeCall），验证
+        "call 按 port 分派 + typed target 从 ctx.meta 读" 主线。
+        """
+        return self.gateway().as_dispatch()
+
     def container(self) -> AOPContainer:
         """构造与网关共用同一 Registry 的 AOP 容器（P6 两表统一的标准装配入口）。
 
@@ -101,6 +122,6 @@ class ModelCapability:
         """
         return AOPContainer(self.gateway().as_call(), registry=self._model_registry, bus=self._bus)
 
-    def add_backend(self, name: str, llm: LLMPort) -> None:
+    def add_backend(self, name: str, llm: LLMPortWithUsage) -> None:
         """注册降级目标后端（如 "backup"），供网关按 typed 目标切换。"""
         self._model_registry.register_llm(name, llm)

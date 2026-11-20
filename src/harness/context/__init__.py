@@ -7,6 +7,8 @@ from __future__ import annotations
 from .assembler import ContextAssembler, DefaultContextAssembler, SYSTEM_SECTION_NAME
 from .compaction import CompactionPolicy, DefaultCompactionPolicy, count_tokens
 from .manager import ContextMemoryManager
+from .observability import CacheTelemetry
+from .offload_policy import DEFAULT_OFFLOAD_THRESHOLD, OffloadPolicy
 from .offloader import (
     BLOB_HANDLE_SCHEME,
     BlobPort,
@@ -51,6 +53,7 @@ __all__ = [
     "ScopeResolver",
     "make_item_id",
     "ContextMemoryManager",
+    "CacheTelemetry", "OffloadPolicy", "DEFAULT_OFFLOAD_THRESHOLD",
     "BlobPort",
     "Offloader",
     "InMemoryBlobStore",

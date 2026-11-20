@@ -10,8 +10,8 @@ from typing import Any
 
 import pytest
 
-import hooks
-from hooks import PortCtx, ToolSpec
+import compose
+from compose import PortCtx, ToolSpec
 from harness.tools import MCPTransport, clear_pending
 
 
@@ -100,7 +100,7 @@ class FakeTransport:
             ToolSpec(
                 name="search", description="搜索",
                 parameters_schema={"type": "object"},
-                danger=hooks.DangerLevel.SAFE, source="mcp",
+                danger=compose.DangerLevel.SAFE, source="mcp",
             ),
         ]
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 
-from hooks import DangerLevel, PortCtx, make_call
+from compose import DangerLevel, PortCtx, make_call
 from harness.tools import ToolRegistry, tool
 
 

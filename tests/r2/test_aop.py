@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 
-from aop import (
+from compose import (
     AOPContainer,
     Envelope,
     FaultRecord,
@@ -14,7 +14,7 @@ from aop import (
     Verdict,
     Warden,
 )
-from hooks import LifecycleBus, LifecyclePhase, Notice, Registry
+from compose import LifecycleBus, LifecyclePhase, Notice, Registry
 from runtime import Invoke, Result
 
 

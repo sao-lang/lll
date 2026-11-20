@@ -9,7 +9,7 @@ import asyncio
 
 import pytest
 
-from aop import FaultRecord, Verdict
+from compose.context import FaultRecord, Verdict
 from runtime import Invoke
 
 from harness.resilience import (

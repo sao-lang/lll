@@ -1,4 +1,4 @@
-"""R2 DTO：跨模块数据契约（pydantic），全框架统一。
+"""共享 DTO：跨模块数据契约（pydantic），全框架统一（原 R2 hooks/dto.py 归位组合层）。
 
 字段只增不改语义；废弃字段先标记 deprecated 至少一个 minor 版本。
 所有形态由外部 port 决定的字段统一用 DynamicValue（动态边界具名别名），
@@ -52,24 +52,6 @@ class StreamEventKind(str, Enum):
     DONE = "done"
 
 
-@dataclass(frozen=True, slots=True)
-class StreamEvent:
-    """结构化流式事件（跨 Port/网关统一载体，规则 3 动态边界用具名 kind）。
-
-    字段：
-        kind: 事件类型。data: 载荷形态由 kind 决定（文本为 str，工具为 dict，USAGE 为 Usage）。
-    """
-
-    kind: StreamEventKind
-    data: DynamicValue = None
-
-
-class _Strict(BaseModel):
-    """严格模型基类：拒绝未声明字段（extra=forbid），避免脏数据静默混入。"""
-
-    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
-
-
 class DangerLevel(str, Enum):
     """工具风险分级（规则 5：有限取值集合用 Enum，禁止裸魔法串）。
 
@@ -97,6 +79,24 @@ class DangerLevel(str, Enum):
             except ValueError:
                 return cls.CRITICAL
         return cls.CRITICAL
+
+
+@dataclass(frozen=True, slots=True)
+class StreamEvent:
+    """结构化流式事件（跨 Port/网关统一载体，规则 3 动态边界用具名 kind）。
+
+    字段：
+        kind: 事件类型。data: 载荷形态由 kind 决定（文本为 str，工具为 dict，USAGE 为 Usage）。
+    """
+
+    kind: StreamEventKind
+    data: DynamicValue = None
+
+
+class _Strict(BaseModel):
+    """严格模型基类：拒绝未声明字段（extra=forbid），避免脏数据静默混入。"""
+
+    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
 
 @dataclass(frozen=True, slots=True)

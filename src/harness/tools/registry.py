@@ -13,7 +13,7 @@ import time
 from collections.abc import Callable
 from typing import Self
 
-from hooks import (
+from compose import (
     AuditPort, DangerLevel, HumanPort, PortCtx, SandboxPort,
     ToolCall, ToolPort, ToolResult, ToolSpec,
 )

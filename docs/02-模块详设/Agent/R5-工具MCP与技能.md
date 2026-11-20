@@ -1,7 +1,7 @@
 # R5：工具·MCP·技能（tools）
 
 > **实现状态**：已实现（含装配期自动注册）。`src/harness/tools/` + `src/harness/skills/` 已落地；测试 `tests/r5/`、demo `tests/demos/demo_r5.py`、门禁 key `r5` 全部就绪。
-> **本次变更**：技能调用并入 `Invoke(port="skill")`（P5）；装配入口 `install` 把 tool/disclosure/mcp/skill 注册进共用 Registry（P3；工具/Warden/Envelope 增强器由 R9 安全域与 R12 composition root 统一注册，R5 无自有增强器）；Runner 在 `Invoke(port=tool)` 执行点发 `before_tool` / `after_tool` / `tool_error` 通知（P2）。遵守三体系正交与依赖方向 插件/增强器 → 装配层 → 内核。
+> **本次变更（规格 P5）**：技能调用并入 `Invoke(port="skill")`；装配入口把 tool/disclosure/mcp/skill 注册进组合层 Registry（②守卫/③call 装饰器由组合层装配器统一注册，R5 无自有横切逻辑）；R1/能力层在 `Invoke(port=tool)` 执行点发 `before_tool` / `after_tool` / `tool_error` notify（④）。**DangerLevel/coerce 归位 R5**（⑤Port 契约一部分，原固化在 `src/hooks/dto.py:73-99`）；danger 路由变③call 装饰器（`danger_route`，沙箱是⑤Port）、注入检测变③装饰器（`injection_guard`）；三级披露编排是①A 类算子（gate/branch 决定何时加载）、L1/L2/L3 内容是⑤/⑥；DisclosureIndex/DisclosurePacket 归 R5。R5 套 ToolLayer 外壳（`build() -> Program`）。依赖方向 工具层 → 组合层 → R1（R1 零改动）。
 
 
 > **权威来源**：[《AGENT 总设计》](../../01-总览与设计/AGENT-总设计.md) §R5 D+E 域 §3~§6。本文为模块级拆分详设。
@@ -24,9 +24,9 @@
 
 **统一合集**是核心：本地 @tool、MCP 工具（`mcp__<server>__<tool>`）、Skill 正文都进同一个 Registry，运行时无差别。三级披露对统一合集投影：L1 目录常驻 / L2 schema 按需 / L3 正文按需。danger 分级驱动沙盒与审批路由。
 
-**Effect 统一入口（P5）**：技能调用不再单独成类，而是并入 `Invoke(port="skill")`——`payload` 携带 `name`/`part`，与 `Invoke(port="tool")` 共用 AOP 链（Warden 准入/Envelope 包裹/Refiner 改写）。新增工具/技能种类只需注册 `PORT_PROTOCOLS` 并用对应 port，内核零改动。
+**Effect 统一入口（P5）**：技能调用不再单独成类，而是并入 `Invoke(port="skill")`——`payload` 携带 `name`/`part`，与 `Invoke(port="tool")` 共用组合层 call 链（③装饰器 + ②守卫 + dispatch）。新增工具/技能种类只需注册 `PORT_PROTOCOLS` 并用对应 port，R1 零改动。
 
-**tool 通知（P2）**：Runner 在 `Invoke(port="tool")` 执行点经 `notify` 回调（装配层用 `runner_notifier(bus)` 桥接）发 `before_tool` / `after_tool` / `tool_error`（技能 `port="skill"` 不发 tool 通知）；通知为纯通知（异常就地隔离、返回值不消费），插件可借此做观测，不能拦截调用。拦截/改写/包裹类语义归 AOP 角色（Warden/Envelope/Refiner），不由通知承担。
+**tool 通知（④notify）**：R1 在 `Invoke(port="tool")` 执行点经 `notify` 回调发 `before_tool` / `after_tool` / `tool_error`（技能 `port="skill"` 不发 tool 通知）；通知为纯通知（异常就地隔离、返回值不消费），订阅方可借此观测，不能拦截调用。拦截/改写/包裹类语义归③call 装饰器（`danger_route`/`injection_guard`）/②守卫，不由通知承担。
 
 R5 不自带沙盒/审批/审计实现：三者在 ToolRegistry 构造期注入（缺席即拒绝，见 §4/§6）。`DisclosureIndex` 协议归 R2 `protocols.py` 并登记 `PORT_PROTOCOLS["disclosure"]`，默认实现 ToolIndex 在 R5。装配类 ToolsCapability（§11）把上述组件与 R9 三 Port 组装为可插拔能力。
 
@@ -67,7 +67,7 @@ flowchart TD
 ## 4. API 规范（完整接口）
 
 ```python
-# ---- R2 权威 DTO（src/hooks/dto.py）----
+# ---- R5 权威 DTO（DangerLevel/coerce 归位本模块；原 src/hooks/dto.py:73-99）----
 # DangerLevel(str, Enum) + coerce(value) -> DangerLevel：未知/None → CRITICAL（fail closed）
 # ToolCall.danger / ToolSpec.danger / make_call(danger=...) 均为 DangerLevel
 # ToolSpec  = name / description / parameters_schema / danger / source
@@ -221,7 +221,7 @@ class KeywordInjectionDetector:          # 默认实现：关键词/正则启发
 
 | 条件 | 实现 | 证据 |
 |------|------|------|
-| CL-1 契约自足 | 依赖 R1 types + R2 协议/Registry + AOP 五角色 + Lifecycle + Port | import 扫描 |
+| CL-1 契约自足 | 依赖 R1 types + 组合层协议/Registry + ④notify + Port | import 扫描 |
 | CL-2 自带 fake | tests/r5/conftest.py（FakeSandbox/Human/Audit/Injection/Fetcher/Transport）+ fake transport | fake 用例 |
 | CL-3 自带测试 | tests/r5/ 覆盖门禁 | 覆盖率报告 |
 | CL-4 独立 demo | `make demo-r5` | demo 冒烟 |
@@ -264,7 +264,7 @@ class KeywordInjectionDetector:          # 默认实现：关键词/正则启发
 
 ## 11. 装配类 ToolsCapability
 
-R5 提供统一装配类，把工具/MCP/技能/披露与 R9 三 Port 组装为一个可插拔能力（遵循 R2 `Capability` 契约）。`install` 只把四个 Port 注册进共用 Registry；工具/Warden/Envelope 增强器由 R9 安全域与 R12 composition root 统一注册（R5 无自有增强器）；tool 相位通知由 Runner 经 `runner_notifier(bus)` 在 `Invoke(port=tool)` 执行点发：
+R5 提供统一装配类，把工具/MCP/技能/披露与 R9 三 Port 组装为 ToolLayer（遵循 `Capability.build()->Program` 契约）。装配时把四个 Port 注册进组合层 Registry；②守卫/③call 装饰器由组合层装配器统一注册（R5 无自有横切逻辑）；tool 相位通知由 R1 notify 在 `Invoke(port=tool)` 执行点发：
 
 ```python
 class ToolsCapability:
@@ -282,7 +282,8 @@ class ToolsCapability:
         human: HumanPort | None = None,
         audit: AuditPort | None = None,
     ) -> None: ...   # 构造注入；R9 三 Port 的缺席拒绝在 ToolRegistry.call 兑现
-    def install(self, container: AOPContainer | None, reg: Registry) -> None: ...
+    def build(self) -> Program: ...   # ToolLayer 外壳
+    def install(self, reg: Registry) -> None: ...
         # 注册各 Port/协议实例（R2 Capability 契约）；先调 self._registry.register_pending() 再注册各 Port
         # 增强器由 R9 安全域 / R12 composition root 统一注册；本能力只注册 Port
     def registry(self) -> ToolRegistry: ...
@@ -291,7 +292,7 @@ class ToolsCapability:
     def disclose(self, names: list[str]) -> DisclosurePacket: ...   # 委托 index + skills
 ```
 
-> **披露触发**：披露由装配层在 `before_model` 通知点调用 `disclose(names)` 生成上下文段（通知为纯通知、返回不消费，故披露动作在订阅者的实现内完成）；R5 自身闭环可独立测试。技能调用走 `Invoke(port="skill")`，与工具共用 AOP 链（不发 tool 通知）。
+> **披露触发**：披露由组合层在 `before_model` notify 相位调用 `disclose(names)` 生成上下文段（notify 为纯通知、返回不消费，故披露动作在订阅方的实现内完成）；何时加载由①A 类算子（gate/branch）决定。R5 自身闭环可独立测试。技能调用走 `Invoke(port="skill")`，与工具共用组合层 call 链（不发 tool 通知）。
 
 ---
 *R5 模块详设 · 派生自 AGENT-总设计与《扩展体系重构规格（2026-11-20）》P2/P3/P5 · 门禁 key=r5 · 本次变更：SKILL 并入 Invoke(port=skill)；install 注册四 Port 进共用 Registry（增强器由 R9/R12 统一注册）；Runner 在 Invoke(port=tool) 执行点发 before_tool/after_tool/tool_error 通知*

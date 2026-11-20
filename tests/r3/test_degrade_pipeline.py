@@ -6,7 +6,7 @@ ladder 选下一级；全部目标失败则落 REFUSE。断言强度不降，只
 """
 from __future__ import annotations
 
-from aop import FaultRecord, Invocation
+from compose.context import FaultRecord, Invocation
 from runtime import Invoke
 
 from harness.resilience import DegradeLadder, DegradeMode, DegradeStep, Degradation

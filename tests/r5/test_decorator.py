@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 from pydantic import BaseModel, ConfigDict
 
-from hooks import DangerLevel, make_call
+from compose import DangerLevel, make_call
 from harness.tools import ToolFn, ToolRegistry, tool
 
 
@@ -57,7 +57,7 @@ def test_registry_register_and_call() -> None:
     registry = ToolRegistry()
     registry.register(add.spec, add)
     result = __import__("asyncio").run(
-        registry.call(make_call("add", {"a": 2, "b": 3}), __import__("hooks").PortCtx())
+        registry.call(make_call("add", {"a": 2, "b": 3}), __import__("compose").PortCtx())
     )
     assert result.ok and result.value == 5
     assert result.meta["danger"] == "SAFE" and result.meta["source"] == "local"

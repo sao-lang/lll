@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from hooks import SkillManifest, SkillPort
+from compose import SkillManifest, SkillPort
 from harness.skills import FileSkillProvider, InjectionVerdict, KeywordInjectionDetector
 
 

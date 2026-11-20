@@ -6,7 +6,7 @@ L3 技能正文需要 SkillPort 参与：注入后按技能清单加载正文（
 """
 from __future__ import annotations
 
-from hooks import DisclosureIndex, DisclosurePacket, SkillManifest, SkillPort, ToolSpec
+from compose import DisclosureIndex, DisclosurePacket, SkillManifest, SkillPort, ToolSpec
 
 from .registry import ToolRegistry
 

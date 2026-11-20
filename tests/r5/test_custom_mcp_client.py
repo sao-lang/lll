@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 
-from hooks import DangerLevel, PortCtx, make_call
+from compose import DangerLevel, PortCtx, make_call
 from harness.tools import MCPManager, MCPTransport, ToolRegistry
 
 
@@ -21,7 +21,7 @@ class MyMCPClient:
 
     async def list_tools(self, server: str) -> list[object]:
         """返回原始工具名（不加 mcp__ 前缀）。"""
-        from hooks import ToolSpec
+        from compose import ToolSpec
         return [ToolSpec(
             name="search", description="搜索",
             parameters_schema={"type": "object", "properties": {"q": {"type": "string"}}},

@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
-from hooks import HookBusError, LLMPort, Provider
+from compose import HookBusError, LLMPort, Provider
 
 __all__ = ["ModelEndpoint", "ModelRegistry", "InMemoryModelRegistry"]
 

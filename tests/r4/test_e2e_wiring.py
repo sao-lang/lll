@@ -7,18 +7,20 @@ from __future__ import annotations
 
 import asyncio
 
-from aop import AOPContainer, FaultRecord, Invocation, Verdict, Warden
-from hooks import LifecycleBus, LifecyclePhase, Notice
+from compose.context import FaultRecord, Invocation, Verdict
+
+from compose import AOPContainer, Warden
+from compose import LifecycleBus, LifecyclePhase, Notice
 from runtime import Invoke, Result, Runner, Session, Terminate
 
 from harness.model import ModelCapability
 from harness.resilience import (
-    BreakerStatus, BudgetGuard, Bulkhead, CircuitBreaker, DegradeLadder,
+    BreakerStatus, Bulkhead, CircuitBreaker, DegradeLadder,
     DegradeMode, Degradation, DegradeStep, Idempotency, RetryPolicy,
 )
 
 from tests.r4.conftest import pctx, req
-from hooks import LLMRequest, LLMResponse, Usage
+from compose import LLMRequest, LLMResponse, Usage
 
 
 class FakeLLM:

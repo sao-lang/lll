@@ -12,7 +12,7 @@ from collections.abc import Callable
 import httpx
 import pytest
 
-from hooks import DangerLevel, PortCtx, ToolSpec
+from compose import DangerLevel, PortCtx, ToolSpec
 from ports.adapters.mcp import (
     HttpMCPTransport, StdioMCPTransport, StdioChannel,
 )

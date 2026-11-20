@@ -10,7 +10,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from typing import Protocol, runtime_checkable
 
-from aop import FaultRecord, Invocation, Verdict
+from compose.context import FaultRecord, Invocation, Verdict
 from runtime import Invoke, Result
 
 from .types import BreakerState, BreakerStatus

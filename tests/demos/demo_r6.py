@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from hooks import PORT_PROTOCOLS, PortCtx  # noqa: E402
+from compose import PORT_PROTOCOLS, PortCtx  # noqa: E402
 
 from harness.rag import (  # noqa: E402
     DefaultPostProcessor,

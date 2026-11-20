@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from aop import FaultRecord, Invocation, Verdict  # noqa: E402
+from compose.context import FaultRecord, Invocation, Verdict
 from runtime import Invoke, Result  # noqa: E402
 
 from harness.resilience import (  # noqa: E402

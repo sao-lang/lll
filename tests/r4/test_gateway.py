@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import asyncio
 
-from hooks import LLMRequest, LLMResponse, PortCtx, Usage
+from compose import LLMRequest, LLMResponse, PortCtx, Usage
 
 from harness.model import (
     CostGuard,

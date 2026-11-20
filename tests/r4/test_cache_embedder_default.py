@@ -17,7 +17,7 @@ from harness.model import (
     InMemoryCacheStore,
     SimilarityCache,
 )
-from hooks import LLMRequest, LLMResponse
+from compose import LLMRequest, LLMResponse
 
 
 def _req(text: str) -> LLMRequest:

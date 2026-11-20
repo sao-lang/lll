@@ -12,11 +12,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from aop import (  # noqa: E402
+from compose import (  # noqa: E402
     AOPContainer, Envelope, Invocation, Prelude, Refiner, Verdict, Warden,
 )
 from runtime import Result  # noqa: E402
-from hooks import LifecycleBus, LifecyclePhase, Notice, Registry  # noqa: E402
+from compose import LifecycleBus, LifecyclePhase, Notice, Registry  # noqa: E402
 from runtime import Invoke  # noqa: E402
 
 
@@ -82,7 +82,7 @@ async def main() -> None:
     blocked = AOPContainer(core, bus=bus).add_warden(Block())
     denied = await blocked.run_invocation(inv)
     assert not denied.ok and seen == ["invoke_rejected"]
-    print("PASS demo_r2: AOP 五角色顺序 + Lifecycle 通知 + 拒绝短路")
+    print("PASS demo_r2: 组合层 call 链顺序 + Lifecycle 通知 + 拒绝短路")
 
 
 if __name__ == "__main__":

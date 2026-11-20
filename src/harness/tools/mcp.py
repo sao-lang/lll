@@ -8,7 +8,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Protocol, runtime_checkable
 
-from hooks import MCPPort, PortCtx, ToolSpec
+from compose import MCPPort, PortCtx, ToolSpec
 from runtime import DynamicValue
 
 from .registry import ToolRegistry

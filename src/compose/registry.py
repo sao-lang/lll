@@ -1,4 +1,4 @@
-"""R2 核心类型：共用注册表与可插拔协议基契约。
+"""共用注册表与可插拔协议基契约（原 R2 hooks/types.py 归位组合层，规格 P2）。
 
 三体系正交后，本模块只保留跟扩展实现无关的数据契约：
 - Registry：Provider 注册表（AOPContainer / LifecycleBus / 装配层共用同一实例，P6）。
@@ -6,7 +6,7 @@
 - HookBusError：装配期错误（重名、缺 provider、冻结后写入）。
 
 扩展点实现已拆分为 AOP 与 Lifecycle 两个体系；
-how 维度见 src/aop/，when 维度见 hooks/lifecycle.py。
+组合层统一装配（原 how/when 维度已归位到 compose/call_chain.py 与 notify.py）。
 """
 from __future__ import annotations
 

@@ -8,7 +8,9 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-from hooks import AuditPort, DangerLevel, PortCtx, ToolSpec
+from compose import AuditPort, PortCtx, ToolSpec
+
+from .types import DangerLevel
 
 from harness.skills import InjectionDetector, InjectionVerdict, KeywordInjectionDetector
 

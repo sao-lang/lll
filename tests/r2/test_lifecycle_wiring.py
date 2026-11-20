@@ -7,11 +7,11 @@ from __future__ import annotations
 
 import asyncio
 
-from aop import AOPContainer
-from hooks import LifecycleBus, LifecyclePhase, runner_notifier
+from compose import AOPContainer
+from compose import LifecycleBus, LifecyclePhase, runner_notifier
 from runtime import Invoke, Result, Runner, Session, Terminate
 
-from aop import Invocation
+from compose import Invocation
 
 
 class _FakeLLM:
@@ -19,13 +19,13 @@ class _FakeLLM:
     def __init__(self, name: str) -> None:
         self.name = name
     async def complete(self, request, ctx):
-        from hooks import LLMResponse, Usage
+        from compose import LLMResponse, Usage
         return LLMResponse(content=self.name, usage=Usage(prompt_tokens=1))
     async def stream(self, request, ctx):
         yield self.name
     @property
     def last_usage(self):
-        from hooks import Usage
+        from compose import Usage
         return Usage(prompt_tokens=1)
 
 

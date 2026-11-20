@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 
-from hooks import PORT_PROTOCOLS, MemoryPort, StorePort
+from compose import PORT_PROTOCOLS, MemoryPort, StorePort
 
 from harness.memory.memory import MemoryStore
 from harness.memory.store import InMemoryStorePort
