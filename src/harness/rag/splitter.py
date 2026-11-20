@@ -8,7 +8,7 @@ from typing import Protocol, runtime_checkable
 
 from harness.rag.types import Chunk, Document
 
-__all__ = ["Splitter", "RecursiveSplitter", "DEFAULT_CHUNK_SIZE", "DEFAULT_OVERLAP"]
+__all__ = ["DEFAULT_CHUNK_SIZE", "DEFAULT_OVERLAP", "RecursiveSplitter", "Splitter"]
 
 DEFAULT_CHUNK_SIZE: int = 512
 DEFAULT_OVERLAP: int = 64
@@ -48,7 +48,7 @@ class RecursiveSplitter:
             ValueError: chunk_size <= 0。
         """
         if chunk_size <= 0:
-            raise ValueError("chunk_size 必须为正整数")
+            raise ValueError("chunk_size must be a positive integer")
         self.chunk_size = chunk_size
         self.overlap = overlap if 0 <= overlap < chunk_size else 0
 

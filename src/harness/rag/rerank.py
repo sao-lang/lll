@@ -9,7 +9,7 @@ from typing import Protocol, runtime_checkable
 
 from harness.rag.types import Hit, Query
 
-__all__ = ["Reranker", "LexicalReranker"]
+__all__ = ["LexicalReranker", "Reranker"]
 
 
 @runtime_checkable

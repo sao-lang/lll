@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import cast
 
 from harness.skills import InjectionVerdict
 
@@ -16,16 +17,32 @@ from harness.rag import (
     RAGPipeline,
     VectorRetriever,
 )
+from harness.rag.embedder import Embedder
+from harness.rag.pipeline import CachePort
+from harness.rag.post import PostProcessor
+from harness.rag.rerank import Reranker
+from harness.rag.rewrite import QueryRewriter
+from harness.rag.types import RAGResult
+from harness.skills import InjectionDetector
 
-from .conftest import CountingEmbedder, FakeSplitter, InMemoryVectorStore as FakeStore, doc, pctx
+from .conftest import CountingEmbedder, FakeSplitter, doc, pctx
 
 
-def _pipeline(**kw: object) -> RAGPipeline:
-    """构造测试流水线。"""
+def _pipeline(
+    *,
+    embedder: Embedder | None = None,
+    rewrite: QueryRewriter | None = None,
+    rerank: Reranker | None = None,
+    cache: CachePort | bool | None = None,
+    detector: InjectionDetector | None = None,
+    post: PostProcessor | None = None,
+) -> RAGPipeline:
+    """构造测试流水线；未注入的增强点保持默认关闭（隔离基础行为）。"""
     store = InMemoryVectorStore()
     return RAGPipeline(
-        FakeSplitter(), kw.pop("embedder", HashEmbedder(dim=8)), store,
-        VectorRetriever(store), DefaultPostProcessor(), **kw,  # type: ignore[arg-type]
+        FakeSplitter(), embedder or HashEmbedder(dim=8), store,
+        VectorRetriever(store), post or DefaultPostProcessor(),
+        rewrite=rewrite, rerank=rerank, cache=cache, detector=detector,
     )
 
 
@@ -58,7 +75,7 @@ def test_pipeline_detector_takes_effect() -> None:
     marker = MarkerDetector()
     p = _pipeline(detector=marker)
 
-    async def run() -> object:
+    async def run() -> RAGResult:
         await p.ingest([doc("d1", "clean normal text")], pctx())
         return await p.query(Query(text="clean", top_k=2))
 
@@ -88,9 +105,10 @@ def test_cache_key_includes_filters_and_ingest_invalidates() -> None:
         q2 = Query(text="alpha", top_k=2, filters={"tenant": "b"})
         await p.query(q1)
         r2 = await p.query(q2)  # 不同 filters → 不命中 q1 缓存
-        n_before = p._cache._data.__len__() if p._cache else 0
+        cache = cast(InMemoryCache, p._cache)
+        n_before = len(cache._data) if cache else 0
         await p.ingest([doc("d2", "alpha beta")], pctx())
-        n_after = p._cache._data.__len__() if p._cache else 0  # ingest 清空
+        n_after = len(cache._data) if cache else 0  # ingest 清空
         return r2, n_before, n_after
 
     _, n_before, n_after = asyncio.run(run())

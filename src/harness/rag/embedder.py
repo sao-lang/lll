@@ -10,7 +10,7 @@ from typing import Protocol, runtime_checkable
 
 from harness.rag.types import Vector
 
-__all__ = ["EmbeddingClient", "Embedder", "HashEmbedder", "DEFAULT_DIM"]
+__all__ = ["DEFAULT_DIM", "Embedder", "EmbeddingClient", "HashEmbedder"]
 
 DEFAULT_DIM: int = 16
 

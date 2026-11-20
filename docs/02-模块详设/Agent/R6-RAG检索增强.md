@@ -114,7 +114,7 @@ class RAGPipeline:
 
 **实现覆盖状态**（v2.1，2026-11-19 独立 review 后如实登记，禁止把占位当已实现）：
 - ✅ **完整实现**：向量化、RRF 融合、预算拼接、引用溯源、乱序修复、空结果降级、注入检测接入、查询/入库向量同源。
-- 🟡 **简化/近似实现（可注入替换升级）**：切分（递归+overlap，无语义/父子块）；存储与索引（向量点积 + meta 精确匹配，关键词通道是词面覆盖扫描、非真 BM25/倒排索引）；重排（词面覆盖近似、非真 cross-encoder，协议可注入替换）；查询改写（默认多查询复制同串为离线占位，不提升召回，协议可注入 HyDE/step-back）；缓存（**精确缓存** InMemoryCache/CachePort，非语义相似缓存）。
+- 🟡 **简化/近似实现（可注入替换升级）**：切分（递归+overlap，无语义/父子块）；存储与索引（向量点积 + meta 精确匹配，关键词通道是词面覆盖扫描、非真 BM25/倒排索引）；重排（词面覆盖近似、非真 cross-encoder，协议可注入替换）；查询改写（默认规则改写=同义词替换+子查询分解，无模型、词表可注入，已非复制占位；语义改写 HyDE/step-back 仍需注入替换，详见[设计规格](./R6-改写器加厚-设计规格.md)）；缓存（**精确缓存** InMemoryCache/CachePort，非语义相似缓存）。
 - ⚪ **未实现 / 归其他模块**（设计保留能力，非当前模块缺陷）：查询路由（未实现，待 R12 装配决策）；MMR 去冗余（未实现）；权限/时效过滤的**语义判定**（当前仅做 meta 键值精确匹配与注入检测，复杂时效/权限规则归 R9）；自检索（未实现）；RAG 评测 Recall/MRR/NDCG（归 R10 EvalPort）；增量去重（当前 upsert 为追加，按 chunk_id/doc_id 覆盖语义未实现）。
 - **红线保障**：引用溯源 / 预算不超 / 空结果确定性 / 注入 fail-closed 四项均真实实现并有测试；其中注入检测复用 R5 检测器，逐块检测后对融合候选统一兜底过滤（filters + 注入），跨块切断注入串属已知边界（拼接插入引用串与换行降低可利用性，评估归 R9 输入护栏统一处理）。
 
@@ -132,8 +132,8 @@ class RAGPipeline:
 | 召回 | Retriever | 混合（向量+词面关键词，RRF 融合） | 返回 Hit 结构；两通道同施 filters |
 | 后处理 | PostProcessor | 默认（meta/注入兜底过滤+预算拼接+引用） | 不超预算、带引用 |
 | 重排 | Reranker | 词面覆盖近似（可注入 cross-encoder） | 返回 Hit 结构 |
-| 改写 | QueryRewriter | 多查询（离线占位，可注入语义改写） | 不引入原问题没有的实体 |
-| 缓存 | CachePort（R6 本地协议，语义同 R4 CachePort 的精确缓存） | InMemoryCache | 命中/invalidate 生效；ingest 自动失效 |
+| 改写 | QueryRewriter | 规则改写（同义词替换+子查询分解，无模型，词表可注入；详见[改写器加厚设计规格](./R6-改写器加厚-设计规格.md)） | 不引入原问题没有的实体（同义词映射视为等价词） |
+| 缓存 | CachePort（R6 本地协议，语义同 R4 CachePort 的精确缓存） | InMemoryCache | 命中/invalidate 生效；ingest 按 key 精准失效（本实例写入的 key 逐个失效，不清空整表，详见[缓存按 key 失效设计规格](./R6-缓存按key失效-设计规格.md)） |
 
 > 注入检测**不是**第 9 个替换点：复用 R5 `InjectionDetector`，通过 `detector=` 构造参数传入（`RAGPipeline.__init__` 第 8 位之后的预留参数），默认由装配层给 `KeywordInjectionDetector`，缺席 fail-closed。
 
@@ -167,7 +167,7 @@ RAG 不是一个组件，是**可分层评测、逐层优化**的流水线。核
 | 层 | 参数 | 默认 | 作用 |
 |----|------|------|------|
 | 切分 | chunk_size / overlap / parent_child | 512 / 64 / True | 父子块兼顾精度与上下文 |
-| 改写 | strategy / n_variants | multi_query / 3 | 多查询/HyDE/step-back |
+| 改写 | n_variants / synonyms（策略固定为规则改写，无 strategy 入参） | 3（最多变体数，含原串）/ 内置精简词表可注入 | 同义词替换+标点/连接词拆子句；无模型（详见[设计规格](./R6-改写器加厚-设计规格.md)） |
 | 召回 | top_k_per_channel / channels | — | 向量+BM25+关键词并行 |
 | RRF | k / weights | 60 / 均等 | `RRF(d)=Σ w/(k+rank)`，融合不同量纲 |
 | 重排 | model / candidates / top_n | cross-encoder / 50 / 5 | 精排 top_n |

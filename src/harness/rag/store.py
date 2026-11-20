@@ -9,7 +9,7 @@ from typing import Protocol, runtime_checkable
 
 from harness.rag.types import Chunk, Hit, Vector
 
-__all__ = ["VectorStore", "InMemoryVectorStore", "matches_filters"]
+__all__ = ["InMemoryVectorStore", "VectorStore", "matches_filters"]
 
 # 元数据过滤中可直查的块字段（具名常量，避免裸串散落）。
 _CHUNK_FIELDS: frozenset[str] = frozenset({"chunk_id", "doc_id"})

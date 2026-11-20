@@ -82,7 +82,7 @@ def test_store_filters_and_empty_vector() -> None:
 
 
 def test_lexical_rerank_and_rewrite() -> None:
-    """重排按词项覆盖度排序取 top_n；改写产出 n 份且不改原查询。"""
+    """重排按词项覆盖度排序取 top_n；规则改写只产可改变体且不改原查询。"""
     hits = [
         Hit(chunk=Chunk(chunk_id="a", doc_id="a", text="unrelated", tokens=1, meta={}), score=0.9),
         Hit(chunk=Chunk(chunk_id="b", doc_id="b", text="alpha beta gamma", tokens=3, meta={}), score=0.1),
@@ -90,9 +90,13 @@ def test_lexical_rerank_and_rewrite() -> None:
     ranked = LexicalReranker(top_n=1).rerank(hits, Query(text="alpha beta"))
     assert ranked[0].chunk.doc_id == "b"
 
-    rewrites = asyncio.run(MultiQueryRewriter(n_variants=3).rewrite(Query(text="q")))
-    assert len(rewrites) == 3 and all(r.text == "q" for r in rewrites)
-    assert rewrites[0] is not rewrites[1]
+    # 规则改写：无可拆/无可替换的单字只产原串一份；有词表命中则产出文本不同的变体。
+    plain = asyncio.run(MultiQueryRewriter(n_variants=3).rewrite(Query(text="q")))
+    assert len(plain) == 1 and plain[0].text == "q"
+    expanded = asyncio.run(MultiQueryRewriter(n_variants=3).rewrite(Query(text="召回")))
+    assert len(expanded) > 1 and expanded[0].text == "召回"
+    assert len({r.text for r in expanded}) == len(expanded)
+    assert expanded[0] is not expanded[1]
 
 
 def test_vector_and_hybrid_retriever_paths() -> None:

@@ -12,10 +12,6 @@ from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
 
-from hooks import PortCtx
-
-from harness.skills import InjectionDetector
-
 from harness.rag.embedder import Embedder
 from harness.rag.post import PostProcessor
 from harness.rag.rerank import Reranker
@@ -30,10 +26,11 @@ from harness.rag.types import (
     Query,
     RAGResult,
     TokenBudget,
-    Vector,
 )
+from harness.skills import InjectionDetector
+from hooks import PortCtx
 
-__all__ = ["RAGPipeline", "PIPELINE_NAME", "CachePort", "InMemoryCache"]
+__all__ = ["PIPELINE_NAME", "CachePort", "InMemoryCache", "RAGPipeline"]
 
 PIPELINE_NAME: str = "rag_pipeline"
 
@@ -59,7 +56,11 @@ class CachePort(Protocol):
         ...
 
     def invalidate(self, key: str | None = None) -> None:
-        """失效单个键；None 表示清空全部。"""
+        """失效单个键；None 表示清空全部。
+
+        ``invalidate(key)`` 对不存在的 key 幂等（默认实现用 pop 容错）；调用方
+        RAGPipeline 仅依赖单键失效，不依赖 None 全清能力——避免共享缓存被误清空。
+        """
         ...
 
 
@@ -95,6 +96,7 @@ class RAGPipeline:
         name: 装配期留名（RAGPort 契约）。
         splitter/embedder/store/retriever/post: 五段主协议实现（公开以便替换断言）。
         rewrite/rerank/detector: 三个增强注入点；cache 为 CachePort 实例或 None。
+        _cache_keys: 本实例写入缓存的 key 账本；ingest 后按 key 逐个失效（S4）。
     """
 
     name: str = PIPELINE_NAME
@@ -140,6 +142,9 @@ class RAGPipeline:
             self._cache = None
         else:
             self._cache = cache
+        # S4：记录本实例写入缓存的 key，ingest 后按 key 精准失效而非全表清空，
+        # 共享 CachePort 时不会误删其他实例的条目（FR-1）。
+        self._cache_keys: set[str] = set()
 
     async def ingest(self, documents: list[DynamicValue], ctx: PortCtx) -> int:
         """RAGPort 入口：切分→向量化→入库，返回成功入库块数。
@@ -149,7 +154,7 @@ class RAGPipeline:
             ctx: Port 上下文（签名履约 RAGPort，当前不消费）。
 
         Returns:
-            成功入库的块数；入库成功后清空缓存（S4：新文档对已缓存 query 可见）。
+            成功入库的块数；入库成功后按 key 失效本实例写入的缓存（S4：新文档对已缓存 query 可见）。
         """
         del ctx
         chunks: list[Chunk] = []
@@ -229,9 +234,11 @@ class RAGPipeline:
         )
         if self._cache is not None:
             self._cache.set(cache_key, result)
+            # S4：登记本实例写入的 key，供 ingest 后逐 key 失效（FR-2）。
+            self._cache_keys.add(cache_key)
         return result
 
-    def with_(self, **replacements: object) -> "RAGPipeline":
+    def with_(self, **replacements: object) -> RAGPipeline:
         """不可变替换：返回注入点被替换的新实例，原实例不变（S1）。
 
         全部 8 个注入点的当前值都被复制；未知替换点抛 ValueError。
@@ -242,8 +249,8 @@ class RAGPipeline:
         }
         unknown = set(replacements) - allowed
         if unknown:
-            raise ValueError(f"未知替换点: {sorted(unknown)}")
-        # cache 归一：保留原 CachePort 实例（或 None）；缓存内容不迁移（新实例空缓存）。
+            raise ValueError(f"Unknown replacement points: {sorted(unknown)}")
+        # cache 归一：保留原 CachePort 实例（或 None）；账本归属见下方 FR-5。
         current: dict[str, object] = {
             "splitter": self.splitter,
             "embedder": self.embedder,
@@ -256,12 +263,29 @@ class RAGPipeline:
             "detector": self.detector,
         }
         current.update(replacements)
-        return type(self)(**current)  # type: ignore[arg-type]
+        new = type(self)(**current)  # type: ignore[arg-type]
+        # S4 账本归属（FR-5）：cache 实例未变（含未传）→ 共享同一账本，否则
+        # 新实例 ingest 失效不到旧实例写入的 key，破 S4；cache 被换 → 新实例空账本。
+        if new._cache is self._cache:
+            new._cache_keys = self._cache_keys
+        return new
 
     async def invalidate_cache(self) -> None:
-        """清空检索缓存（委托 CachePort）。"""
-        if self._cache is not None:
-            self._cache.invalidate()
+        """按 key 失效本实例写入的检索缓存（不无参全表清空）。
+
+        FR-3：对账本中每个 key 调 ``CachePort.invalidate(key)``，随后清空账本；
+        默认内存实现与自定义共享缓存走同一路径，避免误删他人的缓存条目。
+        """
+        if self._cache is None or not self._cache_keys:
+            return
+        # 先固定本次失效集合：CachePort 契约为同步（§CachePort）、本方法内无 await，
+        # asyncio 单线程下循环期间不会被任务切换插入登记，snapshot == 当前账本。
+        # 用 difference_update 而非 clear：仅移除已失效的 key，若未来换成可挂起/跨线程
+        # 实现，循环期间新登记的 key 会保留到下次 ingest，不会"有缓存无账本"泄漏。
+        snapshot = tuple(self._cache_keys)
+        for key in snapshot:
+            self._cache.invalidate(key)
+        self._cache_keys.difference_update(snapshot)
 
     @staticmethod
     def _cache_key(q: Query) -> str:

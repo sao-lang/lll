@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from hooks import PortCtx
 
+from harness.rag.retriever import Retriever
 from harness.rag.types import Chunk, Document, Hit, Query, Vector
-
 
 def pctx(budget: object = None) -> PortCtx:
     """构造 R6 用的 PortCtx，budget_left 可注入 TokenBudget 快照。"""
@@ -16,7 +16,7 @@ def doc(doc_id: str, text: str, *, title: str = "") -> Document:
     return Document(doc_id=doc_id, text=text, meta={"title": title})
 
 
-def query(text: str, *, top_k: int = 3, budget: object = None) -> Query:
+def query(text: str, *, top_k: int = 3, budget: int | None = None) -> Query:
     """构造查询。"""
     return Query(text=text, top_k=top_k, token_budget=budget)
 
@@ -30,19 +30,19 @@ class FakeSplitter:
         """设定切片大小。"""
         self.size = size
 
-    def split(self, document: Document) -> list[Chunk]:
+    def split(self, doc: Document) -> list[Chunk]:
         """把正文按 size 切片，chunk_id 带序号。"""
         out: list[Chunk] = []
-        text = document.text
+        text = doc.text
         for i, start in enumerate(range(0, len(text), self.size)):
             piece = text[start : start + self.size]
             out.append(
                 Chunk(
-                    chunk_id=f"{document.doc_id}:{i}",
-                    doc_id=document.doc_id,
+                    chunk_id=f"{doc.doc_id}:{i}",
+                    doc_id=doc.doc_id,
                     text=piece,
                     tokens=len(piece),
-                    meta=dict(document.meta),
+                    meta=dict(doc.meta),
                 )
             )
         return out
@@ -89,7 +89,7 @@ class CountingRetriever:
 
     name = "counting_retriever"
 
-    def __init__(self, inner: object) -> None:
+    def __init__(self, inner: Retriever) -> None:
         """包装真实召回器。"""
         self._inner = inner
         self.calls = 0

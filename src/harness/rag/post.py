@@ -7,15 +7,14 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
+from harness.rag.store import matches_filters
+from harness.rag.types import Hit, RAGResult, TokenBudget
 from harness.skills import InjectionDetector, InjectionVerdict, KeywordInjectionDetector
 
-from harness.rag.store import matches_filters
-from harness.rag.types import Hit, Query, RAGResult, TokenBudget
-
-__all__ = ["PostProcessor", "DefaultPostProcessor", "EMPTY_CONTEXT"]
+__all__ = ["EMPTY_CONTEXT", "DefaultPostProcessor", "PostProcessor"]
 
 # 空结果固定提示文本（具名常量，禁魔法字符串）。
-EMPTY_CONTEXT: str = "未检索到相关文档，请依据常识谨慎作答或拒绝回答。"
+EMPTY_CONTEXT: str = "No relevant documents were found. Answer cautiously from general knowledge or decline to answer."
 
 # 引用标注模板（具名常量）。
 _CITATION_FMT: str = "[{cid}]"

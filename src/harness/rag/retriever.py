@@ -9,12 +9,13 @@ RRF(d) = Σ weight / (k + rank)，k=60（设计 §5）。
 """
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from collections.abc import Callable
+from typing import Protocol, cast, runtime_checkable
 
 from harness.rag.store import VectorStore, matches_filters
-from harness.rag.types import Chunk, Hit, Query, RRF_K, Vector
+from harness.rag.types import RRF_K, Chunk, Hit, Query, Vector
 
-__all__ = ["Retriever", "VectorRetriever", "HybridRetriever"]
+__all__ = ["HybridRetriever", "Retriever", "VectorRetriever"]
 
 # 混合召回的通道权重（具名常量，避免裸数字散落）。
 _VECTOR_WEIGHT: float = 1.0
@@ -87,10 +88,14 @@ class HybridRetriever:
             return self._all_chunks
         getter = getattr(self._store, "all_chunks", None)
         if callable(getter):
-            return list(getter())
+            # getattr 的静态类型是 object；callable() 只收窄到 Callable[..., object]，
+            # 其返回值仍是 object，传给 list() 会因不满足 Iterable 而报错。
+            # 鸭子取用的真实契约由 store.all_chunks 保证（-> list[Chunk]），cast 显式还源类型。
+            corpus_getter = cast(Callable[[], list[Chunk]], getter)
+            return list(corpus_getter())
         raise ValueError(
-            "混合召回需要关键词素材：请给 HybridRetriever 传 all_chunks，"
-            "或让 VectorStore 实现 all_chunks()"
+            "Hybrid retrieval requires keyword material: pass all_chunks to HybridRetriever, "
+            "or let VectorStore implement all_chunks()"
         )
 
     def _keyword_search(self, query: Query, corpus: list[Chunk]) -> list[Hit]:

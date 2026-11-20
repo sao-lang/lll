@@ -54,9 +54,9 @@ class Document(_Strict):
         meta: 元数据（标题/页码/权限标签等，键由上游决定故为动态映射）。
     """
 
-    doc_id: str = Field(description="文档唯一标识")
-    text: str = Field(description="正文")
-    meta: dict[str, object] = Field(default_factory=dict, description="元数据")
+    doc_id: str = Field(description="Unique document identifier")
+    text: str = Field(description="Raw text")
+    meta: dict[str, object] = Field(default_factory=dict, description="Metadata")
 
 
 class Chunk(_Strict):
@@ -71,12 +71,12 @@ class Chunk(_Strict):
         vector: 向量化产物（入库前由 Embedder 填充；纯文本块为 None）。
     """
 
-    chunk_id: str = Field(description="块唯一标识")
-    doc_id: str = Field(description="来源文档标识")
-    text: str = Field(description="块正文")
-    tokens: int = Field(default=0, description="token 估算数")
-    meta: dict[str, object] = Field(default_factory=dict, description="元数据")
-    vector: Vector | None = Field(default=None, description="向量化产物")
+    chunk_id: str = Field(description="Unique chunk identifier")
+    doc_id: str = Field(description="Source document identifier")
+    text: str = Field(description="Chunk text")
+    tokens: int = Field(default=0, description="Estimated token count")
+    meta: dict[str, object] = Field(default_factory=dict, description="Metadata")
+    vector: Vector | None = Field(default=None, description="Vectorized embedding")
 
 
 class Hit(_Strict):
@@ -89,10 +89,10 @@ class Hit(_Strict):
         ts: 命中时间戳（可选）。
     """
 
-    chunk: Chunk = Field(description="命中的块")
-    score: float = Field(default=0.0, description="相关度分数")
-    source: str = Field(default="", description="来源标识")
-    ts: int | None = Field(default=None, description="命中时间戳")
+    chunk: Chunk = Field(description="Matched chunk")
+    score: float = Field(default=0.0, description="Relevance score")
+    source: str = Field(default="", description="Source identifier")
+    ts: int | None = Field(default=None, description="Hit timestamp")
 
 
 class Query(_Strict):
@@ -106,11 +106,11 @@ class Query(_Strict):
         purpose: 查询用途（区分问答/记忆召回）。
     """
 
-    text: str = Field(description="查询文本")
-    filters: dict[str, object] | None = Field(default=None, description="元数据过滤")
-    top_k: int = Field(default=5, description="每通道召回数")
-    token_budget: int | None = Field(default=None, description="token 预算")
-    purpose: QueryPurpose = Field(default=QueryPurpose.QA, description="查询用途")
+    text: str = Field(description="Query text")
+    filters: dict[str, object] | None = Field(default=None, description="Metadata filter")
+    top_k: int = Field(default=5, description="Top-k per channel")
+    token_budget: int | None = Field(default=None, description="Token budget")
+    purpose: QueryPurpose = Field(default=QueryPurpose.QA, description="Query purpose")
 
 
 class TokenBudget(_Strict):
@@ -120,7 +120,7 @@ class TokenBudget(_Strict):
         limit: 预算上限；None 表示不限制，非负整数表示硬上限（0 = 无预算可分配）。
     """
 
-    limit: int | None = Field(default=None, description="预算上限；None 不限制，0 无预算")
+    limit: int | None = Field(default=None, description="Budget cap; None means unlimited, 0 means no budget")
 
     def __int__(self) -> int:
         """返回预算整数值；None 按 -1 返回（调用方据此判不限）。"""
@@ -138,8 +138,8 @@ class RAGResult(_Strict):
         tokens_used: 本次拼接消耗的 token 数。
     """
 
-    context: str = Field(default="", description="拼接后的上下文文本")
-    citations: list[str] = Field(default_factory=list, description="引用 id 列表")
-    hits: list[Hit] = Field(default_factory=list, description="参与拼接的命中")
-    empty: bool = Field(default=False, description="是否空结果")
-    tokens_used: int = Field(default=0, description="拼接消耗的 token 数")
+    context: str = Field(default="", description="Assembled context text")
+    citations: list[str] = Field(default_factory=list, description="List of citation ids")
+    hits: list[Hit] = Field(default_factory=list, description="Hits included in assembly")
+    empty: bool = Field(default=False, description="Whether the result is empty")
+    tokens_used: int = Field(default=0, description="Tokens consumed by assembly")

@@ -23,4 +23,4 @@ def test_empty_result_is_explicit() -> None:
     assert out.empty is True
     assert out.hits == []
     assert out.context
-    assert "未检索" in out.context or "empty" in out.context.lower()
+    assert "No relevant documents" in out.context or "empty" in out.context.lower()
