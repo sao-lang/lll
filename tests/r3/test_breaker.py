@@ -1,4 +1,4 @@
-"""R3 熔断器三态机测试（ARCH-v5）：closed→open→half_open→closed + 样本量 + 失败率阈值 + 维度隔离。
+"""R3 熔断器三态机测试：closed→open→half_open→closed + 样本量 + 失败率阈值 + 维度隔离。
 
 领域逻辑直接测 CircuitBreaker 插件实例（状态在实例上，跨调用存活）；apply 注册三类 tap。
 熔断状态存取已异步化（BreakerStore 协议），测试用同步函数 + asyncio.run 包装。
@@ -8,15 +8,13 @@ from __future__ import annotations
 import asyncio
 from dataclasses import replace
 
-from hooks import DecisionAction, Host, RequestScope
-from runtime import Effect, EffectKind
+from runtime import Effect, Invoke
 
 from harness.resilience import BreakerStatus, CircuitBreaker, InMemoryBreakerStore
 from tests.r3.conftest import err_result, ok_result
 
 DIM = ("provider", "openai")
-EFFECT = Effect(EffectKind.LLM, {"messages": []})
-
+EFFECT = Invoke(port="llm", payload={'messages': []})
 
 def _policy(clock: object = None, **kw: object) -> CircuitBreaker:
     """构造熔断器插件实例（自带状态）；注入可控时钟推进冷却期。
@@ -32,7 +30,6 @@ def _policy(clock: object = None, **kw: object) -> CircuitBreaker:
     )
     opts.update(kw)
     return CircuitBreaker(**opts)  # type: ignore[arg-type]
-
 
 class TestCircuitBreakerStateMachine:
     """三态机：样本不足不开、阈值触发 open、冷却后半开、探测成功回 closed。"""
@@ -227,78 +224,4 @@ class TestCircuitBreakerStateMachine:
             assert len(st.window) == 3
             assert st.status == BreakerStatus.CLOSED.value
             assert st.failures == 4
-        asyncio.run(run())
-
-
-class TestCircuitBreakerPlugin:
-    """插件自身持有状态：apply 注册三类 tap，check_and_signal/observe 在实例上。"""
-
-    def test_apply_registers_taps(self) -> None:
-        """apply(host) 在 before_invoke / after_invoke / invoke_error 挂 tap。"""
-        host = Host()
-        plugin = CircuitBreaker()
-        plugin.apply(host)
-        assert "r3_breaker" in host.hook("before_invoke").names
-        assert "r3_breaker" in host.hook("after_invoke").names
-        assert "r3_breaker" in host.hook("invoke_error").names
-
-    def test_check_emits_degrade_when_open(self) -> None:
-        """OPEN：check_and_signal 返回占位 DEGRADE，并向 scope 发 degrade 信号。"""
-        async def run() -> None:
-            now = [0.0]
-            plugin = _policy(clock=lambda: now[0], open_cooldown_s=30.0)
-            for _ in range(3):
-                await plugin.record(err_result("500"), DIM)
-
-            scope = RequestScope()
-            d = await plugin.check_and_signal(scope, EFFECT)
-            assert d is not None
-            assert d.action is DecisionAction.DEGRADE
-            assert d.target == ""  # 占位，目标由 settle 阶段裁决
-            assert any(
-                s.kind == "degrade" and s.reason == "breaker_open"
-                for s in scope.signals
-            )
-        asyncio.run(run())
-
-    def test_check_passes_when_healthy(self) -> None:
-        """CLOSED：check_and_signal 返回 None（放行）。"""
-        async def run() -> None:
-            plugin = CircuitBreaker(dimension_of=lambda e: DIM)
-            scope = RequestScope()
-            assert await plugin.check_and_signal(scope, EFFECT) is None
-            assert scope.signals == []
-        asyncio.run(run())
-
-    def test_observe_records_last_result(self) -> None:
-        """after_invoke：从 scope.last_result 记录失败。"""
-        async def run() -> None:
-            plugin = CircuitBreaker(dimension_of=lambda e: DIM)
-            scope = RequestScope(last_result=err_result("500"))
-            await plugin.observe(scope, EFFECT)
-            assert (await plugin.state(DIM)).failures == 1
-        asyncio.run(run())
-
-    def test_observe_error_delegates_to_observe(self) -> None:
-        """invoke_error：与 after_invoke 共用记录逻辑（last_result 已由 host.call 写入）。"""
-        async def run() -> None:
-            plugin = CircuitBreaker(dimension_of=lambda e: DIM)
-            scope = RequestScope(last_result=err_result("500"))
-            await plugin.observe_error(scope, EFFECT)
-            assert (await plugin.state(DIM)).failures == 1
-        asyncio.run(run())
-
-    def test_shared_store_across_breakers(self) -> None:
-        """共享同一 store 的两个插件实例：熔断状态互通。"""
-        async def run() -> None:
-            store = InMemoryBreakerStore()
-            b1 = _policy(store=store)
-            b2 = _policy(store=store)
-            writing = RequestScope(last_result=err_result("500"))
-            for _ in range(3):
-                await b1.observe(writing, EFFECT)
-
-            reading = RequestScope()
-            assert (await b2.state(DIM)).status == BreakerStatus.OPEN.value
-            assert (await b2.check_and_signal(reading, EFFECT)) is not None
         asyncio.run(run())

@@ -1,7 +1,7 @@
 """R1-T06：wait_human 挂起 → checkpoint → resume 续跑。"""
 import asyncio
 
-from runtime import AgentState, Effect, EffectKind, Result, Runner, Session
+from runtime import AgentState, Effect, Result, Runner, Session, Suspend, Terminate
 
 
 async def fake_call(effect, ctx):
@@ -13,8 +13,8 @@ async def fake_dispatch(effect, ctx):
 
 
 def human_program(state):
-    answer = yield Effect(EffectKind.WAIT_HUMAN, {"question": "continue?"})
-    yield Effect(EffectKind.END, {"output": answer})
+    answer = yield Suspend(question='continue?')
+    yield Terminate(output=answer)
 
 
 def test_replay_backfill_branches():
@@ -38,7 +38,7 @@ def test_replay_backfill_branches():
 
 def test_suspend_and_resume():
     async def run():
-        runner = Runner(dispatch=fake_dispatch, call=fake_call, checkpoint_every=1)
+        runner = Runner(call=fake_call, checkpoint_every=1)
         session = Session(session_id="h1", program_factory=lambda: human_program(AgentState()))
         r1 = await runner.run(session)
         assert r1.status == "suspended"

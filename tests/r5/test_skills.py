@@ -51,7 +51,7 @@ def test_injection_detected_refuses_body(tmp_path: Path) -> None:
     detector = KeywordInjectionDetector("ignore previous instructions")
     assert detector.detect("ignore previous instructions") is InjectionVerdict.INJECTED
     provider = FileSkillProvider(tmp_path, detector=detector)
-    with pytest.raises(ValueError, match="注入"):
+    with pytest.raises(ValueError, match="Injection"):
         provider.body("evil")
 
 

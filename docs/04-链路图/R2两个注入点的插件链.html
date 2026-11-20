@@ -1,46 +1,40 @@
-<svg viewBox="0 0 680 430" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
-  <title>R2 Host 的 dispatch 与 call 两个注入点</title>
-  <desc>dispatch 阶段串 before_invoke 守卫与 transform 改写并经 settle 裁决；call 阶段用 around_invoke 包裹真实调用，after_invoke 观察后再 settle</desc>
-  <defs>
-    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-      <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-    </marker>
-  </defs>
-  <text x="40" y="26" font-family="var(--font-sans)" font-size="14" font-weight="500" fill="#2C2C2A">注入点 ① Host.dispatch — 调用 Port 之前</text>
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>R2 插件链（已作废）</title>
+<style>
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #2C2C2A; line-height: 1.7; padding: 24px 32px; max-width: 900px; }
+  .void { border-left: 4px solid #A32D2D; background: #FCEBEB; color: #791F1F; padding: 12px 16px; margin-bottom: 20px; }
+  h1 { font-size: 20px; font-weight: 600; }
+  h2 { font-size: 16px; font-weight: 600; margin-top: 24px; }
+  code { background: #F1EFE8; padding: 2px 4px; border-radius: 4px; }
+  pre { background: #F7F6F2; border: 1px solid #DDD9D0; border-radius: 8px; padding: 16px; overflow-x: auto; font-size: 13px; }
+  .note { color: #5F5E5A; font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="void"><strong>【已作废】</strong>本图对应的旧扩展点模型已删除，不再维护。原图保留仅作历史留痕，不得作为设计或实现依据。</div>
 
-  <g>
-    <rect x="40" y="42" width="600" height="48" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
-    <text x="340" y="59" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#0C447C">before_invoke · BAIL 守卫</text>
-    <text x="340" y="77" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="12" fill="#185FA5">killswitch · 幂等 · 舱壁 · 限流 · 熔断检查 → 首个非 CONTINUE 短路</text>
-  </g>
-  <line x1="340" y1="90" x2="340" y2="108" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+<h1>R2：Invoke 的 AOP 五角色链 + Lifecycle 通知旁路</h1>
+<p class="note">设计依据：<code>docs/01-总览与设计/扩展体系重构规格-20261120.md</code>（P1/P2/P3/P12）与 <code>docs/02-模块详设/Agent/R2-插件总线与协议.md</code>、<code>docs/01-总览与设计/AGENT-总设计.md</code>。三体系正交：Port 回答 what、AOP 增强器回答 how、Lifecycle 通知回答 when。</p>
 
-  <g>
-    <rect x="40" y="110" width="600" height="48" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
-    <text x="340" y="127" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#0C447C">transform · WATERFALL 上下文改写</text>
-    <text x="340" y="145" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="12" fill="#185FA5">逐 tap 链式改写文本（如预算收尾提示），上次输出作下次输入</text>
-  </g>
-  <line x1="340" y1="158" x2="340" y2="176" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
-
-  <g>
-    <rect x="40" y="178" width="600" height="48" rx="8" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.5"/>
-    <text x="340" y="195" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#3C3489">settle · BAIL 降级裁决</text>
-    <text x="340" y="213" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="12" fill="#534AB7">有 degrade 信号 → 选目标写 ctx.degrade_target（守卫短路也走这里）</text>
-  </g>
-
-  <text x="40" y="258" font-family="var(--font-sans)" font-size="14" font-weight="500" fill="#2C2C2A">注入点 ② Host.call — 真正调用 Port</text>
-
-  <g>
-    <rect x="40" y="274" width="600" height="48" rx="8" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.5"/>
-    <text x="340" y="291" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#3C3489">around_invoke · AROUND 洋葱包裹</text>
-    <text x="340" y="309" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="12" fill="#534AB7">timeout（内）→ retry（外）→ core = R4 网关 as_call()</text>
-  </g>
-  <line x1="340" y1="322" x2="340" y2="340" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
-
-  <g>
-    <rect x="40" y="342" width="600" height="48" rx="8" fill="#E1F5EE" stroke="#1D9E75" stroke-width="0.5"/>
-    <text x="340" y="359" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#085041">after_invoke / invoke_error · PARALLEL 观察</text>
-    <text x="340" y="377" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="12" fill="#0F6E56">熔断回喂滑窗 · 异常隔离 · 再 settle 更新 sticky target</text>
-  </g>
-  <text x="40" y="416" font-family="var(--font-sans)" font-size="11" fill="#5F5E5A">RequestScope 每次调用新建：signals 协作 · target 降级目标 · last_result 观察 · releases 兜底释放</text>
-</svg>
+<h2>新链路（文字 / mermaid 式描述）</h2>
+<pre>
+flowchart TD
+    A["装配层 AOPContainer 按角色注册<br/>LifecycleBus 按 name + register(bus) 订阅"] --> B["Runner 收到 Invoke Effect"]
+    B --> C["Prelude.run 最外层包裹"]
+    C --> D["Warden.guard 准入 → Verdict(allowed, reason)"]
+    D -->|拒绝| J["AOP 容器发 invoke_rejected 通知<br/>框架折叠为失败 Result"]
+    D -->|放行| E["Envelope.wrap 前置"]
+    E --> F["Refiner.refine 产新 Invocation"]
+    F --> G["Port call 唯一走能力实现"]
+    G --> H["Envelope.wrap 后置"]
+    H --> I["Salvage.recover 仅异常时"]
+    I --> K["R1 fold 写回 State + Event"]
+    H --> K
+    L["Lifecycle 16 通知点<br/>不消费 / 只做事 / 异常就地隔离<br/>由能力装配层触发"] -.旁路.-> B
+</pre>
+<p class="note">要点：固定顺序 <code>Prelude → Warden → Envelope(前) → Refiner → Port call → Envelope(后) → Salvage(异常时)</code>；增强器不声明 priority；只有 Invoke 进 AOP 链，Spawn/Suspend/Terminate 走内核快路径；拒绝可见性由 <code>invoke_rejected</code> 通知兜住，不依赖任何旧裁决符号。</p>
+</body>
+</html>

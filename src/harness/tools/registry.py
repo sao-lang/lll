@@ -138,16 +138,16 @@ class ToolRegistry:
         problems: list[str] = []
         for name, spec in self._specs.items():  # 逐工具检查，收集全部问题而非首个即止。
             if spec.danger is None:
-                problems.append(f"{name}: danger 未声明")
+                problems.append(f"{name}: danger not declared")
                 continue
             resolved = DangerLevel.coerce(spec.danger)
             if resolved in (DangerLevel.HIGH, DangerLevel.CRITICAL):
                 # 高危工具没有沙盒等于裸奔，必须在装配期暴露。
                 if self._sandbox is None:
-                    problems.append(f"{name}: {resolved.value} 工具缺少 sandbox")
+                    problems.append(f"{name}: {resolved.value} tool missing sandbox")
                 # CRITICAL 还需人工闸门，沙盒在场也不能免。
                 if resolved is DangerLevel.CRITICAL and self._human is None:
-                    problems.append(f"{name}: CRITICAL 工具缺少 human")
+                    problems.append(f"{name}: CRITICAL tool missing human reviewer")
         return problems
 
     def freeze(self) -> Self:
@@ -233,7 +233,7 @@ class ToolRegistry:
             # CRITICAL：审批 + 沙盒两道门缺一不可。
             if self._human is None:
                 return finish(ok=False, error=_ERR_NO_HUMAN)
-            question = f"是否批准执行工具 {call.name}（call_id={call.call_id}）？"
+            question = f"Approve execution of tool {call.name} (call_id={call.call_id})?"
             answer = await self._human.ask(question, [_APPROVE, _OPT_DENY], ctx)
             if answer.strip().lower() != _APPROVE:
                 # 右侧是模块常量（Name），不是字符串字面量比较（规则 5）。

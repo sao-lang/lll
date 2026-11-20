@@ -10,7 +10,18 @@ from dataclasses import dataclass, replace
 from typing import Protocol, cast
 
 from .errors import ProgramCrashed, ProgramInvalid
-from .types import DONE, DoneSentinel, DynamicValue, Effect, EffectPayload, Program
+from .types import (
+    DONE,
+    DoneSentinel,
+    DynamicValue,
+    Effect,
+    EffectPayload,
+    Invoke,
+    Program,
+    Spawn,
+    Suspend,
+    Terminate,
+)
 
 __all__ = ["EffectBatch", "Interpreter", "InterpreterImpl", "SendResult"]
 
@@ -51,29 +62,34 @@ class Interpreter(Protocol):
         ...
 
 
+def _is_effect(value: DynamicValue) -> bool:
+    """判断 yield 值是否为合法 Effect（tagged union 四成员之一）。"""
+    return isinstance(value, (Invoke, Spawn, Suspend, Terminate))
+
+
 def _expand(effect: Effect) -> tuple[Effect, ...]:
-    """batch=True 的 Effect 按 payload['calls'] 展开为多个独立 Effect。
+    """batch=True 的 Invoke 按 payload['calls'] 展开为多个独立 Invoke。
 
     分支：
-        - 非 batch：原样返回单个 Effect。
-        - batch 但无 calls：退化为单个非 batch Effect，避免空批次。
-        - batch 且有 calls：剔除 calls 键后，逐个 call 生成独立 Effect，
-          每个 payload 用 'call' 单值承载，trace_id 原样透传。
+        - 非 Invoke 或无 batch：原样返回单个 Effect。
+        - batch 但无 calls：退化为单个非 batch Invoke，避免空批次。
+        - batch 且有 calls：剔除 calls 键后，逐个 call 生成独立 Invoke，
+          每个 payload 用 'call' 单值承载，trace_id 与幂等键原样透传。
     """
-    if not effect.batch:  # 非批量：无需展开
+    if not isinstance(effect, Invoke) or not effect.batch:
         return (effect,)
     calls = list(effect.payload.get("calls") or ())  # 待展开的调用列表
     if not calls:  # 批量声明为空：降级为单 Effect，避免产出空批次
         return (replace(effect, batch=False),)
-    # 展开时移除 calls 聚合键，避免每个子 Effect 又携带整份 calls。
+    # 展开时移除 calls 聚合键，避免每个子 Effect 又携带整份 calls（D-2：port 种类不变）。
     payload: dict[str, DynamicValue] = {k: v for k, v in effect.payload.items() if k != "calls"}
     return tuple(
-        Effect(
-            effect.kind,
-            cast(EffectPayload, {**payload, "call": call}),  # 每个 call 变单值 payload
+        Invoke(
+            port=effect.port,
+            payload=cast(EffectPayload, {**payload, "call": call}),
             batch=False,  # 子 Effect 已展开，不再是 batch
             trace_id=effect.trace_id,  # 保留链路溯源
-            # B3：父 Effect 的幂等键传给每个子 Effect，否则批量副作用的重试红线失效。
+            # 父 Effect 的幂等键传给每个子 Effect，否则批量副作用的重试红线失效。
             idempotency_key=effect.idempotency_key,
         )
         for call in calls
@@ -128,14 +144,15 @@ class InterpreterImpl:
             raise ProgramCrashed(f"{type(exc).__name__}: {exc}") from exc
         self._started = True  # 推进成功，标记已启动
 
-        if isinstance(raw, Effect):
-            single = _expand(raw)  # 单 Effect（可能是 batch，需展开）
-            return EffectBatch(single, batched=raw.batch or len(single) > 1)
+        if _is_effect(raw):
+            single = _expand(raw)  # 单 Effect（Invoke 可能是 batch，需展开）
+            batched = (isinstance(raw, Invoke) and raw.batch) or len(single) > 1
+            return EffectBatch(single, batched=batched)
         # Program 也允许一次 yield 一个 Effect 列表（并行声明）。
         # 这里仅认「非空」列表：空列表既非合法 Effect 批、也不能当成 DONE，必须落到底部按契约违规报告。
         if isinstance(raw, (list, tuple)) and raw:
             items: tuple[DynamicValue, ...] = tuple(raw)
-            if all(isinstance(e, Effect) for e in items):
+            if all(_is_effect(e) for e in items):
                 # 逐项展开后再合并：列表里每个 Effect 自己可能也是 batch。
                 many: tuple[Effect, ...] = tuple(
                     expanded

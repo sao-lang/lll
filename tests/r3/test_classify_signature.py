@@ -1,6 +1,6 @@
-"""ARCH-v5 签名对齐：FailureClassifier.classify 的 ctx 是鸭子类型 object。
+"""签名对齐：FailureClassifier.classify 的 ctx 是鸭子类型 object。
 
-背景：v2.x 曾锁 HookCtx，v5 重构后分类器只依赖 result.error，
+分类器只依赖 result.error，
 ctx 放宽为 object（可传 RequestScope / 任意上下文）。
 本测试用类型提示锁定签名，防止契约漂移。
 """

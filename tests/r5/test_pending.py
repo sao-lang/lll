@@ -6,7 +6,7 @@ import asyncio
 import pytest
 from pydantic import BaseModel, ConfigDict
 
-from hooks import DangerLevel, Host, PortCtx, Registry, make_call
+from hooks import DangerLevel, PortCtx, Registry, make_call
 from harness.tools import (
     ToolsCapability,
     ToolRegistry,
@@ -121,7 +121,7 @@ def test_install_flushes_pending_automatically() -> None:
 
     registry = ToolRegistry()
     cap = ToolsCapability(registry=registry)
-    cap.install(Host(), Registry())
+    cap.install(Registry())
     assert "auto_add" in [s.name for s in registry.catalog(level=2)]
     assert pending_tools() == ()
 

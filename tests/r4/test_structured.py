@@ -72,7 +72,7 @@ class TestStructuredOutputValidator:
 
 
 class TestSchemaValidatorInjection:
-    """R4 v1.6 结构化校验器可插拔（四要素）：协议 + 默认 + 替换入口 + 履约校验。"""
+    """R4 结构化校验器可插拔（四要素）：协议 + 默认 + 替换入口 + 履约校验。"""
 
     def test_default_is_minimal_validator(self) -> None:
         """缺省用 MinimalSchemaValidator，行为与旧版一致。"""

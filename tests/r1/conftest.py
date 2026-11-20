@@ -3,25 +3,25 @@ from __future__ import annotations
 
 import pytest
 
-from runtime import AgentState, Effect, EffectKind, Result, Session
+from runtime import AgentState, Effect, Result, Session, Invoke, Terminate
 
 
 def react_program(state: AgentState):
     """ReAct 脚本：LLM → 有 tool_calls 则调工具 → 无则 END。"""
     while True:
-        resp = yield Effect(EffectKind.LLM, {"messages": state.messages})
+        resp = yield Invoke(port="llm", payload={'messages': state.messages})
         calls = resp.get("tool_calls", []) if isinstance(resp, dict) else []
         if not calls:
-            yield Effect(EffectKind.END, {"output": resp.get("content", "done") if isinstance(resp, dict) else "done"})
+            yield Terminate(output=resp.get('content', 'done') if isinstance(resp, dict) else 'done')
             return
-        yield Effect(EffectKind.TOOL, {"calls": calls}, batch=True)
+        yield Invoke(port="tool", payload={'calls': calls}, batch=True)
 
 
 async def fake_call(effect: Effect, ctx) -> Result:
     """最小 Port：LLM 返回可配置响应，工具回显。"""
-    if effect.kind is EffectKind.LLM:
+    if isinstance(effect, Invoke) and effect.port == "llm":
         return Result.success({"content": "answer", "tool_calls": []})
-    if effect.kind is EffectKind.TOOL:
+    if isinstance(effect, Invoke) and effect.port == "tool":
         return Result.success({"ok": True, "value": "x"})
     return Result.success(None)
 

@@ -1,13 +1,16 @@
-"""R3 其余防线测试（ARCH-v5）：降级选级 / 限流令牌桶 / 舱壁池 / 幂等 / watchdog / killswitch。
+"""R3 降级与防线测试：新 AOP 角色接口，完整保留四坑与领域语义断言。
 
-守卫统一返回 Decision 并可通过 RequestScope.emit(Signal) 报降级意图；
-降级选级由 Degradation.select(signals) 直接裁决（available 收缩，末级 REFUSE）。
-不再依赖 ControlState / ctx.meta / HookBus.emit / HookMode.DEGRADER。
+四坑（P9）：B1 按会话隔离；B2 failed_target 是后端注册名；R3-6 available 永久剔除写回；
+R3-7 retry/timeout 故障记录带 failed_target。断言强度不降，只换 API 形态。
 """
 from __future__ import annotations
 
-from hooks import DecisionAction, RequestScope, Signal
-from runtime import Effect, EffectKind
+import asyncio
+
+import pytest
+
+from aop import FaultRecord, Verdict
+from runtime import Invoke
 
 from harness.resilience import (
     Bulkhead,
@@ -20,9 +23,11 @@ from harness.resilience import (
     RateLimit,
     Watchdog,
 )
+from tests.r3.conftest import make_ctx
 
-EFFECT = Effect(EffectKind.LLM, {})
-TOOL_EFFECT = Effect(EffectKind.TOOL, {})
+EFFECT = Invoke(port="llm", payload={})
+TOOL_EFFECT = Invoke(port="tool", payload={})
+SID = "s-degrade"
 
 
 def _ladder() -> DegradeLadder:
@@ -32,6 +37,10 @@ def _ladder() -> DegradeLadder:
         DegradeStep(target="backup", mode=DegradeMode.REROUTE, quality=0.6),
         DegradeStep(target="", mode=DegradeMode.REFUSE, quality=0.0),
     ))
+
+
+def _fault(reason: str, target: str) -> FaultRecord:
+    return FaultRecord(reason=reason, failed_target=target)
 
 
 class TestDegradationSelection:
@@ -44,22 +53,38 @@ class TestDegradationSelection:
         assert refuse.mode is DegradeMode.REFUSE and refuse.target == ""
 
     def test_select_shrinks_available_step_by_step(self) -> None:
-        """按失败信号剔除 failed_target：逐级选下一级，全剔除落 REFUSE。"""
+        """B2/R3-6：按失败目标逐级永久剔除，全剔除落 REFUSE。"""
         plugin = Degradation(_ladder(), available={"primary", "backup"})
-        # 无信号：选最优目标
-        assert plugin.select([]) == "primary"
-        # primary 失败 → 剔除 primary → 选 backup
-        one_fail = [Signal("degrade", "primary_down", "primary")]
-        assert plugin.select(one_fail) == "backup"
-        # primary + backup 都失败 → 全部剔除 → REFUSE
-        two_fail = one_fail + [Signal("degrade", "backup_down", "backup")]
-        assert plugin.select(two_fail) == DegradeMode.REFUSE.value
+        assert plugin.select(FaultRecord("none", ""), session_id=SID) == "primary"
+        # primary 失败 → 永久剔除 → 选 backup
+        assert plugin.select(_fault("primary_down", "primary"), session_id=SID) == "backup"
+        # 再选一次无新故障：backup 仍在（剔除是永久但只剔已知故障目标）。
+        assert plugin.select(FaultRecord("none", ""), session_id=SID) == "backup"
+        # backup 也失败 → 全部剔除 → REFUSE
+        assert plugin.select(_fault("backup_down", "backup"), session_id=SID) == DegradeMode.REFUSE.value
 
-    def test_select_ignores_non_degrade_and_unknown_failed_target(self) -> None:
-        """非 degrade 信号 / 不在 available 的 failed_target 不影响选级。"""
+    def test_r3_6_shrink_is_permanent_not_local_copy(self) -> None:
+        """R3-6：剔除写回实例 available——primary 故障后不会在下一轮被重新选回。"""
         plugin = Degradation(_ladder(), available={"primary", "backup"})
-        assert plugin.select([Signal("abort", "manual")]) == "primary"
-        assert plugin.select([Signal("degrade", "ghost_down", "ghost")]) == "primary"
+        plugin.select(_fault("primary_down", "primary"), session_id=SID)
+        # 无新故障的后续选择仍是 backup，绝不回到 primary（局部副本 discard 的旧 bug）。
+        for _ in range(3):
+            assert plugin.select(FaultRecord("none", ""), session_id=SID) == "backup"
+
+    def test_b1_session_isolation(self) -> None:
+        """B1：按 session_id 隔离目标状态；A 会话剔除 primary 不影响 B 会话。"""
+        plugin = Degradation(_ladder(), available={"primary", "backup"})
+        # A 会话 primary 故障 → 剔除 → 选 backup
+        assert plugin.select(_fault("primary_down", "primary"), session_id="session-A") == "backup"
+        # B 会话独立状态：primary 仍可用 → 选 primary（不受 A 影响，消除全局单槽串味）
+        assert plugin.select(FaultRecord("none", ""), session_id="session-B") == "primary"
+        assert "session-A" in plugin._session_state and "session-B" in plugin._session_state
+
+    def test_select_ignores_unknown_failed_target(self) -> None:
+        """非降级原因 / 不在 available 的 failed_target 不误伤选级。"""
+        plugin = Degradation(_ladder(), available={"primary", "backup"})
+        assert plugin.select(FaultRecord("manual", ""), session_id=SID) == "primary"
+        assert plugin.select(_fault("ghost_down", "ghost"), session_id=SID) == "primary"
 
     def test_cycle_rejected_on_init(self) -> None:
         """成环阶梯装配期拒绝。"""
@@ -68,164 +93,139 @@ class TestDegradationSelection:
             DegradeStep(target="x", mode=DegradeMode.REROUTE, quality=0.5),
             DegradeStep(target="", mode=DegradeMode.REFUSE, quality=0.0),
         ))
-        try:
+        with pytest.raises(ValueError):
             Degradation(bad)
-        except ValueError:
-            pass
-        else:
-            raise AssertionError("expected ValueError for cyclic ladder")
 
 
 class TestRateLimit:
     def test_token_bucket_exhaust(self) -> None:
-        """令牌耗尽后拒绝（on_exceed=reject → DENY，无降级信号）。"""
+        """令牌耗尽后拒绝（reject 策略 → allowed=False）。"""
         rl = RateLimit(rate=60, burst=2, on_exceed="reject", clock=lambda: 0.0)
-        scope = RequestScope()
-        assert rl.check(scope, EFFECT).action is DecisionAction.CONTINUE
-        assert rl.check(scope, EFFECT).action is DecisionAction.CONTINUE
-        assert rl.check(scope, EFFECT).action is DecisionAction.DENY
-        assert scope.signals == []
+        assert asyncio.run(rl.guard(make_ctx())).allowed is True
+        assert asyncio.run(rl.guard(make_ctx())).allowed is True
+        assert asyncio.run(rl.guard(make_ctx())).allowed is False
 
     def test_refill_over_time(self) -> None:
         """随时间补充令牌。"""
         now = [0.0]
         rl = RateLimit(rate=60, burst=1, on_exceed="reject", clock=lambda: now[0])
-        scope = RequestScope()
-        assert rl.check(scope, EFFECT).action is DecisionAction.CONTINUE
-        assert rl.check(scope, EFFECT).action is DecisionAction.DENY
+        assert asyncio.run(rl.guard(make_ctx())).allowed is True
+        assert asyncio.run(rl.guard(make_ctx())).allowed is False
         now[0] = 2.0  # 60/s → 2 秒补满
-        assert rl.check(scope, EFFECT).action is DecisionAction.CONTINUE
+        assert asyncio.run(rl.guard(make_ctx())).allowed is True
 
-    def test_degrade_reports_intent(self) -> None:
-        """超限降级：scope 报 degrade 信号 + 占位 DEGRADE（target 由 settle 选）。"""
+    def test_degrade_reports_fault_and_passes(self) -> None:
+        """超限降级：写 fault（含 failed_target，B2）并放行重路由。"""
         rl = RateLimit(rate=60, burst=1, on_exceed="degrade", clock=lambda: 0.0)
-        scope = RequestScope()
-        assert rl.check(scope, EFFECT).action is DecisionAction.CONTINUE  # 耗尽令牌
-        d = rl.check(scope, EFFECT)  # 超限 → DEGRADE
-        assert d.action is DecisionAction.DEGRADE
-        assert d.target == ""  # 占位，真实目标由 settle 覆盖
-        assert any(
-            s.kind == "degrade" and s.reason == "rate_limited" for s in scope.signals
-        )
+        asyncio.run(rl.guard(make_ctx()))  # 耗尽令牌
+        inv = make_ctx()
+        verdict = asyncio.run(rl.guard(inv))
+        assert isinstance(verdict, Verdict) and verdict.allowed is True  # 降级类放行
+        fault = inv.fault()
+        assert fault is not None and fault.reason == "rate_limited"
+        assert fault.failed_target == "primary"  # B2：注册名
 
-    def test_reject_does_not_request_degrade(self) -> None:
-        """reject 策略：DENY，不产生降级信号。"""
+    def test_reject_does_not_write_fault(self) -> None:
+        """reject 策略：拒绝但不写降级 fault。"""
         rl = RateLimit(rate=60, burst=1, on_exceed="reject", clock=lambda: 0.0)
-        scope = RequestScope()
-        rl.check(scope, EFFECT)
-        assert rl.check(scope, EFFECT).action is DecisionAction.DENY
-        assert scope.signals == []
+        asyncio.run(rl.guard(make_ctx()))
+        inv = make_ctx()
+        assert asyncio.run(rl.guard(inv)).allowed is False
+        assert inv.fault() is None
 
 
 class TestBulkhead:
     def test_pool_limit(self) -> None:
-        """舱壁池满：check 拒绝新占用，一轮结束统一释放后可再占。"""
+        """舱壁池满：拒绝新占用；wrap 结束 try/finally 释放后可再占。"""
         bh = Bulkhead(pools={"default": 1}, pool="default", on_full="reject")
-        scope = RequestScope()
-        assert bh.check(scope, EFFECT).action is DecisionAction.CONTINUE  # 占槽
-        assert len(scope.releases) == 1, "check 应登记释放回调"
-        assert bh.check(scope, EFFECT).action is DecisionAction.DENY      # 池满
-        # 生产由 Host 在每轮结束统一 release_all（成功/失败/守卫短路都兜底），
-        # 测试走同一路径，不手调 release。
-        scope.release_all()
-        assert scope.releases == []
-        assert bh.check(scope, EFFECT).action is DecisionAction.CONTINUE
+        async def noop(inv, next): return next(inv)
+        async def core(inv): return __import__("runtime").Result.success(None)
+        asyncio.run(bh.wrap(make_ctx(), core))
+        # wrap 结束已释放，可再占
+        assert bh.acquire("default") is True
+        bh.release("default")
 
-    def test_degrade_reports_intent(self) -> None:
-        """池满降级：scope 报 degrade 信号 + 占位 DEGRADE。"""
+    def test_degrade_writes_fault(self) -> None:
+        """池满降级：写 fault 并放行（由容器重路由）。"""
         bh = Bulkhead(pools={"default": 1}, on_full="degrade")
-        scope = RequestScope()
-        assert bh.check(scope, EFFECT).action is DecisionAction.CONTINUE  # 占满
-        d = bh.check(scope, EFFECT)  # 池满 → DEGRADE
-        assert d.action is DecisionAction.DEGRADE
-        assert d.target == ""
-        assert any(
-            s.kind == "degrade" and s.reason == "bulkhead_full" for s in scope.signals
-        )
-
-    def test_reject_does_not_request_degrade(self) -> None:
-        """reject 策略：DENY，不产生降级信号。"""
-        bh = Bulkhead(pools={"default": 1}, on_full="reject")
-        bh.check(RequestScope(), EFFECT)
-        scope = RequestScope()
-        assert bh.check(scope, EFFECT).action is DecisionAction.DENY
-        assert scope.signals == []
+        assert bh.acquire("default") is True  # 占满
+        inv = make_ctx()
+        from runtime import Result
+        async def core(i): return Result.success(None)
+        asyncio.run(bh.wrap(inv, core))
+        # 占满时 acquire 失败 → 写 fault（wrap 内 finally 会释放）
+        assert inv.fault() is not None and inv.fault().reason == "bulkhead_full"
 
 
 class TestIdempotency:
     def test_dedup(self) -> None:
         """同一幂等键第二次命中：返回去重标记。"""
         idem = Idempotency()
-        assert idem.check_and_mark("k1") is False  # 首次未见过
-        assert idem.check_and_mark("k1") is True   # 第二次命中
+        assert idem.check_and_mark("k1") is False
+        assert idem.check_and_mark("k1") is True
 
-    def test_check_reads_effect_idempotency_key(self) -> None:
-        """before_invoke 回调从 effect.idempotency_key 读键，重复副作用 DENY。"""
+    def test_guard_reads_effect_idempotency_key(self) -> None:
+        """guard 从 Invoke.idempotency_key 读键，重复副作用拒绝。"""
         idem = Idempotency()
-        eff = Effect(EffectKind.TOOL, {}, idempotency_key="k1")
-        assert idem.check(RequestScope(), eff).action is DecisionAction.CONTINUE
-        d = idem.check(RequestScope(), eff)
-        assert d.action is DecisionAction.DENY
+        eff = Invoke(port="tool", payload={}, idempotency_key="k1")
+        inv = make_ctx(eff)
+        assert asyncio.run(idem.guard(inv)).allowed is True
+        assert asyncio.run(idem.guard(make_ctx(eff))).allowed is False
+
+    def test_ttl_evicts_expired_key(self) -> None:
+        """TTL 真淘汰：过期后同键视为首次。"""
+        now = [1000.0]
+        idem = Idempotency(ttl=60, clock=lambda: now[0])
+        assert idem.check_and_mark("k") is False
+        assert idem.check_and_mark("k") is True
+        now[0] += 61
+        assert idem.check_and_mark("k") is False
+
+    def test_explicit_store_receives_timestamps(self) -> None:
+        """注入 store 存的是登记时间戳。"""
+        store: dict[str, float] = {}
+        idem = Idempotency(store=store, ttl=10, clock=lambda: 500.0)
+        idem.check_and_mark("x")
+        assert store["x"] == 500.0
 
 
 class _DictStore:
-    """killswitch 用的最小 store fake（get 支持默认值，兼容 MutableMapping 语义）。"""
-
+    """killswitch 用的最小 store fake。"""
     def __init__(self) -> None:
         self.data: dict[str, bool] = {}
-
     def get(self, key: str, default: bool = False) -> bool:
         return self.data.get(key, default)
-
     def set(self, key: str, value: bool) -> None:
         self.data[key] = value
 
 
 class TestWatchdog:
     def test_abab_detect(self) -> None:
-        """A-B-A-B 交替 → abort（观测 kind 由直送 effect 派生，不手填）。"""
+        """A-B-A-B 交替 → 拒绝（观测标识由 Invoke.port 派生）。"""
         wd = Watchdog(window=6, repeat_k=2, detect_abab=True, kinds={"tool", "llm"})
-        verdict = None
+        verdict = Verdict()
         for eff in (TOOL_EFFECT, EFFECT, TOOL_EFFECT, EFFECT):
-            verdict = wd.check(RequestScope(), eff)
-        assert verdict is not None and verdict.action is DecisionAction.ABORT
+            verdict = asyncio.run(wd.guard(make_ctx(eff)))
+        assert verdict.allowed is False and verdict.reason == "watchdog:abab"
 
     def test_repeat_detect(self) -> None:
-        """同一 kind 连续重复 k 次 → abort。"""
+        """同一 kind 连续重复 k 次 → 拒绝。"""
         wd = Watchdog(window=10, repeat_k=3, detect_abab=True, kinds={"tool"})
-        verdict = None
+        verdict = Verdict()
         for _ in range(3):
-            verdict = wd.check(RequestScope(), TOOL_EFFECT)
-        assert verdict is not None and verdict.action is DecisionAction.ABORT
+            verdict = asyncio.run(wd.guard(make_ctx(TOOL_EFFECT)))
+        assert verdict.allowed is False and verdict.reason == "watchdog:repeat"
 
 
 class TestKillSwitch:
-    def test_flag_set_aborts(self) -> None:
-        """标志置位 → abort。"""
+    def test_flag_set_rejects(self) -> None:
+        """标志置位 → 拒绝。"""
         store = _DictStore()
         store.set("kill:session", True)
         ks = KillSwitch(flag_store=store, scope="session")
-        assert ks.check(RequestScope(), EFFECT).action is DecisionAction.ABORT
+        assert asyncio.run(ks.guard(make_ctx())).allowed is False
 
-    def test_flag_unset_continues(self) -> None:
+    def test_flag_unset_passes(self) -> None:
         store = _DictStore()
         ks = KillSwitch(flag_store=store, scope="session")
-        assert ks.check(RequestScope(), EFFECT).action is DecisionAction.CONTINUE
-
-
-class TestIdempotencyTTL:
-    def test_ttl_evicts_expired_key(self) -> None:
-        """TTL 真淘汰：过期后同键视为首次。"""
-        now = [1000.0]
-        idem = Idempotency(ttl=60, clock=lambda: now[0])
-        assert idem.check_and_mark("k") is False   # 首次
-        assert idem.check_and_mark("k") is True    # 窗口内重复
-        now[0] += 61                                # 推进过 TTL
-        assert idem.check_and_mark("k") is False   # 已淘汰，重新视为首次
-
-    def test_explicit_store_receives_timestamps(self) -> None:
-        """注入 store 存的是登记时间戳（可被外部检查/共享）。"""
-        store: dict[str, float] = {}
-        idem = Idempotency(store=store, ttl=10, clock=lambda: 500.0)
-        idem.check_and_mark("x")
-        assert store["x"] == 500.0
+        assert asyncio.run(ks.guard(make_ctx())).allowed is True

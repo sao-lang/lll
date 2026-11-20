@@ -6,8 +6,8 @@
 from __future__ import annotations
 
 from .cache import (
-    CacheEmbedder, CachePort, CacheStore, ExactCache,
-    InMemoryCacheStore, SimilarityCache,
+    CacheEmbedder, CachePort, CacheStore, DEFAULT_CACHE_EMBED_DIM,
+    ExactCache, HashCacheEmbedder, InMemoryCacheStore, SimilarityCache,
 )
 from .capability import ModelCapability
 from .gateway import ModelGateway
@@ -46,6 +46,8 @@ __all__ = [
     "CacheStore",
     "InMemoryCacheStore",
     "CacheEmbedder",
+    "HashCacheEmbedder",
+    "DEFAULT_CACHE_EMBED_DIM",
     "ModelEndpoint",
     "ModelRegistry",
     "InMemoryModelRegistry",

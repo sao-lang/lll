@@ -49,7 +49,7 @@ class WebFetchTool:
         self._audit = audit
         self.spec = ToolSpec(
             name=self.name,
-            description="抓取网页正文（不可信输入，过注入检测）",
+            description="Fetch web page body (untrusted input, injection-checked)",
             parameters_schema={
                 "type": "object",
                 "properties": {"url": {"type": "string"}},
@@ -69,7 +69,7 @@ class WebFetchTool:
                 await self._audit.record(
                     {"tool": self.name, "url": url, "verdict": verdict.value}, ctx
                 )
-            raise ValueError(f"抓取正文命中注入检测，拒绝加载：{url}")
+            raise ValueError(f"Injection detected in fetched body; refusing to load: {url}")
 
         if self._audit is not None:
             # 干净正文也留痕，满足 R9「网页视为不可信」的可审计要求。

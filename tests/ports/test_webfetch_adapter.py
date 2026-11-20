@@ -116,7 +116,7 @@ def test_webfetch_tool_rejects_injected_body_and_allows_clean() -> None:
         HttpFetcher(client=_client(handler)),
         detector=KeywordInjectionDetector("ignore previous"),
     )
-    with pytest.raises(ValueError, match="注入"):
+    with pytest.raises(ValueError, match="Injection"):
         asyncio.run(tool.fetch("https://example.com/bad", _ctx()))
     assert (
         asyncio.run(tool.fetch("https://example.com/good", _ctx()))
@@ -152,7 +152,7 @@ def test_network_error_folded_to_runtime_error() -> None:
         raise httpx.ConnectError("boom")
 
     fetcher = HttpFetcher(client=_client(handler))
-    with pytest.raises(RuntimeError, match="网络"):
+    with pytest.raises(RuntimeError, match="network"):
         asyncio.run(fetcher.fetch("https://example.com/net", _ctx()))
 
 

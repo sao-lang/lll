@@ -1,11 +1,11 @@
-"""R3 能力装配：ResilienceCapability.install(host) 挂载显式选择的插件。
+"""R3 能力装配：ResilienceCapability 把显式选择的插件按 AOP 角色注册。
 
-ARCH-v5：插件只实现 apply(host)，状态由插件实例自身持有（跨调用存活），
-不自声明 mode/priority/events；装配顺序即 tap 顺序（宿主扩展点内有序）。
+插件保留一等身份（name + 实例状态 + 构造注入），install 按角色分派到 AOPContainer。
+装配顺序即执行顺序（同角色内按注册序）。
 """
 from __future__ import annotations
 
-from hooks import Host
+from aop import AOPContainer, Envelope, Prelude, Refiner, Salvage, Warden
 
 from .breaker import CircuitBreaker
 from .defenses import (
@@ -18,8 +18,7 @@ __all__ = ["ResilienceCapability"]
 
 
 class ResilienceCapability:
-    """可靠性能力包：把显式选择的插件装到 host。"""
-
+    """可靠性能力包：把显式选择的插件装到 AOP 容器。"""
     name = "resilience"
     version = "5.0.0"
     requires: tuple[str, ...] = ()
@@ -41,21 +40,49 @@ class ResilienceCapability:
     ) -> None:
         """装配（opt-in）：传实例才装，不传即缺席。"""
         self._plugins = (
-            killswitch, watchdog, idempotency, bulkhead, rate_limit, breaker,
-            retry, timeout, degradation, budget_guard,
+            killswitch, watchdog, idempotency, rate_limit, bulkhead,
+            breaker, retry, timeout, degradation, budget_guard,
         )
         self._extra = tuple(extra_plugins)
-        for p in self._extra:  # 装配期逐个校验额外插件，fail-fast 避免运行期遇到无名插件
-            # 规则 6 例外：extra 插件是鸭子类型（非协议子类），装配期以 getattr 容错读取 name。
+        for p in self._extra:
+            # 规则 6 例外：extra 插件是鸭子类型（非协议子类），装配期容错读取 name。
             if not getattr(p, "name", None):
                 raise ValueError(f"extra plugin must have a name: {p!r}")
 
-    def install(self, host: Host) -> Host:
-        """注册插件（顺序即 tap 顺序）。"""
-        for p in self.plugins():  # 按序注册：tap 顺序即插件执行顺序（守卫类在前、降级兜底在后）
-            host.plugin(p)  # type: ignore[arg-type]
-        return host
+    def install(self, container: AOPContainer, reg: object | None = None) -> AOPContainer:
+        """按角色注册插件（顺序即同角色内执行序）。
+
+        角色映射：
+            Warden：KillSwitch/Watchdog/Idempotency/RateLimit/CircuitBreaker。
+            Envelope：Bulkhead/RetryPolicy/Timeout/CircuitBreaker（观察后置）。
+            Refiner：BudgetGuard。
+            Salvage：Degradation。
+        CircuitBreaker 同时注册 Warden（check）与 Envelope（observe），仍算一个插件。
+        """
+        for p in self.plugins():
+            if isinstance(p, (KillSwitch, Watchdog, Idempotency, RateLimit)):
+                container.add_warden(p)
+            elif isinstance(p, CircuitBreaker):
+                container.add_warden(p)  # check_and_signal
+                container.add_envelope(p)  # observe 后置
+            elif isinstance(p, (Bulkhead, RetryPolicy, Timeout)):
+                container.add_envelope(p)
+            elif isinstance(p, BudgetGuard):
+                container.add_refiner(p)
+            elif isinstance(p, Degradation):
+                container.add_salvage(p)
+            elif isinstance(p, Prelude):
+                container.add_prelude(p)
+            elif isinstance(p, Warden):
+                container.add_warden(p)
+            elif isinstance(p, Envelope):
+                container.add_envelope(p)
+            elif isinstance(p, Refiner):
+                container.add_refiner(p)
+            elif isinstance(p, Salvage):
+                container.add_salvage(p)
+        return container
 
     def plugins(self) -> tuple[object, ...]:
         """已选插件（内置 + extra），顺序确定。"""
-        return tuple(p for p in self._plugins if p is not None) + self._extra  # 过滤未装配的 None 槽位；extra 追加在后
+        return tuple(p for p in self._plugins if p is not None) + self._extra

@@ -7,8 +7,9 @@ from __future__ import annotations
 
 import asyncio
 
-from hooks import HookCtx, LLMRequest, LLMResponse, PortCtx, Usage
-from runtime import AgentState, Effect, EffectKind
+from hooks import LLMRequest, LLMResponse, PortCtx, Usage
+from aop import Invocation, RoutingTarget
+from runtime import Invoke
 
 from harness.model import (
     BackendResolution,
@@ -40,18 +41,25 @@ class CountingLLM:
         return gen()
 
 
-def _ctx(*, target: str | None = None) -> HookCtx:
-    ctx = HookCtx(
-        effect=Effect(EffectKind.LLM, {"messages": []}),
-        state=AgentState(), session_id="s-r4-refuse", event="before_invoke",
+class _SessionView:
+    session_id = "s-r4"
+
+
+def _ctx(*, target: str | None = None) -> Invocation:
+    """构造 Invocation；target 非空时写 typed routing_target（替代旧裸桥接字段）。"""
+    inv = Invocation(
+        effect=Invoke(port="llm", payload={"messages": [{"role": "user", "content": "hi"}]}),
+        ctx=type("Ctx", (), {"session_id": "s-r4", "meta": {}})(),
+        session=_SessionView(),
+        meta={},
     )
     if target is not None:
-        ctx.degrade_target = target
-    return ctx
+        inv.write_routing_target(RoutingTarget(target=target, reason="test"))
+    return inv
 
 
-def _effect() -> Effect:
-    return Effect(EffectKind.LLM, {"messages": [{"role": "user", "content": "hi"}]})
+def _effect() -> Invoke:
+    return Invoke(port="llm", payload={'messages': [{'role': 'user', 'content': 'hi'}]})
 
 
 class TestBackendResolutionTypes:
@@ -79,7 +87,7 @@ class TestRefusePriorityOverCache:
         asyncio.run(gw.complete(LLMRequest(messages=[{"role": "user", "content": "hi"}]), pctx()))
         assert primary.calls == 1
 
-        result = asyncio.run(gw.as_call()(_effect(), _ctx(target="refuse")))
+        result = asyncio.run(gw.as_call()(_ctx(target="refuse")))
         assert not result.ok
         assert result.error is not None and result.error.code == "REFUSED"
         assert primary.calls == 1, "拒答路径不应再调后端，也不应返回缓存内容"
@@ -109,7 +117,7 @@ class TestTargetUnresolved:
         reg.register_llm("backup", backup)
         gw = ModelGateway(llm=primary, registry=reg)
 
-        result = asyncio.run(gw.as_call()(_effect(), _ctx(target="ghost")))
+        result = asyncio.run(gw.as_call()(_ctx(target="ghost")))
         assert not result.ok
         assert result.error is not None and result.error.code == "TARGET_UNRESOLVED"
         assert primary.calls == 0 and backup.calls == 0
@@ -118,6 +126,6 @@ class TestTargetUnresolved:
         """无 target 时仍走默认后端（与注册表存在与否无关的兼容路径）。"""
         primary = CountingLLM()
         gw = ModelGateway(llm=primary)
-        result = asyncio.run(gw.as_call()(_effect(), _ctx()))
+        result = asyncio.run(gw.as_call()(_ctx()))
         assert result.ok and result.data["content"] == "primary"
         assert primary.calls == 1

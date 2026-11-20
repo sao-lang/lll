@@ -44,14 +44,14 @@ class TestStructuredOutputSpec:
 class TestCacheKey:
     def test_same_inputs_same_key(self) -> None:
         r = LLMRequest(messages=[{"role": "user", "content": "hi"}], model="m1", temperature=0.5)
-        k1 = build_cache_key(r, prompt_version="v1")
-        k2 = build_cache_key(r, prompt_version="v1")
+        k1 = build_cache_key(r, prompt_version="current")
+        k2 = build_cache_key(r, prompt_version="current")
         assert k1 == k2
 
     def test_version_changes_key(self) -> None:
         """cache key 含 prompt_version：版本变化必须失效。"""
         r = LLMRequest(messages=[{"role": "user", "content": "hi"}], model="m1")
-        assert build_cache_key(r, prompt_version="v1") != build_cache_key(r, prompt_version="v2")
+        assert build_cache_key(r, prompt_version="current") != build_cache_key(r, prompt_version="other")
 
     def test_model_and_messages_change_key(self) -> None:
         r1 = LLMRequest(messages=[{"role": "user", "content": "hi"}], model="m1")
@@ -61,8 +61,8 @@ class TestCacheKey:
         assert build_cache_key(r1) != build_cache_key(r3)
 
     def test_cache_key_is_dataclass(self) -> None:
-        ck = CacheKey(value="abc", version="v1")
-        assert ck.value == "abc" and ck.version == "v1"
+        ck = CacheKey(value="abc", version="current")
+        assert ck.value == "abc" and ck.version == "current"
 
 
 class TestUsageLedger:

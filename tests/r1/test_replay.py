@@ -7,7 +7,7 @@ from tests.r1.conftest import fake_call, fake_dispatch, react_program
 
 def test_replay_matches_terminal_state():
     async def run():
-        runner = Runner(dispatch=fake_dispatch, call=fake_call)
+        runner = Runner(call=fake_call)
         init = AgentState()
         session = Session(session_id="s1", program_factory=lambda: react_program(init))
         result = await runner.run(session)

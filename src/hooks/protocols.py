@@ -36,9 +36,13 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractContextManager
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from runtime import DynamicValue
+
+if TYPE_CHECKING:
+    # R7 记忆召回 DTO：仅在类型检查期引用，避免 R2 协议层反向依赖 harness 能力层。
+    from harness.memory.types import MemoryItem, MemoryQuery
 
 from .dto import (
     DisclosurePacket, LLMRequest, LLMResponse, PortCtx, SkillManifest,
@@ -177,12 +181,20 @@ class MemoryPort(Protocol):
         """遗忘指定记忆（TTL 或显式删除）。"""
         ...
 
+    async def recall(self, query: MemoryQuery, ctx: PortCtx) -> list[MemoryItem]:
+        """语义召回：按查询返回相关记忆项（R7 additive，2026-11-20）。
+
+        DTO 由 R7 自有类型承载（不复用 R6 Query），经 TYPE_CHECKING 前向引用，
+        保持 R2 协议层不反向依赖 harness 能力层。
+        """
+        ...
+
 
 @runtime_checkable
 class StorePort(Protocol):
     """持久化能力：会话快照存取（异步，可落 DB/Redis）。
 
-    v1.1 异步化：save/load 涉及外部 IO（DB/Redis/文件），同步会阻塞 Runner 事件循环；
+    异步化：save/load 涉及外部 IO（DB/Redis/文件），同步会阻塞 Runner 事件循环；
     默认实现 InMemoryStorePort（R7）内部无 IO，但签名统一 async 以支持远程后端。
     """
     name: str
@@ -323,7 +335,7 @@ class EventStreamPort(Protocol):
 
 
 # port 名 → Protocol 类型；供装配期 isinstance 校验适配器是否履约。
-# 键是 R1 EffectKind / 装配约定的 port 名，值是对应的 R2 Protocol 类。
+# 键是装配约定的 port 名，值是对应的 R2 Protocol 类。
 # 用途：registry.register("llm", adapter) 后，可用本表 isinstance(adapter, PORT_PROTOCOLS["llm"])
 # 判断适配器是否实现了该 port 要求的全部方法（缺一即装配期失败）。
 PORT_PROTOCOLS: dict[str, type] = {

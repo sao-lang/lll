@@ -1,4 +1,4 @@
-"""熔断共享态存储协议测试（ARCH-v5）：异步 BreakerStore 可注入自定义实现（Redis/DB 适配器）。
+"""熔断共享态存储协议测试：异步 BreakerStore 可注入自定义实现（Redis/DB 适配器）。
 
 状态逻辑由 CircuitBreaker 插件实例持有；store 决定状态落在进程内还是外部系统。
 """

@@ -78,7 +78,7 @@ class TestGatewayStructured:
         assert r.content == '{"age": -1}'
 
     def test_repair_loop_uses_injected_validator(self) -> None:
-        """注入校验器在修复循环里也生效——校验与修复同一口径（v1.6 关键点）。"""
+        """注入校验器在修复循环里也生效——校验与修复同一口径。"""
         class AlwaysOkValidator:
             name = "always-ok"
             calls = 0

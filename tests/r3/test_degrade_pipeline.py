@@ -1,18 +1,18 @@
-"""R3 降级链路领域逻辑（ARCH-v5）：逐级收缩选级 → 末级 REFUSE。
+"""R3 降级链路领域逻辑：逐级收缩选级 → 末级 REFUSE。
 
-守卫故障 → scope.emit(Signal("degrade", reason, failed_target))，
-Degradation.select(signals) 从 available 剔除 failed_target 后按 ladder 选下一级；
-全部目标失败则落 REFUSE。端到端链路由 tests/r2/test_v5_wiring.py 与
-tests/r4/test_v5_e2e.py 覆盖，这里只测选级领域逻辑本身。
+Warden/Envelope 把具名故障记录（FaultRecord，含 failed_target）写入 inv.meta，
+Degradation.select(fault, session_id) 从本会话 available 剔除 failed_target 后按
+ladder 选下一级；全部目标失败则落 REFUSE。断言强度不降，只换 API 形态。
 """
 from __future__ import annotations
 
-import asyncio
-
-from hooks import Decision, DecisionAction, Host, RequestScope, Signal
-from runtime import Effect, EffectKind
+from aop import FaultRecord, Invocation
+from runtime import Invoke
 
 from harness.resilience import DegradeLadder, DegradeMode, DegradeStep, Degradation
+from tests.r3.conftest import make_ctx
+
+SID = "s-pipeline"
 
 
 def _ladder() -> DegradeLadder:
@@ -29,53 +29,42 @@ def _policy() -> Degradation:
     return Degradation(_ladder(), available={"primary", "backup", "cache"})
 
 
+def _fault(reason: str, target: str) -> FaultRecord:
+    return FaultRecord(reason=reason, failed_target=target)
+
+
 class TestProgressiveDegradation:
     def test_available_shrinks_level_by_level(self) -> None:
         """每失败一个目标就收缩 available，选中下一质量级。"""
         plugin = _policy()
-        assert plugin.select([]) == "primary"  # 健康：最高质量级
-
-        primary_down = Signal("degrade", "breaker_open", "primary")
-        assert plugin.select([primary_down]) == "backup"
-
-        backup_down = Signal("degrade", "timeout", "backup")
-        assert plugin.select([primary_down, backup_down]) == "cache"
-
-        cache_down = Signal("degrade", "cache_miss", "cache")
-        assert plugin.select([primary_down, backup_down, cache_down]) == DegradeMode.REFUSE.value
+        assert plugin.select(FaultRecord("none", ""), session_id=SID) == "primary"
+        assert plugin.select(_fault("breaker_open", "primary"), session_id=SID) == "backup"
+        assert plugin.select(_fault("timeout", "backup"), session_id=SID) == "cache"
+        assert plugin.select(_fault("cache_miss", "cache"), session_id=SID) == DegradeMode.REFUSE.value
 
     def test_available_shrinks_across_effects_reaches_refuse(self) -> None:
-        """跨 Effect 逐级降级：每次故障收缩 available 并记住，backup 失败不得选回 primary。
-
-        真实场景每次 Effect 新建 scope（signals 不继承），若 available 只在局部副本 discard
-        而不写回插件实例，backup 故障时会重新从 {primary,backup,cache} 里选回 primary，
-        永远到不了 REFUSE——这是审计 R3-6 的实测断点。
-        """
+        """R3-6：跨 Effect 逐级降级，backup 失败不得选回 primary（写回实例）。"""
         plugin = _policy()
-        effect = Effect(EffectKind.LLM, {"model": "primary"})
-        # 第 1 个 Effect：primary 故障 → 选 backup，且 primary 应被永久剔除
-        assert plugin.select([Signal("degrade", "500", "primary")]) == "backup"
-        # 第 2 个 Effect：新 scope 只有 backup 故障信号 → 不得选回 primary，应到 cache
-        assert plugin.select([Signal("degrade", "500", "backup")]) == "cache"
-        # 第 3 个 Effect：cache 也故障 → 末级 REFUSE
-        assert plugin.select([Signal("degrade", "500", "cache")]) == DegradeMode.REFUSE.value
+        # 第 1 个 Effect：primary 故障 → backup
+        assert plugin.select(_fault("500", "primary"), session_id=SID) == "backup"
+        # 第 2 个 Effect：backup 故障 → cache（不得选回 primary）
+        assert plugin.select(_fault("500", "backup"), session_id=SID) == "cache"
+        # 第 3 个 Effect：cache 也故障 → REFUSE
+        assert plugin.select(_fault("500", "cache"), session_id=SID) == DegradeMode.REFUSE.value
 
     def test_failed_target_not_registered_is_noop(self) -> None:
         """失败目标不在 available 时选级不变（不误伤健康目标）。"""
         plugin = _policy()
-        assert plugin.select([Signal("degrade", "ghost_down", "ghost")]) == "primary"
+        assert plugin.select(_fault("ghost_down", "ghost"), session_id=SID) == "primary"
 
-    def test_only_degrade_signals_count(self) -> None:
-        """abort / budget 等其他信号不参与降级选级。"""
+    def test_non_degrade_reason_ignored(self) -> None:
+        """非降级原因（abort/budget）且无 failed_target 时不参与选级。"""
         plugin = _policy()
-        signals = [
-            Signal("abort", "manual"),
-            Signal("budget", "exhausted"),
-        ]
-        assert plugin.select(signals) == "primary"
+        assert plugin.select(FaultRecord("abort", ""), session_id=SID) == "primary"
+        assert plugin.select(FaultRecord("budget_exhausted", ""), session_id=SID) == "primary"
 
     def test_pick_uses_passed_available_not_stored(self) -> None:
-        """ladder.pick 以传入的 available 为准，不读插件自身状态。"""
+        """ladder.pick 以传入的 available 为准。"""
         plugin = _policy()
         assert plugin.pick({"primary", "backup", "cache"}).target == "primary"
         assert plugin.pick(set()).mode is DegradeMode.REFUSE
@@ -83,33 +72,18 @@ class TestProgressiveDegradation:
     def test_empty_available_starts_at_refuse(self) -> None:
         """装配时无可用目标 → 直接 REFUSE（不编造后端）。"""
         plugin = Degradation(_ladder(), available=set())
-        assert plugin.select([]) == DegradeMode.REFUSE.value
+        assert plugin.select(FaultRecord("none", ""), session_id=SID) == DegradeMode.REFUSE.value
 
 
-class TestDegradationPluginSettle:
-    def test_settle_selects_target_from_signals(self) -> None:
-        """Degradation 插件 tap settle：读 scope.signals，由插件自身选级。"""
-        async def run() -> None:
-            host = Host()
-            degradation = Degradation(_ladder(), available={"primary", "backup", "cache"})
-            host.plugin(degradation).freeze()
-            assert host.hook("settle").names == ("r3_degrade",)
-
-            scope = host.new_scope()
-            scope.emit(Signal("degrade", "breaker_open", "primary"))
-            d: Decision | None = await host.hook("settle").call(scope)
-            assert d is not None and d.action is DecisionAction.DEGRADE
-            assert d.target == "backup"
-
-        asyncio.run(run())
-
-    def test_settle_noop_without_degrade_signal(self) -> None:
-        """无 degrade 信号时 settle 不产出降级判决。"""
-        async def run() -> None:
-            host = Host()
-            host.plugin(Degradation(_ladder(), available={"primary", "backup"})).freeze()
-            scope = RequestScope()
-            scope.emit(Signal("abort", "manual"))
-            assert await host.hook("settle").call(scope) is None
-
-        asyncio.run(run())
+class TestDegradationSalvage:
+    def test_recover_writes_typed_routing_target(self) -> None:
+        """Salvage.recover：读 fault → select → 写 typed routing_target 供网关消费。"""
+        import asyncio
+        plugin = Degradation(_ladder(), available={"primary", "backup", "cache"})
+        inv = make_ctx(Invoke(port="llm", payload={"model": "primary"}))
+        inv.write_fault(_fault("breaker_open", "primary"))
+        result = asyncio.run(plugin.recover(RuntimeError("boom"), inv))
+        assert result.ok
+        rt = inv.routing_target()
+        assert rt is not None and rt.target == "backup"  # primary 剔除后选 backup
+        assert rt.reason == "breaker_open"

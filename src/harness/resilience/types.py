@@ -19,7 +19,6 @@ from enum import Enum
 from random import Random
 from typing import Protocol, runtime_checkable
 
-from hooks import RetrySpec
 from runtime import Result
 
 __all__ = [
@@ -33,12 +32,32 @@ __all__ = [
     "FailureClass",
     "FailureClassifier",
     "Jitter",
+    "RetrySpec",
     "backoff_delay",
     "classify_failure",
     "normalize_code",
     "validate_ladder",
     "validate_retry_spec",
 ]
+
+
+@dataclass(frozen=True, slots=True)
+class RetrySpec:
+    """重试参数（R3 自身持有的领域参数，不依赖 hooks）。
+
+    字段：
+        max_attempts: 最大尝试次数。base_delay: 初始退避秒数。
+        multiplier: 退避倍数。max_delay: 退避上限秒数。
+        jitter: 抖动策略。respect_retry_after: 是否遵守服务端 Retry-After。
+        idempotency_required: 是否要求幂等键（副作用重试红线）。
+    """
+    max_attempts: int = 3
+    base_delay: float = 0.5
+    multiplier: float = 2.0
+    max_delay: float = 30.0
+    jitter: str = "full"
+    respect_retry_after: bool = True
+    idempotency_required: bool = True
 
 
 class Jitter(str, Enum):
@@ -186,7 +205,7 @@ class FailureClassifier(Protocol):
     def classify(self, result: Result, ctx: object) -> FailureClass:
         """对一次 Port 结果分类；异常由调用方折叠，不抛穿。
 
-        ctx 是可选上下文（ARCH-v5 里传 RequestScope）；
+        ctx 是可选上下文（Invocation 投影）；
         分类器可鸭子读取，但默认表只依赖 result.error。
         """
         ...

@@ -76,6 +76,6 @@ class ToolIndex:
         if token_cost > self._l1_token_budget:
             # 预算超限必须显式拒绝，避免静默把超量上下文塞给模型。
             raise ValueError(
-                f"披露 token 预算超限: {token_cost} > {self._l1_token_budget}"
+                f"Disclosure token budget exceeded: {token_cost} > {self._l1_token_budget}"
             )
         return DisclosurePacket(l1=l1, l2=l2, l3=l3, token_cost=token_cost)

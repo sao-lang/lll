@@ -1,6 +1,6 @@
 """R3 可靠性能力插件：失败分类 / 重试 / 熔断 / 降级 / 限流 / 舱壁 / 幂等 / watchdog / killswitch。
 
-全部基于 R1（runtime）+ R2（hooks）构建，以 Hook 插件形式挂载，内核零策略（R3 §1）。
+全部基于 R1（runtime）+ AOP 五角色构建，以增强器形式挂载，内核零策略（R3 §1）。
 公共 API 见 docs/02-模块详设/Agent/R3-可靠性.md §4。
 """
 from __future__ import annotations
@@ -24,6 +24,7 @@ from .types import (
     FailureClass,
     FailureClassifier,
     Jitter,
+    RetrySpec,
     backoff_delay,
     classify_failure,
     normalize_code,
@@ -36,7 +37,7 @@ __all__ = [
     "FailureClass", "FailureClassifier", "DimensionKey", "DEFAULT_FAILURE_TABLE",
     "backoff_delay", "classify_failure", "normalize_code",
     "validate_retry_spec", "validate_ladder",
-    "DegradeMode", "DegradeStep", "DegradeLadder", "Jitter",
+    "DegradeMode", "DegradeStep", "DegradeLadder", "Jitter", "RetrySpec",
     "BreakerStatus", "BreakerState", "BreakerStore", "InMemoryBreakerStore",
     # 插件（RetryPolicy 是重试策略配置，非状态 Policy）
     "RetryPolicy", "CircuitBreaker", "Degradation", "RateLimit", "Bulkhead",

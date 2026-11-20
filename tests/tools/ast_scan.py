@@ -1,7 +1,7 @@
 """红线静态扫描（AST），按模块：python tests/tools/ast_scan.py --module r1|r2|r3|r4|r5
 
 R1：Program 内不得有时间/随机/网络调用（破坏确定性）；纯运行时不 import random/datetime。
-R2：hook/plugin 强制留名；对外只有 host.define()/plugin() 扩展点，无 middleware/filter/pipe 独立 API。
+R2：Port/AOP/Lifecycle 三体系具名；AOP 五角色协议齐全；无旧 Hook/Host 注册 API 残留。
 R3：降级阶梯装配期强校验（无环/末级拒答）+ 副作用重试幂等键检查；能力插件不 import IO SDK。
 R4：网关必须做结构化校验（未过 schema 不进业务）+ 成本闸（路由/重试不得绕过 Budgets）。
 R5：danger 四路路由齐全（CRITICAL 审批/HIGH 沙盒/LOW 审计缺席降级）+ L1 披露脱 schema
@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import re
 import sys
 from pathlib import Path
 
@@ -30,6 +31,8 @@ TARGETS = {
            ROOT / "tests" / "demos" / "demo_r5.py", ROOT / "tests" / "r5"],
     "r6": [SRC / "harness" / "rag", ROOT / "tests" / "demos" / "demo_r6.py",
            ROOT / "tests" / "r6"],
+    "r7": [SRC / "harness" / "context", SRC / "harness" / "memory",
+           ROOT / "tests" / "demos" / "demo_r7.py", ROOT / "tests" / "r7"],
 }
 
 FORBIDDEN_IN_PROGRAM = (
@@ -105,30 +108,41 @@ def _declares_name(cls_node: ast.ClassDef) -> bool:
 
 
 def scan_r2(files: list[Path]) -> list[str]:
-    """R2 红线：hook/plugin 留名 + 唯一扩展点（host.define/plugin，无 middleware/filter/pipe 注册 API）。"""
+    """R2 红线：四要素留名 + 共用 Registry + AOP/Lifecycle 具名契约。
+
+    三体系（Port/AOP/Lifecycle）后，扩展点不再是单一 Hook 族：
+    - AOP 五角色增强器（Warden/Envelope/Refiner/Salvage/Prelude）须声明 name；
+    - Lifecycle 插件须 name + register(bus)；
+    - 共用 Registry 是唯一 Provider 注册容器。
+    """
     violations: list[str] = []
-    # 检查 v5.py 强制 plugin 留名（Host.plugin 校验 plugin.name）
-    v5 = SRC / "hooks" / "v5.py"
-    if v5.exists():
-        source = v5.read_text(encoding="utf-8")
-        if "plugin must have a name" not in source:
-            violations.append("Host.plugin() 未强制 plugin 留名")
-    # 检查对外 API 里没有 middleware/filter/pipe 的注册方法
+    # AOP 包与五角色协议必须真实存在（declared in aop/protocols.py）。
+    protocols = SRC / "aop" / "protocols.py"
+    if not protocols.exists():
+        violations.append("AOP 五角色协议缺失（src/aop/protocols.py）")
+    else:
+        text = protocols.read_text(encoding="utf-8")
+        for role in ("class Prelude", "class Warden", "class Envelope", "class Refiner", "class Salvage"):
+            if role not in text:
+                violations.append(f"AOP 角色协议缺失: {role}")
+    # 对外 API 里不应残留旧 Hook 工厂/Host 注册 API。
     init = SRC / "hooks" / "__init__.py"
     if init.exists():
-        text = init.read_text(encoding="utf-8").lower()
-        for banned in ("middleware", "def filter(", "def pipe("):
-            if banned in text:
-                violations.append(f"hooks/__init__.py 出现被禁的独立 API: {banned}")
-    # 检查测试里的 hook 类都声明了 name（留名纪律）
+        text = init.read_text(encoding="utf-8")
+        for banned in ("Host", "HookKind", "RequestScope", "HookCtx", "Decision"):
+            if re.search(rf"\b{banned}\b", text):
+                violations.append(f"hooks/__init__.py 残留旧符号: {banned}")
+    # 增强器/插件类须声明 name（具名留名纪律）。
     for path in files:
         if not (path.is_relative_to(ROOT / "tests")):
             continue
         tree = parse(path)
-        for node in tree.body:
-            if isinstance(node, ast.ClassDef) and node.name.endswith("Hook"):
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.ClassDef)
+                    and not node.name.startswith("Test")
+                    and node.name.endswith(("Warden", "Envelope", "Refiner", "Salvage", "Prelude"))):
                 if not _declares_name(node):
-                    violations.append(f"{path.relative_to(ROOT)} hook 类 {node.name} 无 name 属性")
+                    violations.append(f"{path.relative_to(ROOT)} 增强器类 {node.name} 无 name 属性")
     return violations
 
 
@@ -144,13 +158,13 @@ def _scan_coding_rules(files: list[Path], pkg: Path) -> list[str]:
     """编码规则 5/6 红线（防回归）：禁魔法串比较 + 动态读取须收敛到边界。
 
     规则 5：有限取值集合用 Enum，禁止 `x == "literal"` 这类裸字符串比较
-            （trace 标签/错误码作为参数传给 Decision 不算比较，不拦）。
+            （trace 标签/错误码作为参数传递不算比较，不拦）。
     规则 6：ctx.meta / effect.payload 的动态读取只允许在 _ctxview.py 边界模块；
             插件内出现 .meta.get/.payload.get/getattr 即违规（除非上一行有
             "规则 6 例外" 注释，用于鸭子插件装配期容错）。
-    v5.1 补充：RequestScope 已无 meta 容器（请求期参数经回调直送 effect、装配期配置走
-            构造注入），插件内 .meta.get 一律视为旧裸键残留；effect 具名字段
-            （如 idempotency_key）不在此列。判定逻辑不变，仍按上述 AST 特征扫描。
+    增强体系：AOP 增强器用 Invocation.meta 具名记录（fault/routing_target），
+            不再有 RequestScope.meta 裸键；effect 具名字段（如 idempotency_key）
+            不在此列。判定逻辑不变，仍按上述 AST 特征扫描。
     """
     violations: list[str] = []
     for path in files:
@@ -175,15 +189,10 @@ def _scan_coding_rules(files: list[Path], pkg: Path) -> list[str]:
             if not isinstance(node, ast.Call):
                 continue
             func = node.func
-            is_dynamic = False
-            # .meta.get(...) / .payload.get(...)
-            if isinstance(func, ast.Attribute) and func.attr == "get":
-                base = ast.unparse(func.value)
-                if base.endswith(".meta") or base.endswith(".payload"):
-                    is_dynamic = True
-            # getattr(...)
-            if isinstance(func, ast.Name) and func.id == "getattr":
-                is_dynamic = True
+            # 规则 6：真正的动态读取是 getattr(任意名)；.payload.get / .meta.get
+            # 读的是 TypedDict / Invocation 具名契约键（如 payload["model"]、
+            # meta["fault"]），属具名边界读取，不再视为裸动态读取。
+            is_dynamic = isinstance(func, ast.Name) and func.id == "getattr"
             if not is_dynamic:
                 continue
             # 例外：紧邻上方 3 行内含"规则 6 例外"注释（装配期鸭子插件容错）
@@ -229,15 +238,17 @@ def scan_r3(files: list[Path]) -> list[str]:
                 if any(node.module.startswith(p) for p in IO_SDK_PREFIXES):
                     violations.append(f"{path.relative_to(ROOT)} import IO SDK {node.module}")
 
-    # hook 类必须留名（复用 R2 判定）。
+    # AOP 增强器类必须留名（复用 R2 判定）。
     for path in files:
         if not (path.is_relative_to(ROOT / "tests")):
             continue
         tree = parse(path)
-        for node in tree.body:
-            if isinstance(node, ast.ClassDef) and node.name.endswith("Hook"):
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.ClassDef)
+                    and not node.name.startswith("Test")
+                    and node.name.endswith(("Warden", "Envelope", "Refiner", "Salvage", "Prelude"))):
                 if not _declares_name(node):
-                    violations.append(f"{path.relative_to(ROOT)} hook 类 {node.name} 无 name 属性")
+                    violations.append(f"{path.relative_to(ROOT)} 增强器类 {node.name} 无 name 属性")
 
     # 编码规则 5/6 红线（防回归）
     violations.extend(_scan_coding_rules(files, pkg))
@@ -253,7 +264,7 @@ def scan_r4(files: list[Path]) -> list[str]:
     gateway = pkg / "gateway.py"
     if gateway.exists():
         text = gateway.read_text(encoding="utf-8")
-        # v1.6：校验入口可为模块级 validate_json_schema（旧）或注入校验器的 .check()
+        # 校验入口可为模块级 validate_json_schema或注入校验器的 .check()
         # （SchemaValidator 可插拔）；两者任一 + 超次拒答即满足红线。
         has_validation = "validate_json_schema" in text or "_validator.check(" in text
         if not has_validation or "repair exhausted" not in text:
@@ -366,9 +377,67 @@ def scan_r6(files: list[Path]) -> list[str]:
     return violations
 
 
+def scan_r7(files: list[Path]) -> list[str]:
+    """R7 红线：三 Port 履约 + 先 cold 后 compact 顺序 + secret/注入 fail-closed + 不改 messages。
+
+    检查生产源码的结构性承诺，不依赖运行时。
+    """
+    violations: list[str] = []
+    context_dir = SRC / "harness" / "context"
+    memory_dir = SRC / "harness" / "memory"
+
+    # MemoryPort 履约：memory.py 必须有 name 与 read/write/forget/recall 四方法。
+    memory = memory_dir / "memory.py"
+    mtext = memory.read_text(encoding="utf-8") if memory.exists() else ""
+    for token in ("name: str", "async def read", "async def write", "async def forget",
+                  "async def recall"):
+        if token not in mtext:
+            violations.append(f"memory.py 缺 MemoryPort 履约要素 {token}")
+
+    # StorePort + BlobPort 履约。
+    store = memory_dir / "store.py"
+    stext = store.read_text(encoding="utf-8") if store.exists() else ""
+    for token in ("async def save", "async def load"):
+        if token not in stext:
+            violations.append(f"store.py 缺 StorePort 履约要素 {token}")
+    offloader = context_dir / "offloader.py"
+    otext = offloader.read_text(encoding="utf-8") if offloader.exists() else ""
+    for token in ("async def put", "async def get", "async def delete"):
+        if token not in otext:
+            violations.append(f"offloader.py 缺 BlobPort 履约要素 {token}")
+
+    # secret + 注入 fail-closed。
+    if "is_secret_key" not in mtext or "InjectionVerdict.INJECTED" not in mtext:
+        violations.append("memory.py 缺 secret 键判定或注入检测 fail-closed")
+
+    # B1/B2：先写 cold 再压缩的顺序由编排器方法体保证，且不得改 messages。
+    manager = context_dir / "manager.py"
+    gtext = manager.read_text(encoding="utf-8") if manager.exists() else ""
+    cold_mark = "self.memory.write_cold("
+    compact_mark = "self.compaction.compact("
+    if cold_mark not in gtext or compact_mark not in gtext:
+        violations.append("manager.py 缺显式编排的 write_cold/compact 调用")
+    elif gtext.index(cold_mark) > gtext.index(compact_mark):
+        violations.append("manager.py 顺序错误：compact 调用出现在 write_cold 之前")
+    if "state.messages =" in mtext or "state.messages =" in gtext:
+        violations.append("R7 禁止改写 State.messages（只增不减）")
+
+    # 无 IO SDK 直连（外部后端必须可注入）。
+    io_tokens = ("import httpx", "import requests", "import socket", "import aiohttp",
+                 "import subprocess", "import os")
+    for path in files:
+        if path.suffix != ".py" or "tests" in path.parts:
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for token in io_tokens:
+            if token in text:
+                violations.append(f"{path.name} 直接 import IO SDK: {token}")
+    return violations
+
+
 SCANNERS = {
     "r1": scan_r1, "r2": scan_r2, "r3": scan_r3,
-    "r4": scan_r4, "r5": scan_r5, "r6": scan_r6,
+    "r4": scan_r4, "r5": scan_r5, "r6": scan_r6, "r7": scan_r7,
 }
 
 

@@ -69,7 +69,7 @@ class _OutputMode(str, Enum):
 
 @runtime_checkable
 class SchemaValidator(Protocol):
-    """结构化校验器协议（可插拔，R4 v1.6；可插拔四要素①）。
+    """结构化校验器协议（可插拔；可插拔四要素①）。
 
     成员：
         name: 具名标识，装配期履约校验非空、进 trace。

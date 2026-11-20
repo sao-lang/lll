@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from hooks import DisclosureIndex, Host, PortCtx, Registry, ToolPort
+from hooks import DisclosureIndex, PortCtx, Registry, ToolPort
 from harness.tools import MCPManager, ToolIndex, ToolRegistry, ToolsCapability, tool
 from harness.skills import FileSkillProvider
 
@@ -70,7 +70,7 @@ def test_install_registers_all_present_ports(tmp_path: Path) -> None:
     skills = FileSkillProvider(tmp_path)
     cap = ToolsCapability(registry=reg, mcp=mgr, skills=skills)
     provider_reg = Registry()
-    cap.install(Host(), provider_reg)
+    cap.install(provider_reg)
     assert provider_reg.resolve("tool") is reg
     assert provider_reg.resolve("disclosure") is cap.index()
     assert provider_reg.resolve("mcp") is mgr
@@ -81,7 +81,7 @@ def test_install_skips_absent_optional_ports() -> None:
     """MCP/Skills 缺席时 install 不注册这两项，仍注册 tool/disclosure。"""
     cap = ToolsCapability()
     provider_reg = Registry()
-    cap.install(Host(), provider_reg)
+    cap.install(provider_reg)
     assert set(provider_reg.names()) == {"tool", "disclosure"}
     assert isinstance(provider_reg.resolve("tool"), ToolPort)
     assert isinstance(provider_reg.resolve("disclosure"), DisclosureIndex)

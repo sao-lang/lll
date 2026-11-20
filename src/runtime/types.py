@@ -20,10 +20,11 @@ from typing import Any, Protocol, TypedDict, cast
 
 __all__ = [
     "DONE", "AgentState", "BudgetDelta", "Budgets", "CallFn", "DispatchFn",
-    "DoneSentinel", "DynamicValue", "Effect", "EffectKind", "EffectPayload", "Event",
-    "EventStore", "JsonSnapshot", "Message", "Payload", "PortError", "Program",
-    "Result", "RunResult", "RuntimeCtx", "Scratchpad", "Session", "StateSnapshot",
-    "StepReport", "Usage", "CancellationToken", "canonical", "checkpoint", "fingerprint", "restore_checkpoint",
+    "Disposition", "DoneSentinel", "DynamicValue", "Effect", "EffectPayload", "Event",
+    "EventStore", "Invoke", "JsonSnapshot", "Message", "Payload", "PortError", "PortName",
+    "Program", "Result", "RunResult", "RuntimeCtx", "Scratchpad", "Session",
+    "Spawn", "StateSnapshot", "StepReport", "Suspend", "Terminate", "Usage",
+    "CancellationToken", "canonical", "checkpoint", "fingerprint", "restore_checkpoint",
 ]
 
 # --------------------------------------------------------------------------- #
@@ -81,19 +82,31 @@ class StateSnapshot(TypedDict):
     last_reason: str
 
 
-class EffectKind(str, Enum):
-    """程序对外部世界的声明种类；固定枚举，外壳按 kind 扩展 port。
+class Disposition(str, Enum):
+    """Effect 的处理去向（tagged union 的判别标签，内核按此 match 分派）。
 
     成员：
-        LLM: 大模型补全。TOOL: 工具调用。CHILD: 子 Agent。
-        SKILL: 技能加载。WAIT_HUMAN: 挂起等人。END: 结束并产出 output。
+        INVOKE: 唯一走 AOP 增强链与 Port 调用的 Effect。
+        SPAWN: 递归创建子 Agent（内核路径，不进 AOP）。
+        SUSPEND: 挂起等人工输入（内核快路径，不进 AOP）。
+        TERMINATE: 结束会话并产出 output（内核快路径，不进 AOP）。
+    """
+    INVOKE = "invoke"
+    SPAWN = "spawn"
+    SUSPEND = "suspend"
+    TERMINATE = "terminate"
+
+
+class PortName(str, Enum):
+    """Invoke.port 的具名取值域（装配期校验用；Port 种类不可运行时新增）。
+
+    成员与 PORT_PROTOCOLS 对齐；x-* 只用于 Effect.payload 扩展键，不作为 Port 种类。
     """
     LLM = "llm"
     TOOL = "tool"
-    CHILD = "child"
     SKILL = "skill"
-    WAIT_HUMAN = "wait_human"
-    END = "end"
+    RAG = "rag"
+    MEMORY = "memory"
 
 
 @dataclass(frozen=True)
@@ -442,39 +455,104 @@ def _empty_payload() -> EffectPayload:
 
 
 @dataclass(frozen=True)
-class Effect:
-    """对外部世界的声明：只声明、不执行。
+class Invoke:
+    """唯一进入 AOP 增强链与 Port 调用的 Effect：声明"调用什么能力"。
 
     字段：
-        kind: Effect 种类（决定哪个 port 执行）。
-        payload: 参数负载（已知键在 EffectPayload 声明，x-* 扩展键动态）。
-        batch: 是否批量（payload['calls'] 会被解释器展开）。
-        trace_id: 链路标识，由 Runner 按 step/index 注入。
-        idempotency_key: 副作用幂等键（具名字段，非 payload 动态键）；
-            R3 幂等去重与副作用重试红线读此字段。
+        port: 目标 Port 注册名（∈ PORT_PROTOCOLS，装配期校验；不可运行时新增种类）。
+        payload: 参数负载（已知键在 EffectPayload 声明，x-* 扩展键动态保留）。
+        batch: 是否批量（payload['calls'] 由解释器展开为多个独立 Invoke）。
+        trace_id: 链路标识，Runner 按 step/index 注入。
+        idempotency_key: 副作用幂等键，R3 幂等去重与副作用重试红线读此字段。
     """
-    kind: EffectKind
+    port: str
     payload: EffectPayload = field(default_factory=_empty_payload)
     batch: bool = False
     trace_id: str | None = None
     idempotency_key: str | None = None
 
     def __post_init__(self) -> None:
-        """归一 kind 为枚举、payload 冻结为只读视图（frozen 下用 object.__setattr__）。"""
-        object.__setattr__(self, "kind", EffectKind(self.kind))
+        """冻结 payload 为只读视图（frozen 下用 object.__setattr__）。"""
         object.__setattr__(self, "payload", cast(EffectPayload, _freeze(self.payload)))
 
-    def with_payload(self, **extra: DynamicValue) -> Effect:
-        """在副本上增量更新 payload，返回新 Effect（原对象不变）。
+    def with_payload(self, **extra: DynamicValue) -> Invoke:
+        """在副本上增量更新 payload，返回新 Invoke（Refiner 消费）。
 
         参数：
             **extra: 要合并进 payload 的键值对（已知键 + x-* 扩展键）。
         返回：
-            payload 更新后的新 Effect。
+            payload 更新后的新 Invoke。
         """
         data: dict[str, DynamicValue] = dict(self.payload)
         data.update(extra)
         return replace(self, payload=cast(EffectPayload, data))
+
+
+@dataclass(frozen=True)
+class Spawn:
+    """递归创建子 Agent 的 Effect（内核路径，不进 AOP 链）。
+
+    字段：
+        program_factory: 重建子 Program 的无参工厂（快照不携带不可序列化的 generator）。
+        state: 子 Agent 初始状态；缺省继承父会话 state。
+    """
+    program_factory: Callable[[], Program] | None = None
+    state: AgentState | None = None
+    trace_id: str | None = None
+
+
+@dataclass(frozen=True)
+class Suspend:
+    """挂起等人工输入的 Effect（内核快路径，不进 AOP 链）。
+
+    字段：
+        question: 向人工提出的问题。
+        options: 候选答案。
+    """
+    question: str = ""
+    options: tuple[str, ...] = ()
+    trace_id: str | None = None
+
+
+@dataclass(frozen=True)
+class Terminate:
+    """结束会话并产出结果的 Effect（内核快路径，不进 AOP 链）。
+
+    字段：
+        output: 最终输出。
+        reason: 结束原因。
+    """
+    output: DynamicValue = None
+    reason: str = ""
+    trace_id: str | None = None
+
+
+Effect = Invoke | Spawn | Suspend | Terminate
+"""Effect tagged union：内核按具体类型分派，只有 Invoke 走 AOP 增强链。"""
+
+_EFFECT_BY_DISPOSITION: Mapping[str, type[Invoke] | type[Spawn] | type[Suspend] | type[Terminate]] = MappingProxyType({
+    Disposition.INVOKE.value: Invoke,
+    Disposition.SPAWN.value: Spawn,
+    Disposition.SUSPEND.value: Suspend,
+    Disposition.TERMINATE.value: Terminate,
+})
+
+
+def disposition_of(effect: Effect) -> Disposition:
+    """按 Effect 具体类型返回判别标签（checkpoint 持久化与分派用）。
+
+    参数：
+        effect: 任一 Effect 成员。
+    返回：
+        对应的 Disposition 成员。
+    """
+    if isinstance(effect, Invoke):
+        return Disposition.INVOKE
+    if isinstance(effect, Spawn):
+        return Disposition.SPAWN
+    if isinstance(effect, Suspend):
+        return Disposition.SUSPEND
+    return Disposition.TERMINATE
 
 
 class _Done:
@@ -543,8 +621,7 @@ class RuntimeCtx:
         effect: 当前 Effect。state: 当前状态。session_id: 会话标识。
         attempt: 尝试次数。meta: 临时元数据。trace: hook/执行轨迹。
         invoke: 由 Runner 注入的 Port 调用回调（洋葱中心使用）。
-        degrade_target: 降级目标（具名桥接字段，由 Host 从 scope.target 写入，
-            R4 as_call 读取切后端/REFUSE）；不用裸 meta key。
+        meta: 临时元数据。
     """
     effect: Effect
     state: AgentState
@@ -553,7 +630,6 @@ class RuntimeCtx:
     meta: dict[str, DynamicValue] = field(default_factory=dict)
     trace: list[str] = field(default_factory=list)
     invoke: Callable[[Effect, DynamicValue], Awaitable[Result]] | None = None
-    degrade_target: str | None = None
 
 
 @dataclass
@@ -614,7 +690,7 @@ class RunResult:
 
 
 DispatchFn = Callable[[Effect, DynamicValue], Awaitable[DynamicValue]]
-"""链路判决函数签名（R2 注入）；返回 Decision / Result / None。"""
+"""链路调用签名（装配层注入）；返回 Result。"""
 CallFn = Callable[[Effect, DynamicValue], Awaitable[Result]]
 """port 调用函数签名（上层注入）；返回统一 Result 信封。"""
 
@@ -656,6 +732,12 @@ def _plain(obj: DynamicValue) -> DynamicValue:
         return obj
     if isinstance(obj, Enum):
         return obj.value
+    # Effect tagged union：注入 disposition 判别标签，保证 checkpoint 可无损重建
+    # （放在通用 dataclass 分支之前，否则各成员只剩字段字典、类型信息丢失）。
+    if isinstance(obj, (Invoke, Spawn, Suspend, Terminate)):
+        plain = {f.name: _plain(getattr(obj, f.name)) for f in dataclasses.fields(obj)}
+        plain["disposition"] = disposition_of(obj).value
+        return plain
     if hasattr(obj, "model_dump"):
         return _plain(obj.model_dump(mode="python"))
     if isinstance(obj, types.SimpleNamespace):
@@ -780,6 +862,37 @@ def restore_state(data: StateSnapshot) -> AgentState:
     )
 
 
+def _effect_from_plain(raw: Mapping[str, DynamicValue]) -> Effect:
+    """从规范化字典重建 Effect tagged union（checkpoint 恢复的唯一边界）。
+
+    参数：
+        raw: 经 _plain 序列化的 Effect（含 disposition 判别标签）。
+    返回：
+        对应具体类型的 Effect 成员。
+    说明：
+        disposition 缺失时回退 INVOKE（兼容无标签的早期事件快照）。
+    """
+    disposition = str(raw.get("disposition", Disposition.INVOKE.value))
+    if disposition == Disposition.INVOKE.value:
+        return Invoke(
+            port=str(raw.get("port", "")),
+            payload=cast(EffectPayload, dict(raw.get("payload") or {})),
+            batch=bool(raw.get("batch", False)),
+            trace_id=raw.get("trace_id"),
+            idempotency_key=raw.get("idempotency_key"),
+        )
+    if disposition == Disposition.SPAWN.value:
+        # program_factory 不可序列化：恢复时由调用方经 program_factory 重注入；此处留空。
+        raw_state = raw.get("state")
+        return Spawn(state=restore_state(raw_state) if raw_state is not None else None)
+    if disposition == Disposition.SUSPEND.value:
+        return Suspend(
+            question=str(raw.get("question", "")),
+            options=tuple(raw.get("options") or ()),
+        )
+    return Terminate(output=raw.get("output"), reason=str(raw.get("reason", "")))
+
+
 def restore_checkpoint(snapshot: JsonSnapshot, program_factory: Callable[[], Program]) -> Session:
     """从快照重建 State 与事件日志；Program 纯函数 + 重放定位断点。
 
@@ -795,14 +908,7 @@ def restore_checkpoint(snapshot: JsonSnapshot, program_factory: Callable[[], Pro
             Event(
                 seq=e["seq"], session_id=e["session_id"], step=e["step"],
                 state_snapshot=restore_state(cast(StateSnapshot, e["state_snapshot"])),
-                effects=tuple(
-                    Effect(
-                        EffectKind(x["kind"]), x["payload"], x["batch"], x["trace_id"],
-                        # B2：恢复幂等键，否则 checkpoint 续跑后副作用去重/重试红线失效。
-                        idempotency_key=x.get("idempotency_key"),
-                    )
-                    for x in e["effects"]
-                ),
+                effects=tuple(_effect_from_plain(x) for x in e["effects"]),
                 results=tuple(
                     Result(ok=r["ok"], data=revive(r["data"]),
                            usage=Usage.from_mapping(r["usage"]) if r.get("usage") else None,

@@ -17,19 +17,19 @@
 
 ## 2. 设计架构
 
-纵深防御：模型级安全是必要不充分条件，harness 提供独立执行期强制层。每层独立强制，一个 hook 的 allow 不能覆盖 deny（取最严格）。核心原则：**工具/检索/网页/技能正文一律不可信**，注入防御在进上下文前（before_model guard）。审计覆盖全部事件且与事件日志同源可回放。
+纵深防御：模型级安全是必要不充分条件，harness 提供独立执行期强制层。每层独立强制，一道护栏（Warden 增强器）的 allow 不能覆盖 deny（取最严格）。核心原则：**工具/检索/网页/技能正文一律不可信**，注入防御在进上下文前由 Warden 强制（`before_model` 为 Lifecycle 通知点，只通知不拦截；真正的拦截在 AOP Warden 完成）。审计覆盖全部事件且与事件日志同源可回放。
 
 ## 3. 流程图
 
 ```mermaid
 flowchart TD
     IN["不可信输入: 用户/RAG/网页/工具/历史"] --> G["输入护栏 guard<br/>注入检测+敏感过滤+权限预检"]
-    G -->|命中| DENY["deny/redact/ask"]
+    G -->|命中| DENY["deny / SafetyVerdict.redact / ask→Suspend"]
     G -->|通过| ISO["隔离标记包裹 UNTRUSTED_DATA"]
     ISO --> M["模型推理 secret 只经引用注入"]
     M --> S["结构化输出校验(R4)"]
     S --> A["before_tool 授权+danger 分级"]
-    A -->|CRITICAL| AP["HumanPort 审批 ask→挂起→resume"]
+    A -->|CRITICAL| AP["HumanPort 审批: Suspend + wait_human/resumed 通知→resume"]
     A -->|HIGH+| SB["SandboxPort 隔离执行"]
     AP --> SB
     SB --> AU["AuditPort 全程 append-only+哈希链"]
@@ -40,10 +40,10 @@ flowchart TD
 ## 4. API 规范（完整接口）
 
 ```python
-# ---- 安全域 DTO（v1.1 补齐：此前 SecurityCtx/Verdict/SafetyReport 只有名字无结构）----
+# ---- 安全域 DTO（本次补齐：此前 SecurityCtx/SafetyVerdict/SafetyReport 只有名字无结构）----
 @dataclass(frozen=True, slots=True)
 class SecurityCtx:
-    """安全检查上下文：HookCtx 面向安全域的具名投影，避免检测器直接依赖 R2 全量上下文。
+    """安全检查上下文：Invocation（AOP）/ Notice（Lifecycle 只读投影）面向安全域的具名投影，避免检测器直接依赖 R2 全量上下文。
 
     字段：
         session_id / run_id: 会话与 run 标识（审计关联）。
@@ -52,7 +52,7 @@ class SecurityCtx:
         danger: DangerLevel——当前操作的危险级别。
         trust: bool——内容是否来自可信内核（False 则必须过注入检测）。
         meta: dict[str, DynamicValue]——扩展元数据（规则 3 动态边界）。
-    构造：由 R9 护栏 hook 从 HookCtx 投影生成（from_hook_ctx 类方法），不改 HookCtx 本身。
+    构造：由 R9 护栏增强器从 Invocation 投影生成（from_invocation 类方法）；Lifecycle 侧可从 Notice（Invocation 只读投影）经 from_notice 生成，不改 Invocation/Notice 本身。
     """
     session_id: str
     run_id: str
@@ -63,12 +63,14 @@ class SecurityCtx:
     meta: dict[str, DynamicValue] = field(default_factory=dict)
 
 @dataclass(frozen=True, slots=True)
-class Verdict:
-    """护栏判定结果：allow/redact/deny/ask 四态。
+class SafetyVerdict:
+    """安全域护栏判定结果：allow/redact/deny/ask 四态（D-1：与 AOP 通用 Verdict(allowed, reason) 区分，改用本名）。
 
     字段：
-        action: 四态之一。redacted: redact 时的替换文本。
+        action: 四态之一。redacted: redact 时的替换文本（掩码/脱敏产物）。
         reason: 判定原因（进 trace）。rule: 命中的规则 id（无则空）。
+    ask 语义：返回 ask 不直接拦截，由框架产 Suspend(question, options) 并挂 wait_human/resumed 两个通知点；
+    redact 语义：经本类 redacted 字段返回脱敏内容，不复用 AOP Verdict。
     """
     action: Literal["allow","redact","deny","ask"]
     redacted: DynamicValue = None
@@ -98,9 +100,10 @@ class AuditEvent:
     data_touched: tuple[str, ...]; rationale: str
     prev_hash: str = ""; hash: str = ""
 
-class Guardrail(Protocol):
+class Guardrail(Protocol):                        # 作为 Warden 增强器接入 AOP 链
     name: str; direction: Literal["input","output"]
-    def check(self, data: DynamicValue, ctx: HookCtx) -> Verdict: ...   # allow/redact/deny/ask
+    # 参数为 Invocation（AOP 主路径）或 SecurityCtx（安全域投影）；返回 SafetyVerdict
+    def check(self, data: DynamicValue, ctx: Invocation | SecurityCtx) -> SafetyVerdict: ...   # allow/redact/deny/ask; ask→Suspend
 class InjectionDetector(Protocol):
     name: str
     def inspect(self, text: str, ctx: SecurityCtx) -> SafetyReport: ...  # safe/suspicious/malicious
@@ -143,7 +146,7 @@ class ApprovalFlow:
 
 | 条件 | 实现 | 证据 |
 |------|------|------|
-| CL-1 契约自足 | 依赖 R1 types + R2 Hook + 安全协议 | import 扫描 |
+| CL-1 契约自足 | 依赖 R1 types + R2 AOP 增强器/Lifecycle 通知 + 安全协议 | import 扫描 |
 | CL-2 自带 fake | fake SandboxPort/AuditPort/HumanPort | fake 用例 |
 | CL-3 自带测试 | tests/r9/ | 覆盖率报告 |
 | CL-4 独立 demo | `make demo-r9` | demo 冒烟 |

@@ -9,7 +9,6 @@ from random import Random
 
 import pytest
 
-from hooks import HookCtx
 from runtime import Result
 
 from harness.resilience import (

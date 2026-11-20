@@ -1,4 +1,4 @@
-"""结构化流式事件帮助函数（R4 §4.1 v1.2）。
+"""结构化流式事件帮助函数。
 
 把只实现 stream()->AsyncIterator[str] 的旧后端包装成 StreamEvent 流，
 使未覆盖 stream_events 的后端也能接入结构化事件通道，且不污染 LLMPort 协议

@@ -39,6 +39,8 @@ DEFAULT_IMPL_CONTRACTS: dict[str, tuple[str, str]] = {
     "mcp": ("HttpMCPTransport", "ports/adapters/mcp.py"),
     "webfetch": ("HttpFetcher", "ports/adapters/webfetch.py"),
     "rag": ("RAGPipeline", "harness/rag/pipeline.py"),
+    "memory": ("MemoryStore", "harness/memory/memory.py"),
+    "store": ("InMemoryStorePort", "harness/memory/store.py"),
 }
 
 
@@ -46,19 +48,24 @@ MODULES = {
     "r1": {
         "title": "R1 核心运行时", "pkg": "runtime", "path": "runtime",
         "doc": "docs/02-模块详设/Agent/R1-核心运行时.md", "demo": "tests/demos/demo_r1.py", "coverage": 90,
-        "symbols": ["Effect", "EffectKind", "AgentState", "Budgets", "Result", "Runner",
+        "symbols": ["Effect", "Invoke", "Spawn", "Suspend", "Terminate", "Disposition",
+                    "AgentState", "Budgets", "Result", "Runner",
                     "Session", "Event", "fold", "fingerprint", "checkpoint"],
         "behavior": ["test_determinism.py", "test_replay.py", "test_budgets.py", "test_batch.py"],
-        "integration": ["test_runner.py", "test_suspend.py", "test_errors.py", "test_types.py"],
+        "integration": ["test_runner.py", "test_suspend.py", "test_errors.py", "test_types.py",
+                        "test_snapshot_migration.py"],
     },
     "r2": {
-        "title": "R2 插件总线与协议", "pkg": "hooks", "path": "hooks",
+        "title": "R2 插件总线与协议（Port + AOP + Lifecycle）", "pkg": "hooks", "path": "hooks",
         "doc": "docs/02-模块详设/Agent/R2-插件总线与协议.md", "demo": "tests/demos/demo_r2.py", "coverage": 85,
-        "symbols": ["HookKind", "Host", "RequestScope", "Signal", "HookCtx",
-                    "Decision", "DecisionAction", "Registry", "Capability", "PORT_PROTOCOLS",
+        # 旧符号 HookKind/Host/RequestScope/Signal/HookCtx/Decision/DecisionAction 已删除（P13）。
+        # AOP 五角色与 AOPContainer 在 aop 包，由 ast_scan 单独核对（跨包）。
+        "symbols": ["LifecycleBus", "LifecyclePhase", "Notice", "PHASE_COUNT",
+                    "Registry", "Capability", "PORT_PROTOCOLS",
                     "LLMRequest", "ToolSpec", "make_call"],
-        "behavior": ["test_v5_primitives.py", "test_v5_wiring.py", "test_v5_call.py"],
-        "integration": ["test_ports.py", "test_registry.py", "test_errors.py"],
+        "behavior": ["test_aop.py", "test_lifecycle.py"],
+        "integration": ["test_ports.py", "test_registry.py", "test_errors.py",
+                        "test_lifecycle_wiring.py"],
     },
     "r3": {
         "title": "R3 可靠性", "pkg": "harness.resilience", "path": "harness/resilience",
@@ -69,7 +76,8 @@ MODULES = {
                     "Idempotency", "Watchdog", "KillSwitch", "BudgetGuard", "ResilienceCapability",
                     "Timeout", "BreakerStore", "InMemoryBreakerStore"],
         "behavior": ["test_types.py", "test_breaker.py", "test_retry.py"],
-        "integration": ["test_degrade.py", "test_degrade_pipeline.py", "test_capability.py"],
+        "integration": ["test_degrade.py", "test_degrade_pipeline.py", "test_capability.py",
+                        "test_e2e_degrade.py", "test_aop_roles.py"],
     },
     "r4": {
         "title": "R4 模型与推理", "pkg": "harness.model", "path": "harness/model",
@@ -79,10 +87,11 @@ MODULES = {
                     "ModelRouter", "RuleRouter", "CachePort", "ExactCache",
                     "validate_json_schema", "StructuredOutputValidator",
                     "SchemaValidator", "MinimalSchemaValidator",
-                    "ModelGateway", "ModelCapability"],
-        "behavior": ["test_types.py", "test_router.py", "test_structured.py", "test_cache.py"],
+                    "ModelGateway", "ModelCapability", "HashCacheEmbedder"],
+        "behavior": ["test_types.py", "test_router.py", "test_structured.py", "test_cache.py",
+                     "test_cache_embedder_default.py"],
         "integration": ["test_adapter.py", "test_cost.py", "test_gateway.py",
-                        "test_e2e_wiring.py", "test_v5_e2e.py", "test_production_chain.py"],
+                        "test_e2e_wiring.py", "test_model_registry.py", "test_refuse.py"],
     },
     "r5": {
         "title": "R5 工具·MCP·技能", "pkg": "harness.tools", "path": "harness",
@@ -117,6 +126,24 @@ MODULES = {
         "integration": ["test_fallback.py", "test_injection.py", "test_cache.py"],
         "required_defaults": {
             "rag": DEFAULT_IMPL_CONTRACTS["rag"],
+        },
+    },
+    "r7": {
+        "title": "R7 上下文与记忆", "pkg": "harness.context", "path": "harness/context",
+        "doc": "docs/02-模块详设/Agent/R7-上下文与记忆.md", "demo": "tests/demos/demo_r7.py", "coverage": 85,
+        "symbols": [
+            "ContextSection", "TrimPolicy", "TRIGGER_RATIO", "ContextAssembler",
+            "DefaultContextAssembler", "SYSTEM_SECTION_NAME", "CompactionPolicy",
+            "DefaultCompactionPolicy", "count_tokens", "BlobPort", "Offloader",
+            "InMemoryBlobStore", "DefaultOffloader", "BLOB_HANDLE_SCHEME",
+            "make_handle", "parse_handle", "ContextMemoryManager",
+        ],
+        "behavior": ["test_types.py", "test_assembly.py", "test_compaction.py"],
+        "integration": ["test_offload.py", "test_memory.py", "test_wiring.py"],
+        "extra_cov": ["harness.memory"],
+        "required_defaults": {
+            "memory": DEFAULT_IMPL_CONTRACTS["memory"],
+            "store": DEFAULT_IMPL_CONTRACTS["store"],
         },
     },
 }

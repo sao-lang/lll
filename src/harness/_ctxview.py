@@ -1,6 +1,6 @@
 """R4 PortCtx 动态上下文边界（编码规则 6）：把 PortCtx 的动态字段读取收敛到一处。
 
-ARCH-v5：HookCtx 侧的动态视图已删除（插件改用 RequestScope 具名字段）。
+PortCtx 是唯一动态上下文边界（插件/AOP 用 Invocation.meta 具名字段）。
 本模块只保留 gateway 需要的 PortCtx 投影与成本归因维度具名读取。
 """
 from __future__ import annotations

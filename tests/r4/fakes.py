@@ -69,7 +69,7 @@ class StreamLLM:
 
 
 class EventStreamLLM:
-    """结构化事件流 LLM：直接产出预置 StreamEvent 序列（R4 §4.1 v1.2）。"""
+    """结构化事件流 LLM：直接产出预置 StreamEvent 序列。"""
 
     name = "event_stream_llm"
 

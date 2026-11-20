@@ -1,4 +1,4 @@
-"""R4 §4.1 v1.2 结构化流式事件测试：TEXT_DELTA / USAGE / DONE + 文本视图兼容。"""
+"""R4 §4.1 结构化流式事件测试：TEXT_DELTA / USAGE / DONE + 文本视图兼容。"""
 from __future__ import annotations
 
 import asyncio

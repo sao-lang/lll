@@ -35,7 +35,7 @@ def test_dto_rejects_extra():
 
 
 class TestPortAsyncContracts:
-    """v1.1：涉及外部 IO 的 Port 方法必须是 async（防阻塞事件循环回归）。"""
+    """涉及外部 IO 的 Port 方法必须是 async（防阻塞事件循环回归）。"""
 
     def test_storage_and_audit_methods_are_async(self) -> None:
         for proto, methods in [

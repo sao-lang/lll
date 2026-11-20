@@ -33,7 +33,7 @@ __all__ = [
 ]
 
 
-# ---- R4 §2.2 / §5.4 降级解析三态（v5 唯一决策点返回值，不回退默认模型）----
+# ---- R4 §2.2 / §5.4 降级解析三态（唯一决策点返回值，不回退默认模型）----
 # 稳定错误码集中为模块常量（规则 5 禁魔法串），R4-T09/T10 断言这两个 code。
 REFUSED_CODE = "REFUSED"
 TARGET_UNRESOLVED_CODE = "TARGET_UNRESOLVED"
@@ -86,10 +86,10 @@ class StructuredOutputSpec(BaseModel):
         default_factory=dict, alias="schema", description="JSON Schema"
     )
     mode: Literal["constrained", "prompt", "repair"] = Field(
-        default="repair", description="结构化输出模式"
+        default="repair", description="Structured output mode"
     )
-    max_repair: int = Field(default=2, ge=0, description="最大修复重试次数")
-    strict: bool = Field(default=True, description="严格模式：非法输出不进业务")
+    max_repair: int = Field(default=2, ge=0, description="Maximum repair retries")
+    strict: bool = Field(default=True, description="Strict mode: invalid output is rejected")
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,10 +97,10 @@ class CacheKey:
     """缓存键快照：value 为规范化哈希，version 为 prompt 版本。"""
 
     value: str
-    version: str = "v1"
+    version: str = "current"
 
 
-def cache_key_string(request: LLMRequest, *, prompt_version: str = "v1") -> str:
+def cache_key_string(request: LLMRequest, *, prompt_version: str = "current") -> str:
     """构造缓存键字符串：hash(messages + model + params + prompt_version)。
 
     参数：
@@ -122,7 +122,7 @@ def cache_key_string(request: LLMRequest, *, prompt_version: str = "v1") -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
 
 
-def build_cache_key(request: LLMRequest, *, prompt_version: str = "v1") -> CacheKey:
+def build_cache_key(request: LLMRequest, *, prompt_version: str = "current") -> CacheKey:
     """构造 CacheKey 值对象（键含版本，供缓存隔离）。"""
     return CacheKey(value=cache_key_string(request, prompt_version=prompt_version), version=prompt_version)
 

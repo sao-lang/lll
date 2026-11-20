@@ -1,10 +1,12 @@
-"""R4 能力装配（ARCH-v5）：ModelCapability 构造网关并持有 ModelRegistry。
+"""R4 能力装配：ModelCapability 构造网关并持有共用 ModelRegistry。
 
-降级目标后端通过 add_backend 注册到同一 ModelRegistry，供网关按 target 切换。
+降级目标后端通过 add_backend 注册到同一 ModelRegistry，供网关按 typed 目标切换；
+容器/网关/能力共用这份注册表（P6 两表统一，载体换为共用 Registry）。
 """
 from __future__ import annotations
 
-from hooks import Host, LLMPort
+from aop import AOPContainer
+from hooks import LifecycleBus, LLMPort, Registry
 
 from .cache import ExactCache, CachePort
 from .gateway import ModelGateway
@@ -17,14 +19,12 @@ __all__ = ["ModelCapability"]
 
 
 class ModelCapability:
-    """模型能力包：把 llm/router/cache 注册进 Provider 注册表。
+    """模型能力包：把 llm/router/cache 注册进共用 Provider 注册表。
 
     属性：
         name/version/requires: 能力级元数据（R13 Capability 契约）。
     """
-
     name = "model"
-    version = "5.0.0"
     requires: tuple[str, ...] = ()
 
     def __init__(
@@ -36,6 +36,7 @@ class ModelCapability:
         spec: StructuredOutputSpec | None = None,
         validator: SchemaValidator | None = None,
         registry: ModelRegistry | None = None,
+        bus: LifecycleBus | None = None,
     ) -> None:
         """装配能力：llm 必填，其余策略可替换。"""
         self._llm = llm
@@ -43,30 +44,29 @@ class ModelCapability:
         self._cache = cache
         self._spec = spec
         self._validator = validator
-        # ARCH-v5 修复：默认建 ModelRegistry 并注册 "primary"，让降级目标可解析。
+        self._bus = bus
+        # 默认建 ModelRegistry 并注册 "primary"，让降级目标可解析。
         self._model_registry = registry or InMemoryModelRegistry()
         self._model_registry.register_llm("primary", llm)
 
-    def install(self, host: Host, reg: ModelRegistry | None = None) -> Host:
-        """R4 §5.6 统一装配：把 llm/router/cache 注册进统一注册表并令两表同源。
+    def install(self, container: AOPContainer | None = None, reg: Registry | None = None) -> Registry:
+        """统一装配：把 llm/router/cache 注册进共用 Provider 注册表。
 
         参数：
-            host: R2 Host；其 registry 指向同一实例（供 hook 总线与网关共用）。
-            reg: 注入的注册表；缺省用本能力持有的实例（无则新建）。
+            container: 可选；若给定，其 registry 指向同一份注册表（两表统一）。
+            reg: 注入的注册表；缺省用本能力持有的实例。
         返回：
-            host（支持链式装配）。
+            共用注册表（支持链式）。
         """
         if reg is not None:
-            # 注入注册表时，本能力后续 gateway 复用同一实例（两表统一）。
-            self._model_registry = reg
+            self._model_registry = reg  # type: ignore[assignment]
         registry = self._model_registry
-        # 具名 provider 三项注册（同名同实例幂等，异实例拒绝由注册表保证）。
         registry.register("llm", self._llm)
         registry.register("model_router", self._router or RuleRouter())
         registry.register("model_cache", self._cache or ExactCache())
-        # 同源：host 与网关指向同一份注册表。
-        host.registry = registry  # ModelRegistry 结构性满足 ProviderRegistry（register/has）
-        return host
+        if container is not None:
+            container.registry = registry
+        return registry  # type: ignore[return-value]
 
     @property
     def llm(self) -> LLMPort:
@@ -79,13 +79,21 @@ class ModelCapability:
         return self._model_registry
 
     def gateway(self) -> ModelGateway:
-        """构造模型网关（传入统一 registry，修复降级目标无法解析断点）。"""
+        """构造模型网关（传入共用 registry 与通知总线）。"""
         return ModelGateway(
             llm=self._llm, router=self._router, cache=self._cache,
             spec=self._spec, validator=self._validator,
-            registry=self._model_registry,
+            registry=self._model_registry, bus=self._bus,
         )
 
+    def container(self) -> AOPContainer:
+        """构造与网关共用同一 Registry 的 AOP 容器（P6 两表统一的标准装配入口）。
+
+        返回：
+            已注入共用 registry 的容器；core 为网关 as_call。
+        """
+        return AOPContainer(self.gateway().as_call(), registry=self._model_registry, bus=self._bus)
+
     def add_backend(self, name: str, llm: LLMPort) -> None:
-        """注册降级目标后端（如 "backup"），供网关按 target 切换。"""
+        """注册降级目标后端（如 "backup"），供网关按 typed 目标切换。"""
         self._model_registry.register_llm(name, llm)

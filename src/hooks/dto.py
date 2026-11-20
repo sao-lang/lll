@@ -33,7 +33,7 @@ __all__ = [
 
 
 class StreamEventKind(str, Enum):
-    """结构化流式事件类型（R4 §4.1 v1.2）。
+    """结构化流式事件类型。
 
     成员：
         TEXT_DELTA: 文本增量，data 为 str。
@@ -139,9 +139,9 @@ class Usage(_Strict):
         cost_usd: 本步成本（美元）。本地/免费实现可全填 0。
     """
 
-    prompt_tokens: int = Field(default=0, description="输入 token 数")
-    completion_tokens: int = Field(default=0, description="输出 token 数")
-    cost_usd: float = Field(default=0.0, description="本步成本（美元）")
+    prompt_tokens: int = Field(default=0, description="Input token count")
+    completion_tokens: int = Field(default=0, description="Output token count")
+    cost_usd: float = Field(default=0.0, description="Cost of this step (USD)")
 
 
 class PortCtx(_Strict):
@@ -154,15 +154,15 @@ class PortCtx(_Strict):
         meta: 临时元数据（动态键，形态由调用方决定）。
     """
 
-    session_id: str = Field(default="", description="会话标识")
-    run_id: str = Field(default="", description="run 标识")
-    trace_span: str | None = Field(default=None, description="链路 span 标识")
+    session_id: str = Field(default="", description="Session id")
+    run_id: str = Field(default="", description="Run id")
+    trace_span: str | None = Field(default=None, description="Trace span id")
     budget_left: DynamicValue = Field(
         default=None,
-        description="预算余量快照（R1 Budgets 的只读投影，避免 DTO 反向依赖内核）",
+        description="Read-only projection of remaining budget (avoids DTO depending on core)",
     )
     meta: dict[str, DynamicValue] = Field(
-        default_factory=dict, description="临时元数据"
+        default_factory=dict, description="Ephemeral metadata"
     )
 
 
@@ -176,11 +176,11 @@ class ToolCall(_Strict):
         source: 工具来源（local/mcp/skill，审计用）。
     """
 
-    call_id: str = Field(description="调用关联 id")
-    name: str = Field(description="工具名")
-    args: dict[str, DynamicValue] = Field(default_factory=dict, description="参数字典")
-    danger: DangerLevel = Field(default=DangerLevel.SAFE, description="风险级别（Enum，未知值由 coerce 归一）")
-    source: str = Field(default="local", description="工具来源 local/mcp/skill")
+    call_id: str = Field(description="Correlation id")
+    name: str = Field(description="Tool name")
+    args: dict[str, DynamicValue] = Field(default_factory=dict, description="Argument dict")
+    danger: DangerLevel = Field(default=DangerLevel.SAFE, description="Risk level (Enum; unknown values normalized by coerce)")
+    source: str = Field(default="local", description="Tool source: local/mcp/skill")
 
 
 class ToolSpec(_Strict):
@@ -193,12 +193,12 @@ class ToolSpec(_Strict):
         source: 来源（local/mcp/skill）。
     """
 
-    name: str = Field(description="全局唯一工具名")
-    description: str = Field(default="", description="一句话描述")
+    name: str = Field(description="Globally unique tool name")
+    description: str = Field(default="", description="One-line description")
     parameters_schema: dict[str, DynamicValue] = Field(
         default_factory=dict, description="JSON Schema"
     )
-    danger: DangerLevel | None = Field(default=None, description="风险级别；装配期必填校验")
+    danger: DangerLevel | None = Field(default=None, description="Risk level; required at assembly time")
     source: str = Field(default="local", description="local/mcp/skill")
 
 
@@ -211,12 +211,12 @@ class ToolResult(_Strict):
         meta: danger/source/sandbox 等元数据（动态键）。
     """
 
-    call_id: str = Field(description="调用关联 id")
-    ok: bool = Field(default=True, description="是否成功返回")
-    value: DynamicValue = Field(default=None, description="返回值")
-    error: str | None = Field(default=None, description="错误信息")
+    call_id: str = Field(description="Correlation id")
+    ok: bool = Field(default=True, description="Whether the call succeeded")
+    value: DynamicValue = Field(default=None, description="Return value")
+    error: str | None = Field(default=None, description="Error message")
     meta: dict[str, DynamicValue] = Field(
-        default_factory=dict, description="danger/source/sandbox 等元数据"
+        default_factory=dict, description="Metadata such as danger/source/sandbox"
     )
 
 
@@ -231,15 +231,15 @@ class LLMRequest(_Strict):
     """
 
     messages: list[dict[str, DynamicValue]] = Field(
-        default_factory=list, description="对话消息列表"
+        default_factory=list, description="Conversation messages"
     )
     tools_catalog: list[ToolSpec] | None = Field(
-        default=None, description="工具目录（L1 披露）"
+        default=None, description="Tool catalog (L1 disclosure)"
     )
-    model: str | None = Field(default=None, description="模型名覆盖")
-    temperature: float | None = Field(default=None, description="采样温度")
-    max_tokens: int | None = Field(default=None, description="最大输出 token")
-    task_hint: str | None = Field(default=None, description="任务类型提示（如 code/chat），供 R4 路由选模型")
+    model: str | None = Field(default=None, description="Model name override")
+    temperature: float | None = Field(default=None, description="Sampling temperature")
+    max_tokens: int | None = Field(default=None, description="Maximum output tokens")
+    task_hint: str | None = Field(default=None, description="Task type hint (e.g. code/chat) for R4 model routing")
 
 
 class LLMResponse(_Strict):
@@ -250,11 +250,11 @@ class LLMResponse(_Strict):
         usage: token 与成本。model: 实际使用的模型。
     """
 
-    content: str | None = Field(default=None, description="文本正文")
-    tool_calls: list[ToolCall] = Field(default_factory=list, description="工具调用列表")
-    usage: Usage = Field(default_factory=Usage, description="token 与成本")
-    model: str = Field(default="", description="实际使用的模型")
-    error: str | None = Field(default=None, description="后端错误码/消息；非 None 表示该次调用失败（R3 据此重试/熔断）")
+    content: str | None = Field(default=None, description="Text body")
+    tool_calls: list[ToolCall] = Field(default_factory=list, description="Tool calls")
+    usage: Usage = Field(default_factory=Usage, description="Token usage and cost")
+    model: str = Field(default="", description="Model actually used")
+    error: str | None = Field(default=None, description="Backend error code/message; non-None means the call failed (R3 retries/breaks on this)")
 
 
 def make_call(

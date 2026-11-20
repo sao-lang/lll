@@ -7,8 +7,8 @@ from tests.r1.conftest import fake_call, fake_dispatch, react_program
 
 def test_deterministic_event_log():
     async def run():
-        r1 = Runner(dispatch=fake_dispatch, call=fake_call)
-        r2 = Runner(dispatch=fake_dispatch, call=fake_call)
+        r1 = Runner(call=fake_call)
+        r2 = Runner(call=fake_call)
         s1 = Session(session_id="same", program_factory=lambda: react_program(AgentState()))
         s2 = Session(session_id="same", program_factory=lambda: react_program(AgentState()))
         a = await r1.run(s1)

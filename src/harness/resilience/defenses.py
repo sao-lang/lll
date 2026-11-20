@@ -1,9 +1,13 @@
-"""R3 其余防线：降级 / 限流 / 舱壁 / 幂等 / watchdog / killswitch。
+"""R3 其余防线：降级 / 限流 / 舱壁 / 幂等 / watchdog / killswitch / 软预算。
 
-v5（ARCH-v5）：插件只实现 apply(host)，在宿主定义的扩展点上 tap 回调；
-守卫返回 Decision 短路，降级意图用 scope.emit(Signal("degrade", ...)) 表达，
-由 settle 阶段统一选级；BudgetGuard 这类 WATERFALL 回调则直接改写上下文文本。
-内核零策略（R3 §1）。时钟/存储显式注入，墙钟/随机不隐式进入，保证可测试、可回放。
+三体系正交后，插件保留一等身份（name + 实例状态 + 构造注入），只把实现接口换成
+AOP 角色：
+- Warden：KillSwitch / Watchdog / Idempotency / RateLimit（guard → Verdict）。
+- Envelope：Bulkhead（acquire + try/finally release）。
+- Refiner：BudgetGuard（改 Invocation，不写 State）。
+- Salvage：Degradation（唯一降级裁决者，保 B1/B2/R3-6/R3-7 四坑）。
+
+时钟/存储显式注入，墙钟/随机不隐式进入，保证可测试、可回放。内核零策略。
 """
 from __future__ import annotations
 
@@ -11,14 +15,8 @@ import time
 from collections.abc import Callable, Collection, MutableMapping
 from enum import Enum
 
-from hooks import (
-    Decision,
-    Host,
-    RequestScope,
-    Signal,
-    SignalKind,
-)
-from runtime import Budgets, Effect
+from aop import FaultRecord, Invocation, RoutingTarget, Verdict
+from runtime import Budgets, Invoke, Result
 
 from .types import DegradeLadder, DegradeMode, DegradeStep, validate_ladder
 
@@ -33,22 +31,35 @@ __all__ = [
 ]
 
 
+def _failed_target_of(inv: Invocation) -> str:
+    """从 Invocation 派生失败目标注册名（B2：阶梯后端注册名，非维度二元组）。
+
+    参数：
+        inv: 调用上下文；effect 为 Invoke 时读 payload.model，缺省 "primary"。
+    返回：
+        后端注册名。
+    """
+    effect = inv.effect
+    if isinstance(effect, Invoke):
+        return str(effect.payload.get("model") or "primary")
+    return "primary"
+
+
 class _ExceedPolicy(str, Enum):
-    """超限策略的有限取值（规则 5；私有枚举，不进 G5 公共契约）。
+    """超限策略的有限取值。
 
     成员：
-        WAIT: 等待/降级（令牌桶缺省，交上层走降级链）。
-        REJECT: 直接拒绝（舱壁缺省）。
-        DEGRADE: 降级。
+        WAIT: 降级（写 fault 交 Degradation 选级）。
+        REJECT: 直接拒绝（Verdict(allowed=False)）。
+        DEGRADE: 降级（同 WAIT）。
     """
-
     WAIT = "wait"
     REJECT = "reject"
     DEGRADE = "degrade"
 
     @classmethod
     def coerce(cls, raw: _ExceedPolicy | str) -> _ExceedPolicy:
-        """字符串归一为成员；未知值显式回退 DEGRADE（规则 5），不静默放行。"""
+        """字符串归一为成员；未知值显式回退 DEGRADE（fail-closed）。"""
         if isinstance(raw, cls):
             return raw
         try:
@@ -58,17 +69,13 @@ class _ExceedPolicy(str, Enum):
 
 
 class _KillScope(str, Enum):
-    """killswitch 作用域的有限取值（规则 5；私有枚举）。
-
-    成员：SESSION 仅会话级标志；GLOBAL 含全局标志。
-    """
-
+    """killswitch 作用域的有限取值。"""
     SESSION = "session"
     GLOBAL = "global"
 
     @classmethod
     def coerce(cls, raw: _KillScope | str) -> _KillScope:
-        """字符串归一为成员；未知值显式回退 SESSION（最小权限，规则 5）。"""
+        """字符串归一为成员；未知值回退 SESSION（最小权限）。"""
         if isinstance(raw, cls):
             return raw
         try:
@@ -76,60 +83,94 @@ class _KillScope(str, Enum):
         except ValueError:
             return cls.SESSION
 
+
 class Degradation:
-    """降级插件：自身持有 ladder 与可用目标集，apply(host) 订阅 settle（BAIL）。
+    """降级插件（Salvage）：唯一裁决者，持有 ladder + available + 按会话隔离状态。
 
-    修复旧架构"available 永不收缩"的空心化：每次 select 先从信号里的
-    failed_target 剔除目标，再 pick 剩余最高质量级；全剔除则落 REFUSE。
-    状态在插件实例上（注册一次、长期存活），跨调用共享。
+    修复历史四坑：
+        B1：目标状态按 session_id 隔离，禁容器级单值（跨 Effect 在同一会话继承）。
+        B2：failed_target 必须是阶梯注册名（由上游 _failed_target_of 派生）。
+        R3-6：故障目标永久从实例 available 剔除并写回（非局部副本）。
+        R3-7：上游故障记录必须携带 failed_target，选级据此剔除。
     """
-
     name = "r3_degrade"
 
-    def __init__(self, ladder: DegradeLadder, *, available: set[str] | None = None) -> None:
-        """装配降级插件：阶梯装配期强校验，可用目标集缺省为空（走 REFUSE）。
+    def __init__(
+        self,
+        ladder: DegradeLadder,
+        *,
+        available: set[str] | None = None,
+        session_state: dict[str, dict[str, object]] | None = None,
+    ) -> None:
+        """装配降级插件：阶梯强校验；可用集缺省空（走 REFUSE）。
 
         参数：
             ladder: 降级阶梯（无环、末级 REFUSE、quality 严格递减）。
-            available: 初始可用注册名集合；None 视为空集。
+            available: 初始可用注册名集合（各会话的初始模板）；None 视为空集。
+            session_state: 按 session_id 隔离的状态表（B1），每会话持自己的 available 副本。
         """
         validate_ladder(ladder)
         self._ladder = ladder
-        self._available = set(available) if available is not None else set()
+        self._initial_available = set(available) if available is not None else set()
+        self._session_state = session_state if session_state is not None else {}
+
+    def _session(self, session_id: str) -> dict[str, object]:
+        """取本会话状态切片（B1，缺失则按初始 available 建独立副本）。
+
+        每个会话拥有独立的 available 集合；一个会话剔除 primary 不影响另一会话，
+        彻底消除旧架构"全局单槽串味"（B1）。
+        """
+        state = self._session_state.get(session_id)
+        if state is None:
+            state = {"available": set(self._initial_available)}
+            self._session_state[session_id] = state
+        return state
 
     def pick(self, available: set[str] | None = None) -> DegradeStep:
-        """从给定（或自身）可用集里选 quality 最高级，全无则 REFUSE。"""
-        return self._ladder.pick(available if available is not None else self._available)
+        """从给定（或初始）可用集里选 quality 最高级，全无则 REFUSE。"""
+        return self._ladder.pick(available if available is not None else set(self._initial_available))
 
-    def select(self, signals: list[Signal]) -> str:
-        """按降级信号选最终目标（跨 Effect 累积收缩，末级 REFUSE）。
+    def select(self, fault: FaultRecord, *, session_id: str) -> str:
+        """唯一选级裁决（四坑落点）。
 
-        R3-6 修复：故障目标必须从插件实例的 available 里**永久剔除并写回**，而非只在
-        局部副本 discard。v5.2 每次 Effect 新建 scope、signals 不继承，若剔除不写回，
-        backup 故障时会重新从初始集合选回 primary，永远到不了 REFUSE。ladder 的 REFUSE
-        级是无条件候选，目标剔除干净后 pick 自然落 REFUSE。
+        分派：
+            - B1：读写本会话独立状态（不碰全局单值）。
+            - R3-6：把 fault.failed_target 永久从本会话 available 剔除并写回。
+            - 沿 ladder 从高 quality 选本会话 available 中仍可用的目标；全剔除 → refuse。
+            - B2：failed_target 已是注册名（由上游保证），此处只做幂等剔除。
         """
-        for sig in signals:  # 逐条信号累积剔除，不能只看末条，否则前序故障目标会被漏掉
-            if sig.kind == SignalKind.DEGRADE and sig.failed_target:
-                # 只剔除当前可用集里的目标：已剔除的、未注册的都不误伤（幂等）。
-                self._available.discard(sig.failed_target)
-        choice = self.pick(self._available)
+        state = self._session(session_id)  # B1：本会话独立切片（跨 Effect 继承锚点）
+        available: set[str] = state["available"]  # type: ignore[assignment]
+        if fault.failed_target:
+            # R3-6：永久剔除并写回本会话集合（非局部副本 discard）。
+            available.discard(fault.failed_target)
+            state["available"] = available
+        choice = self.pick(available)
         return choice.target or DegradeMode.REFUSE.value
 
-    def apply(self, host: Host) -> None:
-        """挂载 settle 扩展点（BAIL）：有降级信号时选级。"""
-        host.hook("settle").tap(self.name, self.settle)
+    async def recover(self, exc: Exception, inv: Invocation) -> Result:
+        """Salvage 入口：读 inv.meta 故障记录 → 选级 → 写 typed routing_target。
 
-    async def settle(self, scope: RequestScope, effect: Effect) -> Decision | None:
-        """settle 回调：有降级意图才按累积收缩后的 available 选目标。"""
-        if not any(s.kind == SignalKind.DEGRADE for s in scope.signals):
-            return None
-        return Decision.degrade(self.select(scope.signals))
+        参数：
+            exc: 中心调用异常（可能 None 由容器补占位）。
+            inv: 调用上下文（含 fault 记录与 session_id）。
+        返回：
+            带目标的成功 Result（目标写入 inv.meta["routing_target"] 供网关消费）。
+        """
+        fault = inv.fault()
+        if fault is None:
+            fault = FaultRecord(reason="invoke_failed", failed_target=_failed_target_of(inv))
+        target = self.select(fault, session_id=inv.session_id)
+        # typed 目标路径：与 Registry 同源的注册名写入具名记录，供 R4 网关消费。
+        inv.write_routing_target(RoutingTarget(target=target, reason=fault.reason))
+        if target == DegradeMode.REFUSE.value:
+            # 末级拒答：真拒答失败 Result，绝不编造答案、绝不调后端。
+            return Result.failure("REFUSED", "degrade ladder exhausted; refusal")
+        return Result.success(target)
 
 
 class RateLimit:
-    """限流插件：令牌桶（token bucket），时钟显式注入；订阅 before_invoke（BAIL）拦截。"""
-
+    """限流插件（Warden）：令牌桶，时钟显式注入。"""
     name = "r3_ratelimit"
 
     def __init__(
@@ -140,14 +181,7 @@ class RateLimit:
         on_exceed: _ExceedPolicy | str = _ExceedPolicy.WAIT,
         clock: Callable[[], float] | None = None,
     ) -> None:
-        """装配令牌桶：rate 令牌/秒，burst 容量，超限策略 on_exceed。
-
-        参数：
-            rate: 每秒补充令牌数。burst: 桶容量。
-            on_exceed: 超限策略，接受 _ExceedPolicy 或字符串，未知值回退 DEGRADE。
-            超限降级只 emit Signal("degrade", ...) 报告意图，target 由 settle 统一选。
-            clock: 注入时钟（秒），缺省常量 0（单实例闭环）。
-        """
+        """装配令牌桶：rate 令牌/秒，burst 容量，超限策略 on_exceed。"""
         self._rate = rate
         self._burst = burst
         self._on_exceed = _ExceedPolicy.coerce(on_exceed)
@@ -162,30 +196,32 @@ class RateLimit:
         self._tokens = min(float(self._burst), self._tokens + elapsed * self._rate)
         self._last = now
 
-    def check(self, scope: RequestScope, effect: Effect) -> Decision:
-        """取一个令牌；不足按策略返回 DENY 或 DEGRADE（并 emit 降级信号）。
+    def check(self) -> Verdict | None:
+        """取一个令牌；不足按策略返回拒绝或降级意图（None 表示降级类故障）。
 
-        令牌桶算法不变：time 推进补充、消耗一个令牌、不足按 on_exceed 处理。
-        effect 由 Hook 直送，当前限流判定不读取（装配期参数已私有持有）。
+        返回：
+            Verdict(allowed=True) 放行；Verdict(allowed=False) 拒绝；
+            None 表示超限降级（由调用方写 fault 并放行重路由）。
         """
         self._refill()
         if self._tokens >= 1.0:
             self._tokens -= 1.0
-            return Decision.continue_()
-        scope.trace.append("ratelimit:exceed")
+            return Verdict(allowed=True)
         if self._on_exceed is _ExceedPolicy.REJECT:
-            return Decision.deny("rate_limited")  # deny 的 reason 是人读原因，保留状态串
-        scope.emit(Signal(SignalKind.DEGRADE, "rate_limited"))
-        return Decision.degrade("")  # 占位，settle 覆盖
+            return Verdict(allowed=False, reason="rate_limited")
+        return None  # 降级类：调用方写 fault(reason="rate_limited") 后放行
 
-    def apply(self, host: Host) -> None:
-        """before_invoke（BAIL）：令牌不足即短路。"""
-        host.hook("before_invoke").tap(self.name, self.check)
+    async def guard(self, inv: Invocation) -> Verdict:
+        """Warden.guard：超限降级时写 fault（含 failed_target，B2）并放行。"""
+        verdict = self.check()
+        if verdict is None:
+            inv.write_fault(FaultRecord(reason="rate_limited", failed_target=_failed_target_of(inv)))
+            return Verdict(allowed=True)  # 降级类放行，容器据此重路由
+        return verdict
 
 
 class Bulkhead:
-    """舱壁插件：按池隔离并发，池满拒绝；订阅 before_invoke（BAIL）拦截。"""
-
+    """舱壁插件（Envelope）：按池隔离并发，池满拒绝；用 try/finally 保证释放。"""
     name = "r3_bulkhead"
 
     def __init__(
@@ -195,28 +231,14 @@ class Bulkhead:
         on_full: _ExceedPolicy | str = _ExceedPolicy.REJECT,
         pool: str = "default",
     ) -> None:
-        """装配舱壁：pools 为池名→容量；on_full 为满时策略（未知值回退 DEGRADE）。
-
-        参数：
-            pools: 池名→并发上限；缺省 {"default": 10}。
-            on_full: 池满策略，接受 _ExceedPolicy 或字符串。
-            pool: 本插件占用的池名（装配期注入），缺省 "default"。
-            池满降级只 emit Signal("degrade", ...) 报告意图，target 由 settle 统一选。
-        注：acquire_timeout 已移除（v2.3）——舱壁满即按 on_full 拒绝，无等待语义；
-        保留一个不生效的超时参数会误导用户，故彻底删除。
-        """
+        """装配舱壁：pools 池名→容量；on_full 满时策略；pool 本插件池名。"""
         self._capacity = dict(pools or {"default": 10})
         self._used: dict[str, int] = {name: 0 for name in self._capacity}
         self._on_full = _ExceedPolicy.coerce(on_full)
         self._pool = pool
 
-    def acquire(self, pool: str, scope: RequestScope | None = None) -> bool:
-        """占用一个槽内；成功 True，池满 False。
-
-        参数：
-            pool: 池名（未声明时回退 default 容量）。
-            scope: 保留参数（供未来 trace），当前不读取。
-        """
+    def acquire(self, pool: str) -> bool:
+        """占用一个槽；成功 True，池满 False。"""
         cap = self._capacity.get(pool, self._capacity.get("default", 0))
         used = self._used.get(pool, 0)
         if used >= cap:
@@ -228,26 +250,21 @@ class Bulkhead:
         """释放一个槽（下限 0，防重复释放）。"""
         self._used[pool] = max(0, self._used.get(pool, 0) - 1)
 
-    def check(self, scope: RequestScope, effect: Effect) -> Decision:
-        """before_invoke（BAIL）：按构造期池名占槽，满时拒绝或 emit 降级。"""
-        if self.acquire(self._pool, scope):
-            # 注册释放回调到 scope：无论后续守卫短路、Port 成功还是失败，
-            # Host 都在本轮结束时统一释放（E2 完整修复，无泄漏边界）。
-            scope.releases.append(lambda: self.release(self._pool))
-            return Decision.continue_()
-        if self._on_full is _ExceedPolicy.REJECT:
-            return Decision.deny("bulkhead_full")  # deny reason 是人读状态串，保留
-        scope.emit(Signal(SignalKind.DEGRADE, "bulkhead_full"))
-        return Decision.degrade("")  # 占位，settle 覆盖
-
-    def apply(self, host: Host) -> None:
-        """before_invoke 占槽；释放由 scope.releases 统一兜底（Host 每轮结束调用）。"""
-        host.hook("before_invoke").tap(self.name, self.check)
+    async def wrap(self, inv: Invocation, next: Callable[[Invocation], object]) -> Result:
+        """Envelope.wrap：占槽 → 调 next → finally 释放（替掉旧 scope.releases）。"""
+        if not self.acquire(self._pool):
+            if self._on_full is _ExceedPolicy.REJECT:
+                return Result.failure("BULKHEAD_FULL", "bulkhead_full")
+            inv.write_fault(FaultRecord(reason="bulkhead_full", failed_target=_failed_target_of(inv)))
+        try:
+            outcome = next(inv)
+            return await outcome if hasattr(outcome, "__await__") else outcome  # type: ignore[return-value]
+        finally:
+            self.release(self._pool)
 
 
 class Idempotency:
-    """幂等插件：按幂等键去重，TTL 到期自动淘汰；订阅 before_invoke（BAIL）拦截。"""
-
+    """幂等插件（Warden）：按幂等键去重，TTL 到期自动淘汰。"""
     name = "r3_idempotency"
 
     def __init__(
@@ -257,22 +274,13 @@ class Idempotency:
         ttl: float = 86400,
         clock: Callable[[], float] | None = None,
     ) -> None:
-        """装配去重存储（值为登记时间戳）与 TTL（真淘汰）。
-
-        参数：
-            store: 幂等键→登记时间戳的映射（缺省进程内字典）。
-            ttl: 去重窗口秒数；到期后同键视为首次，允许重试。
-            clock: 注入时钟（缺省 time.time），便于测试确定性推进。
-        """
+        """装配去重存储（值为登记时间戳）与 TTL（真淘汰）。"""
         self._store = store if store is not None else {}
         self._ttl = ttl
-        self._clock = clock or time.time  # 墙钟在此具名边界进入，不隐式散落
+        self._clock = clock or time.time
 
     def check_and_mark(self, key: str) -> bool:
-        """返回 True 表示窗口内已见过（命中去重），False 表示首次（并登记）。
-
-        先清理该键的过期记录（now - 登记时间 ≥ ttl 即淘汰），再判定。
-        """
+        """返回 True 表示窗口内已见过（命中去重），False 表示首次（并登记）。"""
         now = self._clock()
         marked_at = self._store.get(key)
         if marked_at is not None and now - marked_at >= self._ttl:
@@ -283,27 +291,17 @@ class Idempotency:
         self._store[key] = now
         return False
 
-    def check(self, scope: RequestScope, effect: Effect) -> Decision:
-        """before_invoke（BAIL）：幂等键读 effect.idempotency_key，重复副作用直接 DENY。"""
-        key = effect.idempotency_key
+    async def guard(self, inv: Invocation) -> Verdict:
+        """Warden.guard：读 Invoke.idempotency_key，重复副作用拒绝。"""
+        effect = inv.effect
+        key = effect.idempotency_key if isinstance(effect, Invoke) else None
         if key and self.check_and_mark(key):
-            scope.trace.append("idempotency:duplicate")
-            return Decision.deny("duplicate_side_effect")
-        return Decision.continue_()
-
-    def apply(self, host: Host) -> None:
-        """before_invoke（BAIL）：重复副作用即短路。"""
-        host.hook("before_invoke").tap(self.name, self.check)
+            return Verdict(allowed=False, reason="duplicate_side_effect")
+        return Verdict(allowed=True)
 
 
 class Watchdog:
-    """看门狗：检测重复 / A-B 交替循环，命中则 abort；订阅 before_invoke（BAIL）。
-
-    订阅选择：保留 before_invoke 而非 after_invoke。after_invoke 是 PARALLEL
-    （tap 返回值被丢弃），且当前 host 的 settle 只消费 degrade 信号、不消费 abort，
-    观察型订阅无法真正终止死循环；BAIL 下 Decision.abort 才会短路。
-    """
-
+    """看门狗（Warden）：检测重复 / A-B 交替循环，命中则拒绝。"""
     name = "r3_watchdog"
 
     def __init__(
@@ -314,59 +312,47 @@ class Watchdog:
         detect_abab: bool = True,
         kinds: Collection[str] | None = None,
     ) -> None:
-        """装配循环检测：window 观察窗，repeat_k 重复阈值，detect_abab 是否查交替。
-
-        kinds: 只观察这些 Effect kind 值（与 Matcher.kinds 同义）；None/空表示全观察。
-        观测标识取 str(effect.kind.value)，由直送的 effect 派生。
-        """
+        """装配循环检测：window 观察窗，repeat_k 重复阈值，detect_abab 是否查交替。"""
         self._window = window
         self._repeat_k = repeat_k
         self._detect_abab = detect_abab
         self._kinds = frozenset(kinds) if kinds else None
         self._history: list[str] = []
 
-    def _kind_of(self, effect: Effect) -> str | None:
-        """由 effect 派生观测标识；不在 kinds 白名单内则跳过观察。"""
-        kind = str(effect.kind.value)
+    def _kind_of(self, inv: Invocation) -> str | None:
+        """由 Invoke.port 派生观测标识；不在 kinds 白名单内跳过。"""
+        effect = inv.effect
+        if not isinstance(effect, Invoke):
+            return None
+        kind = effect.port
         if self._kinds is not None and kind not in self._kinds:
             return None
         return kind
 
-    def observe(self, kind: str, scope: RequestScope | None = None) -> Decision:
-        """记录一个观测点；命中重复或交替模式返回 ABORT。
-
-        参数：
-            kind: 观测标识（重复判定用）。scope: 请求容器（保留参数，当前不读取）。
-        返回：
-            ABORT 或 CONTINUE。
-        """
+    def observe(self, kind: str) -> Verdict:
+        """记录观测点；命中重复或交替模式返回拒绝。"""
         self._history.append(kind)
         self._history = self._history[-self._window:]
-        if self._repeat_k > 0 and len(self._history) >= self._repeat_k:  # repeat_k<=0 视为关闭重复检测；样本不足则提前跳过
+        if self._repeat_k > 0 and len(self._history) >= self._repeat_k:
             tail = self._history[-self._repeat_k:]
-            if len(set(tail)) == 1:  # 尾部全为同一 kind 即连续重复，判定死循环
-                return Decision.abort("watchdog:repeat")
-        if self._detect_abab and len(self._history) >= 4:  # A-B 交替需至少 4 个观测才构成完整周期
+            if len(set(tail)) == 1:
+                return Verdict(allowed=False, reason="watchdog:repeat")
+        if self._detect_abab and len(self._history) >= 4:
             tail = self._history[-4:]
-            if tail[0] == tail[2] and tail[1] == tail[3] and tail[0] != tail[1]:  # 奇偶位各自相同且两者不同，排除全重复的干扰
-                return Decision.abort("watchdog:abab")
-        return Decision.continue_()
+            if tail[0] == tail[2] and tail[1] == tail[3] and tail[0] != tail[1]:
+                return Verdict(allowed=False, reason="watchdog:abab")
+        return Verdict(allowed=True)
 
-    def check(self, scope: RequestScope, effect: Effect) -> Decision:
-        """before_invoke（BAIL）：观测标识由 effect 派生，命中循环即短路 abort。"""
-        kind = self._kind_of(effect)
+    async def guard(self, inv: Invocation) -> Verdict:
+        """Warden.guard：观测标识由 Invoke.port 派生，命中循环即拒绝。"""
+        kind = self._kind_of(inv)
         if kind is None:
-            return Decision.continue_()
-        return self.observe(kind, scope)
-
-    def apply(self, host: Host) -> None:
-        """before_invoke（BAIL）：一次调用观察一次，命中循环即短路 abort。"""
-        host.hook("before_invoke").tap(self.name, self.check)
+            return Verdict(allowed=True)
+        return self.observe(kind)
 
 
 class KillSwitch:
-    """紧急开关：标志置位时 abort（人工/运维一键熔断）；订阅 before_invoke（BAIL）。"""
-
+    """紧急开关（Warden）：标志置位时拒绝（人工/运维一键熔断）。"""
     name = "r3_killswitch"
 
     def __init__(
@@ -375,48 +361,31 @@ class KillSwitch:
         flag_store: MutableMapping[str, bool] | None = None,
         scope: _KillScope | str = _KillScope.SESSION,
     ) -> None:
-        """装配标志存储（缺省进程内字典）与作用域（未知值回退 SESSION，规则 5）。
-
-        参数：
-            flag_store: 标志存储（可注入共享 store）。scope: 作用域枚举或字符串。
-        """
+        """装配标志存储与作用域（未知值回退 SESSION）。"""
         self.flag_store = flag_store if flag_store is not None else {}
         self._scope = _KillScope.coerce(scope)
 
-    def check(self, scope: RequestScope, effect: Effect) -> Decision:
-        """before_invoke（BAIL）：任一全局标志或本作用域标志置位 → ABORT。"""
+    async def guard(self, inv: Invocation) -> Verdict:
+        """Warden.guard：任一全局标志或本作用域标志置位 → 拒绝。"""
         keys = ("kill:global", f"kill:{self._scope.value}")
         if any(self.flag_store.get(k, False) for k in keys):
-            scope.trace.append("killswitch:triggered")
-            return Decision.abort("killswitch")
-        return Decision.continue_()
-
-    def apply(self, host: Host) -> None:
-        """before_invoke（BAIL）：标志置位即短路。"""
-        host.hook("before_invoke").tap(self.name, self.check)
+            return Verdict(allowed=False, reason="killswitch")
+        return Verdict(allowed=True)
 
 
 class BudgetGuard:
-    """软预算守卫：任一预算维度达软阈值时在上下文文本尾部注入"收尾"提示。
+    """软预算守卫（Refiner）：达软阈值时给 Invocation.meta 注入收尾提示。
 
-    与 R1 硬限的分工（R3 §4）：R1 `Budgets.exceeded()` 负责硬上限拒答；
-    BudgetGuard 在硬限之前给模型一个软提示，让它主动收尾而非撞墙。
-    订阅 transform（WATERFALL）：tap 回调签名是 `(value, effect) -> value`——接收上下文文本
-    与 effect 直送参数，返回改写后的文本，不是 `(scope) -> Decision`。因此预算投影在装配时
-    经 budgets 注入，达阈值时把收尾提示追加到 value（软阈值是渐进降级，不是拒绝）。
+    与 R1 硬限分工：R1 Budgets.exceeded() 硬拒答；BudgetGuard 在硬限前给模型软提示。
+    不写 State（回放/指纹前提），只产新 Invocation。
     """
-
     name = "r3_budgetguard"
 
-    _HINT = "预算即将用尽，请收敛并给出最终答案，不要开启新任务。"
+    _HINT = "Budget is running low. Wrap up and give a final answer; do not start new tasks."
 
     def __init__(self, *, soft: float = 0.8, budgets: Budgets | None = None) -> None:
         """装配软阈值与预算投影。
 
-        参数：
-            soft: 触发收尾提示的用量比例（0~1），缺省 0.8。
-            budgets: 预算投影来源；None 表示未注入，不误触发。
-                     WATERFALL 回调不携带预算投影，故需在装配时给定。
         异常：
             ValueError: soft 不在 (0, 1]。
         """
@@ -426,14 +395,10 @@ class BudgetGuard:
         self._budgets = budgets
 
     def check(self, budgets: Budgets | None = None) -> bool:
-        """任一维度用量/上限 ≥ soft 且未到硬限时，返回 True（应注入收尾提示）。
-
-        六维判断（turns/hops/rounds/cost/tokens/parallel_children）逻辑不变。
-        """
+        """任一维度用量/上限 ≥ soft 且未到硬限时，返回 True。"""
         current = budgets if budgets is not None else self._budgets
         if current is None:
-            return False  # 未注入预算投影：无信息，不误判
-        # 显式六维判断：直接读具名字段（无 getattr 动态读取，满足规则 6；类型安全满足 mypy strict）
+            return False
         return (
             (current.max_turns > 0 and current.used_turns / current.max_turns >= self._soft)
             or (current.max_hops > 0 and current.used_hops / current.max_hops >= self._soft)
@@ -444,12 +409,21 @@ class BudgetGuard:
                 and current.used_parallel_children / current.max_parallel_children >= self._soft)
         )
 
-    def rewrite(self, value: str, effect: Effect) -> str:
-        """transform（WATERFALL）回调：`(value, effect) -> value`；达软阈值时追加收尾提示。"""
+    def refine_hint(self, value: str) -> str:
+        """达软阈值时把收尾提示追加到文本（供测试直接验证领域逻辑）。"""
         if not self.check():
             return value
         return f"{value}\n{self._HINT}" if value else self._HINT
 
-    def apply(self, host: Host) -> None:
-        """transform（WATERFALL）：链式改写上下文文本。"""
-        host.hook("transform").tap(self.name, self.rewrite)
+    async def refine(self, inv: Invocation) -> Invocation:
+        """Refiner.refine：达软阈值时产新 Invocation（meta 注入提示，不写 State）。"""
+        if not self.check():
+            return inv
+        ctx = inv.ctx
+        # 规则 6 例外：RuntimeCtx 是装配期注入的鸭子上下文，按具名字段读取预算投影。
+        budget = getattr(ctx, "state", None)
+        budgets = getattr(budget, "budgets", None) if budget is not None else None
+        if not self.check(budgets):
+            return inv
+        inv.meta["budget_hint"] = self._HINT
+        return inv

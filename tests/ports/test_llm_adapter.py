@@ -40,14 +40,14 @@ class TestComplete:
                 "model": "gpt-test",
             })
 
-        llm = OpenAICompatLLM(base_url="https://api.test/v1", api_key="SK-SECRET",
+        llm = OpenAICompatLLM(base_url="https://api.test/openai", api_key="SK-SECRET",
                               model="gpt-test", client=_client(handler))
         resp = asyncio.run(llm.complete(_req(), _ctx()))
         assert resp.content == "hello"
         assert resp.usage.prompt_tokens == 10 and resp.usage.completion_tokens == 3
         assert resp.model == "gpt-test"
         assert llm.last_usage is not None and llm.last_usage.prompt_tokens == 10
-        assert seen["url"] == "https://api.test/v1/chat/completions"
+        assert seen["url"] == "https://api.test/openai/chat/completions"
         assert seen["auth"] == "Bearer SK-SECRET"
         assert seen["body"]["model"] == "gpt-test"
         assert seen["body"]["stream"] is False
@@ -72,7 +72,7 @@ class TestComplete:
                 "model": "m",
             })
 
-        llm = OpenAICompatLLM(base_url="https://api.test/v1", api_key="k",
+        llm = OpenAICompatLLM(base_url="https://api.test/openai", api_key="k",
                               model="m", client=_client(handler))
         resp = asyncio.run(llm.complete(_req(), _ctx()))
         assert resp.error is None, f"坏 JSON 不该误标网络错误：{resp.error}"
@@ -97,7 +97,7 @@ class TestStream:
             assert body["stream_options"] == {"include_usage": True}
             return httpx.Response(200, text=sse, headers={"content-type": "text/event-stream"})
 
-        llm = OpenAICompatLLM(base_url="https://api.test/v1", api_key="k",
+        llm = OpenAICompatLLM(base_url="https://api.test/openai", api_key="k",
                               model="m", client=_client(handler))
         chunks = asyncio.run(_collect(llm.stream(_req(), _ctx())))
         assert chunks == ["he", "llo"]
@@ -112,7 +112,7 @@ class TestStream:
         def handler(request: httpx.Request) -> httpx.Response:
             raise httpx.ReadError("connection reset mid-stream")
 
-        llm = OpenAICompatLLM(base_url="https://api.test/v1", api_key="k",
+        llm = OpenAICompatLLM(base_url="https://api.test/openai", api_key="k",
                               model="m", client=_client(handler))
         asyncio.run(_collect(llm.stream(_req(), _ctx())))
         assert llm.last_usage is None, \
@@ -128,7 +128,7 @@ class TestErrors:
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(500, json={"error": {"message": "boom"}})
 
-        llm = OpenAICompatLLM(base_url="https://api.test/v1", api_key="k", model="m", client=_client(handler))
+        llm = OpenAICompatLLM(base_url="https://api.test/openai", api_key="k", model="m", client=_client(handler))
         resp = asyncio.run(llm.complete(_req(), _ctx()))
         assert resp.error is not None and "500" in resp.error
         assert resp.usage.prompt_tokens == 0  # 错误不产生 usage，非假数据

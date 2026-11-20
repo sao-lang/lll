@@ -15,7 +15,7 @@
 
 ## 2. 设计架构
 
-认知模块是可独立调用的服务（内部走 Effect/Hook），内置架构只是装配品。多 Agent 与单 Agent 共用同一解释器：`Effect(child)` → Runner 递归创建子 Session，子 trace 挂父 span，预算从父切分。铁律：**架构即 Program，可任意嵌套**。
+认知模块是可独立调用的服务（内部走 Effect + AOP 增强器/Lifecycle 通知），内置架构只是装配品。多 Agent 与单 Agent 共用同一解释器：`Spawn(program_factory, state)` → Runner 递归创建子 Session，子 trace 挂父 span，预算从父切分。铁律：**架构即 Program，可任意嵌套**。
 
 ## 3. 流程图
 
@@ -24,7 +24,7 @@ flowchart TD
     subgraph 认知
         UI["用户意图"] --> INT["IntentStrategy 识别 label/confidence/gaps"]
         INT --> CLR{"信息不足?"}
-        CLR -->|是| ASK["Decision.ask 澄清"]
+        CLR -->|是| ASK["Suspend(question/options) 澄清<br/>发 wait_human 通知，resumed 后继续"]
         CLR -->|否| PLAN["Planner 产出 steps"] --> EXEC["Executor 逐 step 调度"]
         EXEC --> F{"失败超阈值/环境变化?"}
         F -->|是| RP["RePlanner 重规划"] --> EXEC
@@ -33,7 +33,7 @@ flowchart TD
         REF -->|过关| DONE["完成"]
     end
     subgraph 编排
-        SUP["Supervisor 拆任务"] --> PAR["par(Effect(child)) 并发+分账"]
+        SUP["Supervisor 拆任务"] --> PAR["par(Spawn(...)) 并发+分账"]
         PAR --> JOIN["JoinStrategy 聚合"]
         PAR --> COM["AgentMailbox 通信+Blackboard"]
     end
@@ -97,7 +97,7 @@ seq / par / branch / race / retry / map_state / budget
 
 | 条件 | 实现 | 证据 |
 |------|------|------|
-| CL-1 契约自足 | 依赖 R1 types + R2 Hook + 认知协议 | import 扫描 |
+| CL-1 契约自足 | 依赖 R1 types + R2 AOP 增强器/Lifecycle 通知 + 认知协议 | import 扫描 |
 | CL-2 自带 fake | FakeLLMPort + fake classifier | fake 用例 |
 | CL-3 自带测试 | tests/r8、tests/r12 | 覆盖率报告 |
 | CL-4 独立 demo | `make demo-arch` | demo 冒烟 |

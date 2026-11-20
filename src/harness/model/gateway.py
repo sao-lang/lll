@@ -6,20 +6,24 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import NoReturn
 
+from aop import Invocation, RoutingTarget
 from harness._ctxview import as_port_ctx, coerce_port_ctx
 from hooks import (
     LLMPort,
     LLMRequest,
     LLMResponse,
+    LifecycleBus,
+    LifecyclePhase,
+    Notice,
     PortCtx,
     StreamEvent,
     StreamEventKind,
     Usage,
 )
-from runtime import Effect, EffectKind, Message, Result
+from runtime import Effect, Invoke, Message, PortName, Result
 
 from .cache import CachePort, ExactCache
 from .registry import ModelRegistry
@@ -73,10 +77,11 @@ class ModelGateway:
         cache: CachePort | None = None,
         spec: StructuredOutputSpec | None = None,
         validator: SchemaValidator | None = None,
-        prompt_version: str = "v1",
+        prompt_version: str = "current",
         cost_guard: CostGuard | None = None,
         registry: ModelRegistry | None = None,
         cost_estimator: Callable[[LLMRequest], float] | None = None,
+        bus: LifecycleBus | None = None,
     ) -> None:
         """装配网关：只 llm 必填，其余缺省用默认实现。
 
@@ -101,6 +106,7 @@ class ModelGateway:
         self._prompt_version = prompt_version
         self._cost_guard = cost_guard
         self._cost_estimator = cost_estimator or _default_cost_estimate
+        self._bus = bus  # Lifecycle 通知（before_model/after_model；缺省不发）
         self.ledger = CostAttributor()
         self.cache = self._cache
         # P2a singleflight：同一缓存 key 的并发 miss 共享一次后端调用，
@@ -109,8 +115,21 @@ class ModelGateway:
 
     @property
     def registry(self) -> ModelRegistry | None:
-        """装配核对用：网关解析降级目标所用的注册表（与 host.registry 同源）。"""
+        """装配核对用：网关解析降级目标所用的注册表（与共用容器同源）。"""
         return self._registry
+
+    def _notify_model(self, phase: LifecyclePhase, request: LLMRequest, ctx: PortCtx,
+                      *, extra: dict[str, object] | None = None) -> None:
+        """发 model 相位通知（纯通知、异常隔离由总线保证，不拦截调用）。"""
+        if self._bus is None:
+            return
+        self._bus.emit(Notice(
+            phase=phase,
+            session_id=ctx.session_id,
+            port=PortName.LLM.value,
+            payload={"model": request.model or "", **(extra or {})},
+            meta=dict(ctx.meta),
+        ))
 
     def _resolve_llm(
         self, request: LLMRequest, ctx: PortCtx, *, degrade_target: str | None = None
@@ -119,7 +138,7 @@ class ModelGateway:
 
         参数：
             request: LLM 请求。ctx: Port 上下文。
-            degrade_target: 降级目标名（优先于 router 结果；来自 dispatch 回传）。
+            degrade_target: 降级目标名（优先于 router 结果；来自 inv.meta 的 typed routing_target）。
         返回：
             LLMPort（切后端）/ RefuseExecution（拒答）/ TargetUnresolved（未注册显式失败）。
         说明：
@@ -128,9 +147,9 @@ class ModelGateway:
             - 非空未注册 target → TargetUnresolved（不再 raise ValueError 折叠成 PORT_CRASHED）。
             - registry 缺省时：无 target 走默认后端（兼容）；有 target 则 TargetUnresolved（不回退）。
         """
-        # 构造 router 需要的 Effect：task_hint 来自请求（E4 修复，原来恒空导致路由空转）
-        effect = Effect(
-            kind=EffectKind.LLM,
+        # 构造 router 需要的 Invoke：task_hint 来自请求。
+        effect = Invoke(
+            port=PortName.LLM.value,
             payload={
                 "messages": [dict(m) for m in request.messages],
                 "model": request.model or "",
@@ -149,7 +168,7 @@ class ModelGateway:
             return self._llm
         resolved = self._registry.resolve_llm(target) if self._registry is not None else None
         if resolved is None:
-            # 非空未注册目标：显式失败，绝不静默回退（ARCH-v5 红线）。
+            # 非空未注册目标：显式失败，绝不静默回退（降级红线）。
             return TargetUnresolved(target=target)
         return resolved
 
@@ -172,20 +191,34 @@ class ModelGateway:
         detail = resolution.reason if isinstance(resolution, RefuseExecution) else resolution.target
         raise ValueError(f"{code}: {detail}")
 
-    def as_call(self) -> Callable[[Effect, object], object]:
-        """给 R1 Runner 的 call 适配器：Effect→LLMRequest→complete→Result。
+    def as_call(self) -> Callable[[Invocation], Awaitable[Result]]:
+        """给 AOP 容器中心调用的适配器：Invocation → LLMRequest → complete → Result。
 
-        ARCH-v5 降级接力：从 ctx.degrade_target（typed 具名桥接字段，Host 写入）读目标，
-        REFUSE → 真拒答 Result.failure("REFUSED")，绝不调后端、绝不回退默认模型。
+        降级目标唯一 typed 来源：inv.meta["routing_target"]（RoutingTarget，由 R3
+        Degradation 裁决写入，与 Registry 同源）。REFUSE → 真拒答 Result.failure("REFUSED")；
+        未注册目标 → TargetUnresolved 折叠失败，绝不回退默认模型。发 before_model/after_model
+        通知（纯通知，不拦截）。
         """
-        async def adapter(effect: Effect, ctx: object) -> Result:
-            """R1 call 适配器：读降级目标 → 唯一决策点解析 → 折叠为 Result。"""
-            # 规则 6 例外：degrade_target 是 RuntimeCtx 的声明字段（具名桥接，非裸 meta key），
-            # 鸭子读取兼容测试用简单 ctx。
-            target = getattr(ctx, "degrade_target", None)
+        async def adapter(inv: Invocation) -> Result:
+            """AOP 中心适配器：读 typed 降级目标 → 唯一决策点解析 → 折叠为 Result。"""
+            ctx = inv.ctx
+            effect = inv.effect
+            if not isinstance(effect, Invoke):
+                return Result.failure("INVALID_EFFECT", "model port needs Invoke effect")
+
+            # typed 降级目标（R3 产出）：只读具名记录，不读任何裸桥接字段（reason 只进 trace）。
+            routing = inv.routing_target()
+            target = routing.target if routing is not None else None
+            if routing is not None:
+                ctx.meta.setdefault("degrade_reason", []).append(routing.reason)
+
+            self._notify_model(LifecyclePhase.BEFORE_MODEL, LLMRequest(
+                messages=list(effect.payload.get("messages", [])),
+                model=str(effect.payload.get("model") or "") or None,
+            ), as_port_ctx(ctx))
 
             if target == REFUSE_TARGET:
-                # 拒答优先于缓存与后端：在 as_call 层直接折叠，零解析零调用。
+                # 拒答优先于缓存与后端：零解析零调用。
                 return RefuseExecution("degraded to refusal; no backend invoked").to_result()
 
             payload = effect.payload
@@ -196,6 +229,8 @@ class ModelGateway:
             )
             port_ctx = as_port_ctx(ctx)
             response = await self.complete(request, port_ctx, degrade_target=target)
+            self._notify_model(LifecyclePhase.AFTER_MODEL, request, port_ctx,
+                               extra={"error": response.error or ""})
             # 后端错误（E3）：折叠为失败 Result，让 R3 的重试/熔断/降级能看到。
             if response.error:
                 return Result.failure(response.error.split(":")[0], response.error)
@@ -376,7 +411,7 @@ class ModelGateway:
     def stream_events(
         self, request: LLMRequest, ctx: PortCtx, *, degrade_target: str | None = None
     ) -> AsyncIterator[StreamEvent]:
-        """结构化流式事件（R4 §4.1 v1.2）：透传后端事件，遇 USAGE 结算成本。
+        """结构化流式事件：透传后端事件，遇 USAGE 结算成本。
 
         参数：
             request: LLM 请求。ctx: Port 上下文。

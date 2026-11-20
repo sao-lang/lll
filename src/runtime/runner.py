@@ -1,12 +1,14 @@
 """R1 Runner：唯一的 async IO 编排点。
 
-链路顺序：预算预检 → 驱动 generator → batch 展开 → dispatch(上层) →
-call(Port) → fold 纯函数回填 → 事件溯源 → checkpoint → 继续/挂起/结束。
+链路顺序：预算预检 → 驱动 generator → batch 展开 → call(Port) →
+fold 纯函数回填 → 事件溯源 → checkpoint → 继续/挂起/结束。
 
-依赖注入：dispatch / call / store / ctx_factory 均可替换；store 未注入时用内存实现，
+依赖注入：call / store / ctx_factory / notify 均可替换；store 未注入时用内存实现，
 因此 R1 无需外部服务即可独立闭环。所有异常在此折叠为 Result，绝不裸抛穿运行时。
-"""
 
+内核零依赖扩展体系：AOP 增强链由装配层包进 call 槽，Lifecycle 通知由 notify 回调
+承载（内核只认 Callable，不 import hooks/aop）。依赖方向恒定 装配层 → 内核。
+"""
 from __future__ import annotations
 
 import asyncio
@@ -14,7 +16,6 @@ import inspect
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from enum import Enum
-from typing import cast
 
 from .errors import AgentKitError, ChainAborted, PortMissing, ProgramCrashed, ProgramInvalid
 from .fold import field, fold, replay_events
@@ -24,19 +25,22 @@ from .types import (
     AgentState,
     CallFn,
     CancellationToken,
-    DispatchFn,
     DynamicValue,
     Effect,
-    EffectKind,
     Event,
     EventStore,
+    Invoke,
     JsonSnapshot,
+    PortName,
     Program,
     Result,
     RunResult,
     RuntimeCtx,
     Session,
+    Spawn,
     StepReport,
+    Suspend,
+    Terminate,
     Usage,
     checkpoint,
     restore_checkpoint,
@@ -45,15 +49,32 @@ from .types import (
 __all__ = ["InMemoryEventStore", "Runner"]
 
 
+type NotifyFn = Callable[[str, DynamicValue], None]
+"""Lifecycle 通知注入回调签名：(相位名, 只读投影)。内核零依赖 hooks，只认 Callable。"""
+
+
+class _StepStatus(str, Enum):
+    """单步状态枚举：值与 Event / StepReport.status 的既有字符串一致。"""
+    RUNNING = "running"
+    DONE = "done"
+    SUSPENDED = "suspended"
+    ERROR = "error"
+
+
+class _ErrCode(str, Enum):
+    """Runner 内部折叠错误码：值与 errors.py 的稳定 code 对齐。"""
+    PORT_CRASHED = "PORT_CRASHED"
+    PROGRAM_CRASHED = "PROGRAM_CRASHED"
+
+
 @dataclass
 class _CancellationHolder:
-    """Runner 内部可变取消态（B7）。
+    """Runner 内部可变取消态。
 
     CancellationToken 对外保持 frozen 语义（cancel() 返回新对象），但 Runner 在
     构造后无法感知新对象，导致运行中取消失效。holder 由 Runner 独占持有，
-    通过 Runner.cancel() 原地置位；step() 每步读 holder，兑现 §4.1 取消承诺。
+    通过 Runner.cancel() 原地置位；step() 每步读 holder，兑现取消承诺。
     """
-
     cancelled: bool = False
     reason: str = ""
 
@@ -61,6 +82,20 @@ class _CancellationHolder:
         """原地置位取消态（供 Runner.cancel 调用）。"""
         self.cancelled = True
         self.reason = reason
+
+
+@dataclass
+class _Runtime:
+    """单个会话在 Runner 内的可变执行态（与 Session 分离，便于重放重建）。
+
+    字段：
+        interpreter: 该会话的 generator 解释器，承载推进游标。
+        last_value: 上一次 Effect 的结果，下一步 send 回 Program。
+        step: 当前步号（逻辑时钟，Event.ts 与 trace_id 都取自它）。
+    """
+    interpreter: InterpreterImpl
+    last_value: DynamicValue = None
+    step: int = 0
 
 
 class InMemoryEventStore(EventStore):
@@ -84,115 +119,6 @@ class InMemoryEventStore(EventStore):
         return self.snapshots.get(session_id)
 
 
-@dataclass
-class _Runtime:
-    """单个会话在 Runner 内的可变执行态（与 Session 分离，便于重放重建）。
-
-    字段：
-        interpreter: 该会话的 generator 解释器，承载推进游标。
-        last_value: 上一次 Effect 的结果，下一步 send 回 Program。
-        step: 当前步号（逻辑时钟，Event.ts 与 trace_id 都取自它）。
-    """
-
-    interpreter: InterpreterImpl
-    last_value: DynamicValue = None
-    step: int = 0
-
-
-# --------------------------------------------------------------------------- #
-# 裁决契约（私有）：R1 不 import R2，用结构化投影替代散落的 getattr + 魔法串。
-# 全部下划线开头 —— G5 契约锁只提取非下划线公共类，故不触发契约基线变更。
-# --------------------------------------------------------------------------- #
-
-class _VerdictAction(str, Enum):
-    """裁决动作枚举：值与 R2 DecisionAction 对齐，R1 侧独立定义以免反向依赖。"""
-    CONTINUE = "continue"
-    ABORT = "abort"
-    DENY = "deny"
-    FALLBACK = "fallback"
-
-
-class _ErrCode(str, Enum):
-    """Runner 内部折叠错误码：值与 errors.py 的稳定 code 对齐，不新增公共类。"""
-    CHAIN_ABORTED = "CHAIN_ABORTED"
-    PORT_CRASHED = "PORT_CRASHED"
-    PROGRAM_CRASHED = "PROGRAM_CRASHED"
-
-
-class _StepStatus(str, Enum):
-    """单步状态枚举：值与 Event / StepReport.status 的既有字符串一致。"""
-    RUNNING = "running"
-    DONE = "done"
-    SUSPENDED = "suspended"
-    ERROR = "error"
-
-
-_VERDICT_BY_NAME = {member.value: member for member in _VerdictAction}
-"""动作字符串 → 枚举查表；未知名回退 CONTINUE，保持原 fall-through 语义。"""
-
-
-@dataclass(frozen=True, slots=True)
-class _Verdict:
-    """判决对象的规范化投影：把鸭子判决字段一次性读成具名、带类型的视图。
-
-    字段：
-        action: 裁决动作（枚举，未知动作归一为 CONTINUE）。
-        reason: 拒绝 / 终止原因。
-        value: 裁决载体（fallback 兜底值 / around 回填的 Result / 普通值）。
-    """
-    action: _VerdictAction = _VerdictAction.CONTINUE
-    reason: str = ""
-    value: DynamicValue = None
-
-
-type _DispatchOutcome = Result | _Verdict | None
-"""dispatch 的规范化返回集：None 放行 / Result 采纳 / _Verdict 待裁决。"""
-
-
-def _coerce_verdict(outcome: DynamicValue) -> _Verdict:
-    """把 dispatch 的鸭子判决归一为 _Verdict；唯一的动态字段读取边界。
-
-    getattr 集中于此，下游只访问具名类型字段（编码规则 3）。
-    历史兼容：abort 为 callable（Decision.abort 类方法）不算标志，布尔真值才算。
-    """
-    raw_action: DynamicValue = getattr(outcome, "action", None)
-    action_name = str(getattr(raw_action, "value", raw_action))
-    action = _VERDICT_BY_NAME.get(action_name, _VerdictAction.CONTINUE)
-    reason = str(getattr(outcome, "reason", "") or "")
-    value: DynamicValue = getattr(outcome, "value", None)
-    abort_flag: DynamicValue = getattr(outcome, "abort", False)
-    if not callable(abort_flag) and abort_flag:
-        action = _VerdictAction.ABORT
-        nested = getattr(outcome, "verdict", None)
-        reason = str(getattr(nested, "reason", "") or "") or "chain aborted"
-    return _Verdict(action=action, reason=reason, value=value)
-
-
-def _settle(verdict: _Verdict) -> Result | None:
-    """把规范化判决折叠为 Result；返回 None 表示放行、需真正调用 Port。
-
-    参数：
-        verdict: 已归一的结构化判决（由 _coerce_verdict 产出）。
-    返回：
-        裁决 Result，或 None（continue 且无裁决载体 → 放行）。
-    """
-    if verdict.action in (_VerdictAction.ABORT, _VerdictAction.DENY):
-        # 终止 / 拒绝：不调用 Port，reason 由插件提供。
-        return Result.failure(
-            _ErrCode.CHAIN_ABORTED.value, verdict.reason or "chain aborted"
-        )
-    if verdict.action is _VerdictAction.FALLBACK:
-        # 兜底：用插件提供的值作为结果，不调用 Port。
-        return Result.success(verdict.value)
-    # around 中心 invoke 的 Result 装在 value 里，直接采纳，保证副作用只执行一次。
-    if isinstance(verdict.value, Result):
-        return verdict.value
-    if verdict.value is not None:
-        usage = cast(Usage | None, getattr(verdict.value, "usage", None))
-        return Result.success(verdict.value, usage=usage)
-    return None
-
-
 def _send_value(event: Event) -> DynamicValue:
     """把事件里的 Result 还原成 Program 当初 send 收到的值。
 
@@ -208,7 +134,7 @@ def _send_value(event: Event) -> DynamicValue:
 
 
 async def _maybe_await(value: DynamicValue) -> DynamicValue:
-    """统一等待：dispatch/call 既可是同步值也可是 awaitable。
+    """统一等待：call 既可是同步值也可是 awaitable。
 
     参数：
         value: 同步返回值或 Awaitable。
@@ -223,7 +149,6 @@ class Runner:
 
     def __init__(
         self,
-        dispatch: DispatchFn,
         call: CallFn,
         *,
         store: EventStore | None = None,
@@ -231,20 +156,20 @@ class Runner:
         checkpoint_every: int = 1,
         max_steps: int = 1000,
         cancellation: CancellationToken | None = None,
+        notify: NotifyFn | None = None,
     ) -> None:
-        """装配 Runner：dispatch（上层判决）与 call（Port 调用）为必注入函数。
+        """装配 Runner：call（Port 调用）为必注入函数，其余可选。
 
         参数：
-            dispatch: 链路判决函数（R2 Host.dispatch），返回 Decision 或 None。
-            call: Port 调用函数；dispatch 放行时真正执行外部副作用。
+            call: Port 调用函数；AOP 增强链由装配层包进此槽，内核零感知。
             store: checkpoint 存储；缺省用 InMemoryEventStore。
-            ctx_factory: 上下文工厂；缺省构造 RuntimeCtx。上层可换成带 meta 的上下文（R2 桥接 RequestScope）。
+            ctx_factory: 上下文工厂；缺省构造 RuntimeCtx。
             checkpoint_every: 每 N 步落一次快照（终态总是落），最小强制为 1。
             max_steps: 单 run 的步数硬上限，防止死循环。
-            cancellation: 取消令牌；缺省不取消。子 Agent 派生时继承同一令牌（A5 递归传播）。
+            cancellation: 取消令牌；缺省不取消。子 Agent 派生时继承同一令牌。
+            notify: Lifecycle 通知回调 (相位名, 只读投影)；缺省 no-op。
         """
-        self._dispatch = dispatch  # 上层链路判决
-        self._call = call  # Port 实际调用
+        self._call = call  # Port 实际调用（内层可含 AOP 增强链）
         self._store = store or InMemoryEventStore()  # 快照存储（缺省内存）
         self._ctx_factory = ctx_factory or (  # 上下文工厂（缺省 RuntimeCtx）
             lambda effect, session: RuntimeCtx(
@@ -253,8 +178,9 @@ class Runner:
         )
         self._checkpoint_every = max(1, checkpoint_every)  # 至少每步落盘
         self._max_steps = max_steps  # 步数硬上限
-        self._cancellation = cancellation  # 原始令牌（A5/_bind identity；None 表示不可取消）
-        # B7：可变 holder 接收运行期 Runner.cancel()；初值来自构造令牌。
+        self._cancellation = cancellation  # 原始令牌（None 表示不可取消）
+        self._notify = notify or (lambda hook, projection: None)  # Lifecycle 通知
+        # 可变 holder 接收运行期 Runner.cancel()；初值来自构造令牌。
         self._cancel_holder = _CancellationHolder(
             cancelled=cancellation.cancelled if cancellation else False,
             reason=cancellation.reason if cancellation else "",
@@ -262,8 +188,7 @@ class Runner:
         self._runtimes: dict[str, _Runtime] = {}  # session_id → 执行态
         self._reasons: dict[str, str] = {}  # session_id → 最近一次结束原因
         self._errors: dict[str, str | None] = {}  # session_id → 最近一次错误码
-        # 子会话序号按父 session 独立递增：同批并发 CHILD 必须拿到唯一 id，
-        # 否则 _runtimes/_reasons/_errors 会互相覆盖（多 Agent 并行扇出的坑）。
+        # 子会话序号按父 session 独立递增：同批并发 Spawn 必须拿到唯一 id。
         # asyncio 单线程中 "读 seq → 写 seq+1" 之间没有 await，故并发安全。
         self._child_seq: dict[str, int] = {}
 
@@ -315,7 +240,7 @@ class Runner:
 
     @staticmethod
     def _bind(ctx: DynamicValue, runner: Runner) -> DynamicValue:
-        """给上下文注入 invoke 回调，让链路洋葱中心能调用 Port call。
+        """给上下文注入 invoke 回调，让增强链中心能调用 Port call。
 
         参数：
             ctx: 上下文对象（RuntimeCtx 或带 meta 的超集），其 invoke 字段被覆写。
@@ -324,7 +249,7 @@ class Runner:
             注入 invoke 后的同一上下文对象（原地设置字段）。
         """
         ctx.invoke = lambda effect, c: runner._call(effect, c)
-        # A5：子 Agent 继承父 Runner 的取消令牌（递归传播）。
+        # 子 Agent 继承父 Runner 的取消令牌（递归传播）。
         ctx.cancellation = runner._cancellation
         return ctx
 
@@ -333,63 +258,77 @@ class Runner:
     ) -> tuple[Result, tuple[Event, ...]]:
         """执行单个 Effect，返回 Result 与子会话事件。
 
+        分派（tagged union）：
+            - Spawn：走递归子 Agent 分支，不进 AOP。
+            - Invoke：走 call 槽（装配层已包入 AOP 增强链）。
+            - Suspend/Terminate：走内核快路径，不进 call（由 step 在批次层面处理）。
         参数：
             effect: 待执行 Effect。
-            ctx: 已注入 invoke 的上下文，传给 dispatch/call。
-            session: 当前会话（CHILD fork 时作为父会话）。
+            ctx: 已注入 invoke 的上下文，传给 call。
+            session: 当前会话（Spawn 时作为父会话）。
         返回：
-            (Result, 子会话产生的事件元组)。非 CHILD 时事件元组为空。
+            (Result, 子会话产生的事件元组)。非 Spawn 时事件元组为空。
         """
-        if effect.kind is EffectKind.CHILD:
+        if isinstance(effect, Spawn):
             return await self._child(effect, session)  # 子 Agent 走递归分支
+        # Invoke(port=tool)：发 tool 相位通知（R5 发 tool 系列，规格 P2）。
+        # 内核只认 notify 回调与 PortName 枚举，不 import hooks。
+        is_tool = isinstance(effect, Invoke) and effect.port == PortName.TOOL.value
+        if is_tool:
+            self._notify("before_tool", {
+                "session_id": session.session_id, "port": PortName.TOOL.value,
+            })
         try:
-            outcome = await _maybe_await(self._dispatch(effect, ctx))
-            if outcome is None:
-                # 判决放行（None）：直接调用 Port。
-                return await _maybe_await(self._call(effect, ctx)), ()
-            if isinstance(outcome, Result):
-                # 判决直接给出 Result：采纳，不再调用 Port。
-                return outcome, ()
-            # 结构化判决归一为具名视图，再折叠；内核不 import R2 的 Decision。
-            settled = _settle(_coerce_verdict(outcome))
-            if settled is not None:
-                return settled, ()
-            # continue 且无裁决载体：判决放行，真正调用 Port。
-            return await _maybe_await(self._call(effect, ctx)), ()
+            result = await _maybe_await(self._call(effect, ctx))
         except AgentKitError as exc:
             # 框架异常：用自身 code 折叠为失败信封。
+            if is_tool:
+                self._notify("tool_error", {
+                    "session_id": session.session_id, "port": PortName.TOOL.value,
+                    "error": exc.code,
+                })
             return Result.failure(exc.code, str(exc)), ()
         except Exception as exc:  # 异常绝不抛穿运行时  # noqa: BLE001
             # 未预期异常统一折叠，保留异常类型名便于诊断。
+            if is_tool:
+                self._notify("tool_error", {
+                    "session_id": session.session_id, "port": PortName.TOOL.value,
+                    "error": _ErrCode.PORT_CRASHED.value,
+                })
             return Result.failure(
                 _ErrCode.PORT_CRASHED.value, f"{type(exc).__name__}: {exc}"
             ), ()
+        if is_tool:
+            if result.ok:
+                self._notify("after_tool", {
+                    "session_id": session.session_id, "port": PortName.TOOL.value,
+                })
+            else:
+                self._notify("tool_error", {
+                    "session_id": session.session_id, "port": PortName.TOOL.value,
+                    "error": result.error.code if result.error else "UNKNOWN",
+                })
+        return result, ()
 
     async def _child(
-        self, effect: Effect, session: Session
+        self, effect: Spawn, session: Session
     ) -> tuple[Result, tuple[Event, ...]]:
-        """Effect(child) 递归创建子 Session，复用同一解释器与注入函数。
+        """Spawn Effect 递归创建子 Session，复用同一解释器与注入函数。
 
         参数：
-            effect: CHILD Effect，payload 携带 program_factory/program/state。
+            effect: Spawn Effect，具名携带 program_factory / state。
             session: 父会话（用于继承 state 与生成子会话 id）。
         返回：
             (以子 run 的 output 为 data 的 Result, 子会话全部事件)。
         """
-        payload = effect.payload
-        # 优先用可序列化的 program_factory；回退到直接 program（包装成无参工厂）。
-        factory: Callable[[], Program] | None = payload.get("program_factory")
+        # 通知：子 Agent 创建。
+        self._notify("child_spawn", {"session_id": session.session_id})
+        factory = effect.program_factory
         if factory is None:
-            child_program: Program | None = payload.get("program")
-            if child_program is None:
-                # 两种都没给：无法构造子 Program，返回失败信封。
-                return Result.failure(
-                    "CHILD_PROGRAM_MISSING", "child needs program_factory"
-                ), ()
-            factory = lambda p=child_program: p  # 默认参数绑定，避免闭包晚绑定
-        child_state: AgentState = payload.get("state") or session.state
+            return Result.failure("CHILD_PROGRAM_MISSING", "spawn needs program_factory"), ()
+        child_state: AgentState = effect.state or session.state
         child_state = child_state.with_(budgets=child_state.budgets.consume(hops=1))  # 子 Agent 深度 +1
-        # 用单调递增序号作子会话 id 后缀，保证同批并发 CHILD 的 id 唯一。
+        # 用单调递增序号作子会话 id 后缀，保证同批并发 Spawn 的 id 唯一。
         seq = self._child_seq.get(session.session_id, 0)
         self._child_seq[session.session_id] = seq + 1
         child = Session(
@@ -397,11 +336,13 @@ class Runner:
             program_factory=factory,
             state=child_state,
         )
-        res = await self.run(child)  # 递归跑完整子会话（含其自身的 CHILD）
+        res = await self.run(child)  # 递归跑完整子会话（含其自身的 Spawn）
+        # 通知：子 Agent 完成。
+        self._notify("child_done", {"session_id": session.session_id, "status": res.status})
         return Result.success(res.output, usage=Usage()), tuple(res.events)
 
     def cancel(self, reason: str) -> None:
-        """运行中请求取消（B7）：下一 step 检查到后停止执行任何 Effect。
+        """运行中请求取消：下一 step 检查到后停止执行任何 Effect。
 
         与 frozen CancellationToken 不冲突：token 对外仍不可变，本方法只更新 Runner
         内部 holder。子 Agent 共享同一 Runner 树时经 holder 递归可见。
@@ -419,8 +360,7 @@ class Runner:
         返回：
             StepReport：本步步号、新 State、Effect/Result、状态与事件。
         """
-        # A5 取消检查：holder 已置位则本步不执行任何 Effect，写 cancelled 事件并报告。
-        # B7：读内部 holder（支持运行期 Runner.cancel()），不再只读构造时的不可变 token。
+        # 取消检查：holder 已置位则本步不执行任何 Effect，写 cancelled 事件并报告。
         if self._cancel_holder.cancelled:
             reason = self._cancel_holder.reason
             session.events.append(Event(
@@ -433,7 +373,7 @@ class Runner:
                 status="cancelled",
                 reason=reason,
             ))
-            # B6：取消原因也要进 RunResult（_result 读 _reasons），不能只进事件。
+            self._notify("cancelled", {"session_id": session.session_id, "reason": reason})
             self._reasons[session.session_id] = reason
             return StepReport(
                 step=0,
@@ -465,14 +405,17 @@ class Runner:
         reason = ""  # 结束/挂起原因
         error: str | None = None  # 错误码（仅 error 态非空）
 
-        # 0. 预算预检：超限强制 END（内核硬强制，Program 无法绕过）
+        # 0. 预算预检：超限强制 Terminate（内核硬强制，Program 无法绕过）
         exceeded = state.budgets.exceeded()
         if exceeded:
             reason = f"BUDGET_EXCEEDED:{exceeded}"
-            effects = (Effect(EffectKind.END, {"reason": reason}),)
+            effects = (Terminate(reason=reason),)
             results = (Result.success(None),)
             status = _StepStatus.DONE.value
+            self._notify("budget_check", {"session_id": session.session_id, "exceeded": exceeded})
         else:
+            # 通知：预算检查通过（纯函数判定，读 state.budgets）。
+            self._notify("budget_check", {"session_id": session.session_id, "exceeded": ""})
             # 1. 推进解释器，拿到下一批 Effect 或 DONE。
             try:
                 batch = rt.interpreter.send(rt.last_value)
@@ -485,38 +428,45 @@ class Runner:
                 )
                 batch = EffectBatch(())
 
-            if status == _StepStatus.RUNNING.value and batch is DONE:  # 仅未出错时处理自然结束，避免覆盖此前 interpreter 抛错写入的 error 态
-                # Program 已 return：合成一个 END Effect 收尾。
+            if status == _StepStatus.RUNNING.value and batch is DONE:
+                # Program 已 return：合成一个 Terminate 收尾。
                 status, reason = _StepStatus.DONE.value, "program_returned"
-                effects = (Effect(EffectKind.END, {"reason": reason}),)
+                effects = (Terminate(reason=reason),)
                 results = (Result.success(None),)
-            elif status == _StepStatus.RUNNING.value:  # 仍在运行且非 DONE：确实拿到了 Effect，才进入下面的批次分派
+            elif status == _StepStatus.RUNNING.value:  # 仍在运行且非 DONE
                 assert isinstance(batch, EffectBatch)
-                # 给每个 Effect 打 trace_id：<session>:<step>:<index>，便于事件溯源定位。
+                # 给每个 Effect 打 trace_id：<session>:<step>:<index>。
+                # tagged union 各成员均带 trace_id 字段，可统一 replace。
                 effects = tuple(
                     replace(e, trace_id=f"{session.session_id}:{step_no:04d}:{i:02d}")
                     for i, e in enumerate(batch.effects)
                 )
-                if state.budgets.check_parallel(len(effects)):  # 并行度是内核硬预算：超限必须先于任何 Port 调用被拦截
-                    # 并行度超限：内核拦截，强制 END。
+                if state.budgets.check_parallel(len(effects)):  # 并行度是内核硬预算
                     reason = "BUDGET_EXCEEDED:parallel_children"
-                    effects = (Effect(EffectKind.END, {"reason": reason}),)
+                    effects = (Terminate(reason=reason),)
                     results = (Result.success(None),)
                     status = _StepStatus.DONE.value
-                elif effects and all(e.kind is EffectKind.END for e in effects):  # 必须「整批皆 END」：只要混有普通 Effect 就得真正执行，不能被单个 END 提前收尾
-                    # Program 主动 END：整批都是 END 才走快路径，不调用 Port（B8）。
-                    # 每个 END 都回填一个 success，保证 effects/results 等长配对。
+                elif effects and all(isinstance(e, Terminate) for e in effects):
+                    # Program 主动 Terminate：整批都是才走快路径，不调用 Port。
                     results = tuple(Result.success(None) for _ in effects)
+                    first_term = effects[0]
+                    assert isinstance(first_term, Terminate)
                     status, reason = (
                         _StepStatus.DONE.value,
-                        str(effects[0].payload.get("reason", "end")),
+                        str(first_term.reason or "terminated"),
                     )
-                elif effects and all(e.kind is EffectKind.WAIT_HUMAN for e in effects):  # 同 B8：仅当全批都在等人，混合批若含可执行 Effect 则不能被「挂起」吞掉
-                    # 人工在环：整批都是 WAIT_HUMAN 才挂起（B8：混合批不能被首元素吞掉）。
+                elif effects and all(isinstance(e, Suspend) for e in effects):
+                    # 人工在环：整批都是 Suspend 才挂起（混合批含可执行 Effect 不能被吞）。
                     results = tuple(Result.success(None) for _ in effects)
                     status, reason = _StepStatus.SUSPENDED.value, "wait_human"
+                    first_suspend = effects[0]
+                    assert isinstance(first_suspend, Suspend)
+                    self._notify("wait_human", {
+                        "session_id": session.session_id,
+                        "question": first_suspend.question,
+                    })
                 else:
-                    # 常规批：为每个 Effect 构造上下文并绑定 invoke，然后并发执行。
+                    # 常规批：为每个 Invoke 构造上下文并绑定 invoke，并发执行。
                     ctxs = [
                         self._bind(self._ctx_factory(e, session), self) for e in effects
                     ]
@@ -528,17 +478,6 @@ class Runner:
                     child_events = tuple(ev for item in executed for ev in item[1])
                     for ev in child_events:
                         session.events.append(ev)
-                    # 任一结果被判 abort：本步转 error，取首个 abort 的 reason。
-                    if any(
-                        not r.ok and r.error and r.error.code == _ErrCode.CHAIN_ABORTED.value
-                        for r in results
-                    ):
-                        status, reason = _StepStatus.ERROR.value, "chain aborted"
-                        error = next(
-                            r.error.message
-                            for r in results
-                            if not r.ok and r.error and r.error.code == _ErrCode.CHAIN_ABORTED.value
-                        )
                     # 回填给 Program 的值：batch 用 list，单个取 data（失败取 Result 本身）。
                     rt.last_value = (
                         [r.data if r.ok else r for r in results]
@@ -553,8 +492,9 @@ class Runner:
         # 2. 纯函数折叠：本步的 Effect/Result → 新 State。
         new_state = fold(state, effects, results, reason)
         session.state = new_state
+        # 通知：状态折叠完成。
+        self._notify("state_fold", {"session_id": session.session_id, "step": step_no})
         # 3. 汇总本步 usage（成本/token），写入事件供可观测使用。
-        # usage 由外部 port 提供，形态可能是 dataclass / pydantic / dict，用 field 统一读取。
         cost = sum(float(field(r.usage, "cost_usd", 0.0) or 0.0) for r in results if r.usage)
         tokens = sum(
             (field(r.usage, "prompt_tokens", 0) or 0)
@@ -607,14 +547,17 @@ class Runner:
             _StepStatus.SUSPENDED.value,
         ):
             return self._result(session)  # 终态幂等：不重复跑
+        self._notify("session_start", {"session_id": session.session_id})
+        # user_prompt：会话启动即收到用户提示（Program 首轮的输入相位）。
+        self._notify("user_prompt", {"session_id": session.session_id})
         try:
             return await self._loop(session)
         except (ProgramInvalid, ProgramCrashed) as exc:
-            # B4：构造期 Program 违规不抛穿，折叠为 error RunResult（与 step 同口径）。
+            # 构造期 Program 违规不抛穿，折叠为 error RunResult（与 step 同口径）。
             return self._program_error(session, exc)
 
     def _program_error(self, session: Session, exc: AgentKitError) -> RunResult:
-        """构造期 Program 异常的兜底：写 error 事件 + 错误码，返回 error RunResult（B4）。
+        """构造期 Program 异常的兜底：写 error 事件 + 错误码，返回 error RunResult。
 
         参数：
             session: 目标会话。
@@ -647,10 +590,10 @@ class Runner:
         try:
             rt = _Runtime(InterpreterImpl(session.program_factory()))
         except (ProgramInvalid, ProgramCrashed) as exc:
-            # B4：构造期失败不抛穿（与 run/step 同口径）。
             return self._program_error(session, exc)
         self._runtimes[session.session_id] = rt
         self._replay(session, rt, answer=answer)
+        self._notify("resumed", {"session_id": session.session_id, "answer": answer})
         try:
             return await self._loop(session, initial_value=answer)
         except (ProgramInvalid, ProgramCrashed) as exc:
@@ -670,11 +613,17 @@ class Runner:
         rt = self._runtime(session)
         if initial_value is not None:
             rt.last_value = initial_value
-        for _ in range(self._max_steps):  # 步数硬上限兜底：Program 若永不 yield END，靠此循环边界终止而非无限 step
+        for _ in range(self._max_steps):  # 步数硬上限兜底
             report = await self.step(session)
             if report.status != _StepStatus.RUNNING.value:
                 break  # 到达 done/suspended/error
-        return self._result(session)
+        result = self._result(session)
+        # 通知：会话结束（终态）；挂起不计结束，resume 后会再次 run。
+        if result.status in (_StepStatus.DONE.value, _StepStatus.ERROR.value):
+            self._notify("session_end", {
+                "session_id": session.session_id, "status": result.status,
+            })
+        return result
 
     def _result(self, session: Session) -> RunResult:
         """从会话终态汇总 RunResult。
@@ -682,7 +631,7 @@ class Runner:
         参数：
             session: 目标会话。
         返回：
-            RunResult：状态取自末事件，原因/错误取自 Runner 记录。
+            状态取自末事件，原因/错误取自 Runner 记录。
         """
         last = session.events[-1] if session.events else None
         status = last.status if last else _StepStatus.RUNNING.value  # 无事件视为仍在运行

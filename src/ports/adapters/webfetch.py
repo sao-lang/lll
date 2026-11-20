@@ -76,7 +76,7 @@ class HttpFetcher:
                 return self._decode(raw, response.encoding or "utf-8")
         except httpx.HTTPError as exc:
             # 网络层（连接/超时/DNS）异常：折叠为 RuntimeError，由 WebFetchTool 再包 ToolResult。
-            raise RuntimeError(f"WebFetch 网络错误: {url}: {exc}") from exc
+            raise RuntimeError(f"WebFetch network error: {url}: {exc}") from exc
 
     async def aclose(self) -> None:
         """仅关闭自建 client；注入的 client 归调用方所有，本适配器不越权关闭。"""

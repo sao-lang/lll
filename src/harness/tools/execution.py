@@ -65,7 +65,7 @@ class CodeExecTool(_ExecTool):
     def __init__(self, *, sandbox: SandboxPort | None = None) -> None:
         """构造：code 参数为字符串源码。"""
         super().__init__(
-            sandbox=sandbox, name="code_exec", description="隔离执行代码",
+            sandbox=sandbox, name="code_exec", description="Execute code in isolation",
             properties={"code": {"type": "string"}}, required=("code",),
         )
 
@@ -83,7 +83,7 @@ class ShellExecTool(_ExecTool):
         """构造：allowlist 是允许的命令首词元组（空=拒绝一切，fail closed）。"""
         self._allowlist = allowlist
         super().__init__(
-            sandbox=sandbox, name="shell_exec", description="白名单命令执行",
+            sandbox=sandbox, name="shell_exec", description="Execute allowlisted commands",
             properties={"command": {"type": "string"}}, required=("command",),
         )
 
@@ -104,7 +104,7 @@ class FileExecTool(_ExecTool):
         """构造：root 为虚拟根（空串=不开放任何路径，fail closed）。"""
         self._root = os.path.abspath(root) if root else ""
         super().__init__(
-            sandbox=sandbox, name="file_exec", description="虚拟根内文件读取",
+            sandbox=sandbox, name="file_exec", description="Read files within virtual root",
             properties={"path": {"type": "string"}}, required=("path",),
         )
 

@@ -1,28 +1,21 @@
-"""R2 核心类型：统一返回 Decision + 上下文载体 + 注册表抽象（ARCH-v5）。
+"""R2 核心类型：共用注册表与可插拔协议基契约。
 
-Hook 调用语义（Bail/Waterfall/Loop/Parallel/Around）与 Host/RequestScope/Policy
-定义在 hooks/v5.py；本模块只保留四模块共用的数据契约。
+三体系正交后，本模块只保留跟扩展实现无关的数据契约：
+- Registry：Provider 注册表（AOPContainer / LifecycleBus / 装配层共用同一实例，P6）。
+- Provider / Capability / ProviderRegistry：可插拔基契约（R13 术语基线）。
+- HookBusError：装配期错误（重名、缺 provider、冻结后写入）。
+
+扩展点实现已拆分为 AOP 与 Lifecycle 两个体系；
+how 维度见 src/aop/，when 维度见 hooks/lifecycle.py。
 """
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Iterable
-from dataclasses import dataclass, field
-from enum import Enum
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
-
-from runtime import AgentState, Budgets, DynamicValue, Effect, Result
-
-if TYPE_CHECKING:  # 避免循环 import（v5 反向依赖本模块的 Decision）
-    from .v5 import Host
+from collections.abc import Iterable
+from typing import Protocol, runtime_checkable
 
 __all__ = [
     "Capability",
-    "Decision",
-    "DecisionAction",
-    "HookCtx",
     "HookBusError",
-    "LifecycleEvent",
-    "Matcher",
     "Provider",
     "ProviderRegistry",
     "Registry",
@@ -31,12 +24,11 @@ __all__ = [
 
 @runtime_checkable
 class ProviderRegistry(Protocol):
-    """最小统一注册表视图（供 Host.registry 持有）。
+    """最小统一注册表视图（供各装配组件持有）。
 
-    R4 §6 要求 hook 总线与模型网关共用一份注册表；此协议只约束 register/has，
+    R4 §6 要求网关与扩展容器共用一份注册表；此协议只约束 register/has，
     避免 hooks 反向依赖 harness.model（分层：hooks 不 import harness）。
     """
-
     name: str
 
     def register(self, name: str, provider: Provider) -> object: ...
@@ -44,255 +36,9 @@ class ProviderRegistry(Protocol):
     def has(self, name: str) -> bool: ...
 
 
-class DecisionAction(str, Enum):
-    """统一返回动作；由 R1 内核与 R2 扩展点分层执行（ARCH-v5）。
-
-    成员：
-        CONTINUE: 放行。REWRITE: 改写。DENY: 拒绝。ASK: 转人工。
-        RETRY: 重试。DEGRADE: 降级。FALLBACK: 兜底。ABORT: 终止。
-    执行归属：
-        - R1 `_settle` 消费：CONTINUE / DENY / ABORT / FALLBACK（终止型判决）。
-        - R2 `transform`（WATERFALL）消费：REWRITE 语义（链式改写上下文）。
-        - RETRY：由 R3 RetryPolicy 在 around_invoke（AROUND）内部循环实现。
-        - DEGRADE：守卫产出占位 DEGRADE + degrade 信号；settle 扩展点由
-          降级插件（Degradation）选级写 scope.target，R4 网关据此切后端或 REFUSE 真拒答。
-        - ASK：R9 未实现，暂无执行路径。
-    """
-
-    CONTINUE = "continue"
-    REWRITE = "rewrite"
-    DENY = "deny"
-    ASK = "ask"
-    RETRY = "retry"
-    DEGRADE = "degrade"
-    FALLBACK = "fallback"
-    ABORT = "abort"
-
-
-class LifecycleEvent(str, Enum):
-    """生命周期挂载点：session/turn/context/invoke/tool/state/subagent/external 八组。
-
-    成员按阶段分组：
-        session 级：SESSION_START / SESSION_END。
-        prompt/turn 级：USER_PROMPT / BEFORE_MODEL / AFTER_MODEL / STOP / STOP_FAILURE。
-        上下文级：BEFORE_COMPACT / AFTER_COMPACT。
-        invoke 级：BEFORE_INVOKE / AFTER_INVOKE / INVOKE_ERROR。
-        tool 级：BEFORE_TOOL / AFTER_TOOL / TOOL_ERROR。
-        state 级：STATE_FOLD / BUDGET_CHECK。
-        subagent 级：CHILD_SPAWN / CHILD_DONE。
-        external 级：CONFIG_CHANGE / FILE_CHANGE。
-    """
-
-    SESSION_START = "session_start"
-    SESSION_END = "session_end"
-    USER_PROMPT = "user_prompt"
-    BEFORE_MODEL = "before_model"
-    AFTER_MODEL = "after_model"
-    STOP = "stop"
-    STOP_FAILURE = "stop_failure"
-    BEFORE_COMPACT = "before_compact"
-    AFTER_COMPACT = "after_compact"
-    BEFORE_INVOKE = "before_invoke"
-    AFTER_INVOKE = "after_invoke"
-    INVOKE_ERROR = "invoke_error"
-    BEFORE_TOOL = "before_tool"
-    AFTER_TOOL = "after_tool"
-    TOOL_ERROR = "tool_error"
-    STATE_FOLD = "state_fold"
-    BUDGET_CHECK = "budget_check"
-    CHILD_SPAWN = "child_spawn"
-    CHILD_DONE = "child_done"
-    CONFIG_CHANGE = "config_change"
-    FILE_CHANGE = "file_change"
-
-
-@dataclass(frozen=True)
-class RetrySpec:
-    """重试决策参数（R3 消费；R2 只定义载体）。
-
-    字段：
-        max_attempts: 最大尝试次数。base_delay: 初始退避秒数。
-        multiplier: 退避倍数。max_delay: 退避上限秒数。
-        jitter: 抖动策略（如 full）。respect_retry_after: 是否遵守服务端 Retry-After。
-        idempotency_required: 是否要求幂等键（R3 据此拒绝非幂等重试）。
-    """
-
-    max_attempts: int = 3
-    base_delay: float = 0.5
-    multiplier: float = 2.0
-    max_delay: float = 30.0
-    jitter: str = "full"
-    respect_retry_after: bool = True
-    idempotency_required: bool = True
-
-
-@dataclass(frozen=True)
-class Decision:
-    """Hook 统一返回：action 驱动 R1 行为，其余字段是各 action 的参数。
-
-    字段（都是某类 action 的参数载体）：
-        action: 裁决动作（默认 continue）。
-        payload_patch: rewrite 用，待合并进 Effect.payload。
-        context_inject: rewrite 用，注入的上下文文本。
-        state_patch: 状态改写（R1 state frozen，尚未实现）。
-        target: degrade 用，降级目标。
-        value: 统一裁决载体——fallback 的兜底值 / around 中心 invoke 的 Result。
-        retry: retry_ 用的重试参数。
-        reason: 拒绝/终止/挂起的原因文本。
-    """
-
-    action: DecisionAction = DecisionAction.CONTINUE
-    payload_patch: dict[str, DynamicValue] | None = None
-    context_inject: str | None = None
-    state_patch: dict[str, DynamicValue] | None = None
-    target: str | None = None
-    value: DynamicValue = None
-    retry: RetrySpec | None = None
-    reason: str = ""
-
-    @classmethod
-    def continue_(cls) -> Decision:
-        """放行：不改变执行流程。"""
-        return cls(action=DecisionAction.CONTINUE)
-
-    @classmethod
-    def deny(cls, reason: str = "") -> Decision:
-        """拒绝：不调用 port，返回失败。
-
-        参数：
-            reason: 拒绝原因。
-        """
-        return cls(action=DecisionAction.DENY, reason=reason)
-
-    @classmethod
-    def rewrite(
-        cls,
-        *,
-        context: str | None = None,
-        payload: dict[str, DynamicValue] | None = None,
-    ) -> Decision:
-        """改写：注入上下文或改写 payload 后继续。
-
-        参数：
-            context: 注入的上下文文本。payload: 待合并的 payload 补丁。
-        """
-        return cls(
-            action=DecisionAction.REWRITE, context_inject=context, payload_patch=payload
-        )
-
-    @classmethod
-    def retry_(cls, spec: RetrySpec | None = None) -> Decision:
-        """重放当前 Effect（类名方法带下划线后缀以避开同名字段 retry）。
-
-        参数：
-            spec: 重试参数；缺省用 RetrySpec 默认值。
-        """
-        return cls(action=DecisionAction.RETRY, retry=spec or RetrySpec())
-
-    @classmethod
-    def degrade(cls, target: str) -> Decision:
-        """换目标重跑。
-
-        参数：
-            target: 降级目标（如备用模型/port 名）。
-        """
-        return cls(action=DecisionAction.DEGRADE, target=target)
-
-    @classmethod
-    def fallback(cls, value: DynamicValue) -> Decision:
-        """兜底：不调用 port，用 value 作为结果。
-
-        参数：
-            value: 兜底返回值。
-        """
-        return cls(action=DecisionAction.FALLBACK, value=value)
-
-    @classmethod
-    def ask(cls, question: str, options: list[str] | None = None) -> Decision:
-        """转人工挂起。
-
-        参数：
-            question: 提问文本（存 reason）。options: 候选项（存 value）。
-        """
-        return cls(action=DecisionAction.ASK, reason=question, value=options)
-
-    @classmethod
-    def abort(cls, reason: str = "") -> Decision:
-        """终止 run。
-
-        参数：
-            reason: 终止原因。
-        """
-        return cls(action=DecisionAction.ABORT, reason=reason)
-
-
-@dataclass
-class HookCtx:
-    """Hook 收到的上下文：R1 RuntimeCtx 的超集。
-
-    字段：
-        effect: 当前 Effect（transform 可改）。state: 只读状态（State 本身 frozen）。
-        session_id: 会话标识。event: 当前事件名。
-        attempt: 尝试次数。budget_left: 预算余量投影。
-        trace: hook 执行轨迹。meta: 临时元数据。
-        invoke: 由 R1 注入的 Port 调用回调（洋葱中心使用）。
-    """
-
-    effect: Effect
-    state: AgentState
-    session_id: str
-    event: str
-    attempt: int = 0
-    budget_left: Budgets | None = None
-    trace: list[str] = field(default_factory=list)
-    meta: dict[str, DynamicValue] = field(default_factory=dict)
-    invoke: Callable[[Effect, HookCtx], Awaitable[Result]] | None = None
-
-    @property
-    def state_view(self) -> AgentState:
-        """只读状态视图（State 本身 frozen，故直接返回即可）。"""
-        return self.state
-
-
-@dataclass(frozen=True)
-class Matcher:
-    """事件匹配器：按 kind/tool/model 过滤（当前 bus 未强制调用，供插件自选）。
-
-    字段：
-        kinds: 允许的 Effect kind 值；空表示不限。
-        tools: 允许的工具名；空表示不限。
-        models: 允许的模型名；空表示不限。
-    """
-
-    kinds: tuple[str, ...] = ()
-    tools: tuple[str, ...] = ()
-    models: tuple[str, ...] = ()
-
-    def matches(self, ctx: HookCtx) -> bool:
-        """判断当前 ctx 是否命中；空条件表示全匹配。
-
-        参数：
-            ctx: 钩子上下文，读取其 effect 做过滤。
-        返回：
-            命中 True，否则 False。
-        """
-        effect = ctx.effect
-        if self.kinds and effect.kind.value not in self.kinds:
-            return False
-        # 工具名优先取 payload.call 内的 name，回退到 payload.name。
-        if (
-            self.tools
-            and str(effect.payload.get("call") or effect.payload.get("name") or "")
-            not in self.tools
-        ):
-            return False
-        return not (self.models and str(effect.payload.get("model") or "") not in self.models)
-
-
 @runtime_checkable
 class Provider(Protocol):
     """所有可替换策略的基契约：带 name、可被替换。"""
-
     name: str
 
 
@@ -303,24 +49,26 @@ class Capability(Protocol):
     属性：
         name: 能力名。version: 版本。requires: 依赖的其他能力名。
     """
-
     name: str
     version: str
     requires: tuple[str, ...]
 
-    def install(self, host: Host, reg: Registry) -> None:
-        """把本能力的插件装到 host、provider 装到注册表。
+    def install(self, container: object, reg: Registry) -> None:
+        """把本能力的增强器装到容器、provider 装到注册表。
 
         参数：
-            host: R2 Host（ARCH-v5）。reg: Provider 注册表。
+            container: AOPContainer（增强器注册目标）。
+            reg: Provider 注册表。
         """
         ...
 
 
 class HookBusError(Exception):
-    """R2 装配/执行错误（重名、缺 port、冻结后写入等）。"""
+    """装配/执行错误（重名、缺 port、冻结后写入等）。
 
-    code = "HOOKBUS_ERROR"  # 错误码，便于上层折叠为 Result
+    保留类名以稳定错误码兼容（code="HOOKBUS_ERROR"），语义扩展为共用容器装配错误。
+    """
+    code = "HOOKBUS_ERROR"
 
 
 class Registry:
@@ -328,8 +76,8 @@ class Registry:
 
     def __init__(self) -> None:
         """初始化空注册表，装配期 freeze 后拒绝任何写入。"""
-        self._providers: dict[str, Provider] = {}  # name → provider 实例
-        self._frozen = False  # 冻结标志（装配完成后置 True）
+        self._providers: dict[str, Provider] = {}
+        self._frozen = False
 
     def register(self, name: str, provider: Provider) -> Registry:
         """注册 provider；重名报错（除非用 replace）；返回 self 支持链式。

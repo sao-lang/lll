@@ -74,7 +74,7 @@ class TestModelCapability:
     """能力装配：llm/router/cache 注册进 Registry，gateway() 构造网关。"""
 
     def test_add_backend_registers_degrade_target(self) -> None:
-        """v5：降级目标后端通过 add_backend 注册到 ModelRegistry。"""
+        """降级目标后端通过 add_backend 注册到 ModelRegistry。"""
         cap = ModelCapability(llm=RecordingLLM([resp("x")]))
         backup = RecordingLLM([resp("backup")])
         cap.add_backend("backup", backup)

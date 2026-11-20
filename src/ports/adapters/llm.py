@@ -43,7 +43,7 @@ class OpenAICompatLLM:
         """装配适配器。
 
         参数：
-            base_url: OpenAI-compatible 端点根（如 https://api.x/v1）。
+            base_url: OpenAI-compatible 端点根（如 https://api.example/openai）。
             api_key: 密钥，仅进 Authorization 头，不进 trace/日志/快照。
             model: 默认模型名（请求未覆盖时使用）。
             client: 可注入 httpx 客户端（测试用 MockTransport 避免真联网）；缺省新建。

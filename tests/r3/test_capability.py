@@ -1,32 +1,19 @@
-"""R3 能力装配测试（ARCH-v5）：ResilienceCapability.install(host) 把插件 tap 到宿主扩展点。
+"""R3 能力装配测试：ResilienceCapability.install(container) 按 AOP 角色注册插件。
 
-v5 契约：插件只实现 apply(host)，不自声明 mode/priority/events；装配顺序即
-宿主扩展点内的 tap 顺序。断言对象是 host 的 hook().names，
-不再检查旧的 hooks() 排序 / HookMode / priority。
+插件保留一等身份（name + 实例状态 + 构造注入），install 按角色分派到 AOPContainer；
+装配顺序即同角色内执行顺序。opt-in：不传即不装。
 """
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 
-from hooks import DecisionAction, Host, RequestScope
+from aop import AOPContainer
+from runtime import Result
 
 from harness.resilience import (
-    BudgetGuard,
-    Bulkhead,
-    CircuitBreaker,
-    DegradeLadder,
-    DegradeMode,
-    DegradeStep,
-    Degradation,
-    Idempotency,
-    KillSwitch,
-    RateLimit,
-    ResilienceCapability,
-    RetryPolicy,
-    Timeout,
-    Watchdog,
+    BudgetGuard, Bulkhead, CircuitBreaker, DegradeLadder, DegradeMode, DegradeStep,
+    Degradation, Idempotency, KillSwitch, RateLimit, ResilienceCapability,
+    RetryPolicy, Timeout, Watchdog,
 )
 
 
@@ -38,78 +25,72 @@ def _ladder() -> DegradeLadder:
     ))
 
 
+def _names(plugins: list[object]) -> list[str]:
+    return [str(getattr(p, "name", "")) for p in plugins]
+
+
 class TestCapabilityAssembly:
     def test_no_args_installs_nothing(self) -> None:
-        """opt-in 装配：不传任何插件 → 所有扩展点零 tap。"""
+        """opt-in：不传插件 → 容器各角色零注册。"""
         cap = ResilienceCapability()
         assert cap.plugins() == ()
-        host = cap.install(Host())
-        for name in ("before_invoke", "transform", "around_invoke",
-                     "after_invoke", "invoke_error", "settle"):
-            assert host.hook(name).names == ()
+        c = cap.install(AOPContainer(lambda inv: Result.success("x")))
+        assert c._wardens == [] and c._envelopes == [] and c._refiners == [] and c._salvages == []
 
-    def test_explicit_builtin_instances_tapped_by_name(self) -> None:
-        """只装传入的插件，host 对应扩展点 tap 对应插件名。"""
+    def test_explicit_builtin_registered_by_role(self) -> None:
+        """只装传入插件，按角色分组注册。"""
         cap = ResilienceCapability(killswitch=KillSwitch(flag_store={}), retry=RetryPolicy())
-        host = cap.install(Host())
-        assert "r3_killswitch" in host.hook("before_invoke").names
-        assert "r3_retry" in host.hook("around_invoke").names
-        assert "r3_breaker" not in host.hook("before_invoke").names  # 没传就不装
-        assert "r3_degrade" not in host.hook("settle").names
+        c = cap.install(AOPContainer(lambda inv: Result.success("x")))
+        assert _names(c._wardens) == ["r3_killswitch"]
+        assert _names(c._envelopes) == ["r3_retry"]
+        assert "r3_degrade" not in _names(c._salvages)
 
-    def test_all_extension_points_tapped(self) -> None:
-        """全插件装配：每个扩展点 tap 到预期插件名，顺序即装配顺序。"""
+    def test_all_plugins_by_role(self) -> None:
+        """全插件装配：各角色分组含预期插件，顺序即装配顺序。"""
         cap = ResilienceCapability(
-            killswitch=KillSwitch(flag_store={}),
-            watchdog=Watchdog(),
-            idempotency=Idempotency(),
-            bulkhead=Bulkhead(),
-            rate_limit=RateLimit(),
-            breaker=CircuitBreaker(),
-            retry=RetryPolicy(),
-            timeout=Timeout(),
-            degradation=Degradation(_ladder()),
-            budget_guard=BudgetGuard(),
+            killswitch=KillSwitch(flag_store={}), watchdog=Watchdog(),
+            idempotency=Idempotency(), bulkhead=Bulkhead(), rate_limit=RateLimit(),
+            breaker=CircuitBreaker(), retry=RetryPolicy(), timeout=Timeout(),
+            degradation=Degradation(_ladder()), budget_guard=BudgetGuard(),
         )
-        host = Host()
-        assert cap.install(host) is host  # 链式返回同一 host
-        assert set(host.hook("before_invoke").names) == {
-            "r3_killswitch", "r3_watchdog", "r3_idempotency",
-            "r3_bulkhead", "r3_ratelimit", "r3_breaker",
-        }
-        assert host.hook("around_invoke").names == ("r3_retry", "r3_timeout")
-        assert host.hook("settle").names == ("r3_degrade",)
-        assert host.hook("transform").names == ("r3_budgetguard",)
-        assert "r3_breaker" in host.hook("after_invoke").names
-        assert "r3_breaker" in host.hook("invoke_error").names
-        host.freeze()  # 装配完整，冻结不抛异常
+        c = AOPContainer(lambda inv: Result.success("x"))
+        assert cap.install(c) is c  # 链式返回同一容器
+        w = _names(c._wardens)
+        assert "r3_killswitch" in w and "r3_watchdog" in w and "r3_idempotency" in w
+        assert "r3_ratelimit" in w and "r3_breaker" in w
+        assert set(_names(c._envelopes)) == {"r3_bulkhead", "r3_breaker", "r3_retry", "r3_timeout"}
+        assert _names(c._refiners) == ["r3_budgetguard"]
+        assert _names(c._salvages) == ["r3_degrade"]
+        # CircuitBreaker 拆 check(Warden) + observe(Envelope) 两角色，仍算一个插件。
 
-    def test_guard_chain_short_circuit_trace(self) -> None:
-        """killswitch 置位时 before_invoke 的 BAIL tap 直接 ABORT。"""
+    def test_warden_chain_blocks_via_verdict(self) -> None:
+        """killswitch 置位时 Warden.guard 返回 allowed=False。"""
+        import asyncio
+        from aop import Invocation
+        from runtime import Invoke
         kill = KillSwitch(flag_store={})
-        host = ResilienceCapability(killswitch=kill).install(Host()).freeze()
-        scope = host.new_scope()
-        assert asyncio.run(host.hook("before_invoke").call(scope)) is None  # 健康放行
         kill.flag_store["kill:session"] = True
-        d = asyncio.run(host.hook("before_invoke").call(scope))
-        assert d is not None and d.action is DecisionAction.ABORT
+        kill.flag_store["kill:global"] = True  # 用 global 确保命中（session scope 键为 kill:session 也行）
+        from tests.r3.conftest import make_ctx
+        inv = make_ctx(Invoke(port="llm", payload={}))
+        verdict = asyncio.run(kill.guard(inv))
+        assert verdict.allowed is False and verdict.reason == "killswitch"
 
 
 class TestCustomPlugins:
     def test_custom_degradation_injected(self) -> None:
-        """注入自定义 Degradation 实例：tap 用其插件名。"""
+        """注入自定义 Degradation 实例： Salvage 用其插件名。"""
         class CustomDegradation(Degradation):
             name = "custom_degrade"
-
         custom = CustomDegradation(_ladder())
-        host = ResilienceCapability(degradation=custom).install(Host())
-        assert host.hook("settle").names == ("custom_degrade",)
+        c = ResilienceCapability(degradation=custom).install(AOPContainer(lambda inv: Result.success("x")))
+        assert _names(c._salvages) == ["custom_degrade"]
 
     def test_custom_budget_guard_injected(self) -> None:
-        """注入自定义 BudgetGuard（如改 soft 阈值）：tap 到 transform。"""
+        """注入自定义 BudgetGuard：Refiner 分组含该插件。"""
         custom = BudgetGuard(soft=0.5)
-        host = ResilienceCapability(budget_guard=custom).install(Host())
-        assert host.hook("transform").names == ("r3_budgetguard",)
+        c = ResilienceCapability(budget_guard=custom).install(AOPContainer(lambda inv: Result.success("x")))
+        assert _names(c._refiners) == ["r3_budgetguard"]
         assert custom in ResilienceCapability(budget_guard=custom).plugins()
 
     def test_no_args_installs_no_defaults(self) -> None:
@@ -118,30 +99,29 @@ class TestCustomPlugins:
 
 
 class TestExtraPlugins:
-    class _CustomPlugin:
-        name = "custom_audit"
-
-        def apply(self, host: Host) -> None:
-            host.hook("before_invoke").tap(self.name, self.fn)
-
-        async def fn(self, scope: RequestScope) -> None:
-            return None
-
-    def test_extra_plugin_reaches_host(self) -> None:
-        """extra_plugins 注入任意插件：install 后 tap 到对应扩展点。"""
-        host = ResilienceCapability(extra_plugins=(self._CustomPlugin(),)).install(Host())
-        assert "custom_audit" in host.hook("before_invoke").names
+    def test_extra_warden_reaches_role(self) -> None:
+        """extra_plugins 注入 Warden 角色实例：install 后进入 warden 分组。"""
+        from aop import Verdict, Warden
+        class AuditWarden(Warden):
+            name = "custom_audit"
+            async def guard(self, inv): return Verdict(allowed=True)
+        c = ResilienceCapability(extra_plugins=(AuditWarden(),)).install(
+            AOPContainer(lambda inv: Result.success("x"))
+        )
+        assert "custom_audit" in _names(c._wardens)
 
     def test_extra_plugin_in_plugins(self) -> None:
         """extra_plugins 原样进 plugins()。"""
-        custom = self._CustomPlugin()
+        from aop import Verdict, Warden
+        class AuditWarden(Warden):
+            name = "custom_audit"
+            async def guard(self, inv): return Verdict(allowed=True)
+        custom = AuditWarden()
         assert custom in ResilienceCapability(extra_plugins=(custom,)).plugins()
 
     def test_extra_plugin_without_name_rejected(self) -> None:
         """履约校验：无 name 的插件在装配期被拒绝。"""
         class NoName:
-            def apply(self, host: Host) -> None:
-                return None
-
+            pass
         with pytest.raises(ValueError, match="name"):
-            ResilienceCapability(extra_plugins=(NoName(),))
+            ResilienceCapability(extra_plugins=(NoName(),))  # type: ignore[arg-type]

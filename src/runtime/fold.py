@@ -16,11 +16,16 @@ from .types import (
     BudgetDelta,
     DynamicValue,
     Effect,
-    EffectKind,
+    Invoke,
     Message,
     PortError,
+    PortName,
     Result,
+    Spawn,
+    Suspend,
+    Terminate,
     canonical,
+    disposition_of,
 )
 
 __all__ = ["field", "fold", "replay_events", "state_append_message", "state_set"]
@@ -81,10 +86,13 @@ def _budget_delta(effect: Effect) -> BudgetDelta:
     """Effect 声明的单步预算；未声明时只扣 1 turn。
 
     分支：
-        - 无 budget 声明：空 dict 起步。
+        - 非 Invoke（Spawn/Suspend/Terminate）：无 payload 预算声明，只扣默认 1 turn。
+        - Invoke 无 budget 声明：空 dict 起步。
         - turns 缺失时补默认 1（每个 Effect 至少消耗一个 turn）。
     """
-    declared: dict[str, DynamicValue] = dict(effect.payload.get("budget") or {})
+    declared: dict[str, DynamicValue] = dict(
+        effect.payload.get("budget") or {}
+    ) if isinstance(effect, Invoke) else {}
     declared["turns"] = declared.get("turns", 1)
     return cast(BudgetDelta, declared)
 
@@ -94,19 +102,21 @@ def _message_for(effect: Effect, result: Result) -> Message | None:
 
     分支：
         - 失败 Result：记 system 消息（错误码 + 信息），便于对话上下文感知故障。
-        - LLM：记 assistant 消息（正文 + tool_calls），tool_calls 先规范化。
-        - TOOL：记 tool 消息（结果信封规范化后 canonical 序列化，name=call_id）。
-        - SKILL/CHILD/WAIT_HUMAN/END 等：不进 messages，由 fold 的托管字段承载。
+        - Invoke(port=llm)：记 assistant 消息（正文 + tool_calls），tool_calls 先规范化。
+        - Invoke(port=tool)：记 tool 消息（结果信封规范化后 canonical 序列化，name=call_id）。
+        - Invoke(port=skill) / Spawn / Suspend / Terminate：不进 messages，由托管字段承载。
     """
     data = result.data if result.ok else None
     if not result.ok:
         err = result.error or PortError("UNKNOWN_PORT_ERROR", "unknown port failure")
         return Message(role="system", content=f"[{err.code}] {err.message}")
-    if effect.kind is EffectKind.LLM:
+    if not isinstance(effect, Invoke):
+        return None
+    if effect.port == PortName.LLM.value:
         content = field(data, "content", "") or ""
         calls = tuple(_plain_value(c) for c in (field(data, "tool_calls", []) or []))
         return Message(role="assistant", content=content, tool_calls=calls)
-    if effect.kind is EffectKind.TOOL:
+    if effect.port == PortName.TOOL.value:
         call = effect.payload.get("call") or {}
         # call_id 优先取调用对象内字段，回退到 payload 顶层声明。
         call_id = field(call, "call_id", effect.payload.get("call_id", ""))
@@ -153,16 +163,15 @@ def fold(
         message = _message_for(effect, result)
         if message is not None:
             messages.append(message)
-        # ② 特殊 kind 写入托管字段（互斥：同一 Effect 只可能命中其一）
-        if effect.kind is EffectKind.SKILL:
+        # ② 特殊 Effect 写入托管字段（互斥：tagged union 具体类型彼此排斥）
+        if isinstance(effect, Invoke) and effect.port == PortName.SKILL.value:
             last_skill = _plain_value(result.data)
-        elif effect.kind is EffectKind.CHILD:  # 子 Agent 结果单列托管：与 SKILL 结果来源不同，上层需分别取用
+        elif isinstance(effect, Spawn):  # 子 Agent 结果单列托管：与 SKILL 来源不同，上层分别取用
             last_child = _plain_value(result.data)
-        elif effect.kind is EffectKind.WAIT_HUMAN:
+        elif isinstance(effect, Suspend):
             last_wait_human = _plain_value(result.data)
-        # END 且带 output 时写入最终输出（不与上面的 elif 冲突：END 是独立 kind）。
-        if effect.kind is EffectKind.END and "output" in effect.payload:
-            output = _plain_value(effect.payload["output"])
+        elif isinstance(effect, Terminate):  # Terminate 直接产出最终输出（替代原 END + payload['output']）
+            output = _plain_value(effect.output)
         # ③ 累计本 Effect 的 usage（成本/token），供下方统一计入预算。
         if result.usage is not None:
             cost += float(field(result.usage, "cost_usd", 0.0))
@@ -190,7 +199,7 @@ def fold(
         last_skill=last_skill,
         last_child=last_child,
         last_wait_human=last_wait_human,
-        last_step_kinds=tuple(e.kind.value for e in effects),
+        last_step_kinds=tuple(disposition_of(e).value for e in effects),
         last_tokens=tokens,
         last_reason=reason or state.last_reason,
     )

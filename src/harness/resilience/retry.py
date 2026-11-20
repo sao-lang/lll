@@ -1,7 +1,7 @@
-"""R3 重试插件（AROUND）：包裹 next 调用，失败按退避算法重试。
+"""R3 重试插件（Envelope）：包裹 next 调用，失败按退避算法重试。
 
-ARCH-v5：apply(host) 把 retry 挂到 around_invoke（AROUND）；
-耗尽时向 scope.emit(degrade 信号)，由 settle 阶段统一裁决降级。
+耗尽时把具名故障记录写入 inv.meta（含 failed_target，R3-7），交 Degradation 选级。
+幂等红线：无幂等键的 TOOL 副作用禁止重试。
 """
 from __future__ import annotations
 
@@ -9,28 +9,26 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from random import Random
 
-from hooks import Decision, Host, RequestScope, Signal, SignalKind
-from runtime import Effect, EffectKind, Result
+from aop import FaultRecord, Invocation
+from runtime import Invoke, PortName, Result
 
-from .types import Jitter, backoff_delay, classify_failure, validate_retry_spec
+from .types import Jitter, RetrySpec, backoff_delay, classify_failure, validate_retry_spec
 
 __all__ = ["RetryPolicy"]
 
-NextFn = Callable[[], Awaitable[Decision]]
+type NextFn = Callable[[Invocation], Awaitable[Result]]
 
 
-def _default_failed_target(effect: Effect) -> str | None:
-    """默认失败目标：后端注册名（payload.model）优先，缺省 "primary"。
-
-    规则 6 例外：model 是 EffectPayload 的具名键，此处在边界外读取注册名，
-    与 breaker 的默认派生保持同一口径。
-    """
-    return effect.payload.get("model") or "primary"
+def _failed_target_of(inv: Invocation) -> str:
+    """失败目标注册名（R3-7）：Invoke.payload.model 优先，缺省 "primary"。"""
+    effect = inv.effect
+    if isinstance(effect, Invoke):
+        return str(effect.payload.get("model") or "primary")
+    return "primary"
 
 
 class RetryPolicy:
-    """重试插件：AROUND 包裹 Port 调用，幂等红线保护。"""
-
+    """重试插件（Envelope）：包裹 Port 调用，幂等红线保护。"""
     name = "r3_retry"
 
     def __init__(
@@ -45,17 +43,14 @@ class RetryPolicy:
         idempotency_required: bool = True,
         rng: Random | None = None,
         sleeper: Callable[[float], Awaitable[None]] | None = None,
-        failed_target_of: Callable[[Effect], str | None] | None = None,
+        failed_target_of: Callable[[Invocation], str] | None = None,
     ) -> None:
         """构造重试策略。
 
         参数：
-            failed_target_of: 从 Effect 派生失败目标注册名的纯函数（R3-7：耗尽信号带
-                failed_target 供 settle 剔除）；缺省取 payload.model 或 "primary"。
+            failed_target_of: 从 Invocation 派生失败目标注册名（R3-7）。
         """
-        from hooks import RetrySpec
-
-        self._failed_target_of = failed_target_of or _default_failed_target
+        self._failed_target_of = failed_target_of or _failed_target_of
         self._spec = RetrySpec(
             max_attempts=max_attempts, base_delay=base_delay, multiplier=multiplier,
             max_delay=max_delay, jitter=Jitter.coerce(jitter).value,
@@ -66,50 +61,41 @@ class RetryPolicy:
         self._rng = rng if rng is not None else Random()
         self._sleep = sleeper
 
-    def apply(self, host: Host) -> None:
-        """挂载 around_invoke（AROUND）：包裹真实调用做退避重试。"""
-        host.hook("around_invoke").tap(self.name, self.call)
-
-    async def call(
-        self, next_fn: NextFn, scope: RequestScope, effect: Effect,
-    ) -> Decision:
-        """AROUND 入口：循环调 next_fn，失败退避重试。
-
-        E1 修复点：生产 core 返回裸 Result（无 .value），测试用 Decision(value=Result)，
-        两种载体都兼容：Decision 取 .value，其余按裸 Result 处理。
-        """
+    async def wrap(self, inv: Invocation, next: NextFn) -> Result:
+        """Envelope.wrap：循环调 next，失败退避重试；耗尽写 fault。"""
         sleeper = self._sleep or asyncio.sleep
         prev_delay = 0.0
-        last = Decision.continue_()
-        for attempt in range(1, self._spec.max_attempts + 1):  # 从 1 计到 max_attempts；末次失败走耗尽降级而非再退避
-            verdict = await next_fn()
-            last = verdict
-            result = verdict.value if isinstance(verdict, Decision) else verdict
-            if not isinstance(result, Result):  # 非 Result 载体（守卫短路的 Decision）原样透传，不参与重试判定
-                return verdict
-            fc = classify_failure(result, scope)
-            if not fc.retryable or result.ok:  # 成功或确定性失败立即返回，避免放大不可逆副作用
-                return verdict
-            scope.trace.append(f"retry:classified:{fc.code}")
-            if attempt >= self._spec.max_attempts:  # 末次仍失败：发耗尽降级信号，由 settle 剔除该目标
-                scope.trace.append("retry:exhausted")
-                # R3-7：带上失败目标注册名，settle 才能从 available 剔除它（否则选回自身）。
-                scope.emit(Signal(SignalKind.DEGRADE, "retry_exhausted", self._failed_target_of(effect)))
-                return verdict
-            if self._is_retryable_side_effect(scope, effect):  # 无幂等键的 TOOL 副作用禁止重试，防重复执行
-                return Decision.deny("idempotency_required for side-effect retry")
+        last = Result.failure("RETRY_EXHAUSTED", "no attempts")
+        for attempt in range(1, self._spec.max_attempts + 1):
+            result = await next(inv)
+            last = result
+            fc = classify_failure(result, inv)
+            if not fc.retryable or result.ok:
+                return result
+            inv.meta["retry_classified"] = fc.code
+            if attempt >= self._spec.max_attempts:
+                # 耗尽：写具名故障记录（含 failed_target，R3-7）。
+                inv.write_fault(FaultRecord(
+                    reason="retry_exhausted", failed_target=self._failed_target_of(inv),
+                ))
+                return result
+            if self._is_retryable_side_effect(inv):
+                return Result.failure(
+                    "IDEMPOTENCY_REQUIRED", "idempotency_required for side-effect retry"
+                )
             delay = backoff_delay(
                 attempt, self._spec, self._rng,
                 prev_delay=prev_delay, retry_after=fc.suggested_delay,
             )
-            prev_delay = delay  # 留存本次退避值供下次 decorrelated 抖动使用（解相关防同步重试）
+            prev_delay = delay
             await sleeper(delay)
         return last
 
-    def _is_retryable_side_effect(self, scope: RequestScope, effect: Effect) -> bool:
+    def _is_retryable_side_effect(self, inv: Invocation) -> bool:
         """幂等红线：TOOL 副作用无幂等键时禁止重试。"""
-        if not self._spec.idempotency_required:  # 显式关闭幂等要求才放行重试，默认保守拒绝
+        if not self._spec.idempotency_required:
             return False
-        if effect.kind != EffectKind.TOOL:  # 非 TOOL 无副作用风险，不受幂等键约束
+        effect = inv.effect
+        if not isinstance(effect, Invoke) or effect.port != PortName.TOOL.value:
             return False
         return not bool(effect.idempotency_key)

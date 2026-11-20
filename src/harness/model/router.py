@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Protocol, TypedDict, cast, runtime_checkable
 
 from hooks import PortCtx
-from runtime import Effect
+from runtime import Effect, Invoke
 
 from .types import RouteDecision
 
@@ -68,6 +68,8 @@ def _coerce_route(effect: Effect) -> _RouteInput:
     """
     # 规则 6 例外：task_hint/meta 已在 R1 EffectPayload 声明为明确字段，
     # 此处是类型化读取（.get 安全取可选键），非未声明动态键；形态回退见下方。
+    if not isinstance(effect, Invoke):
+        return _RouteInput(task_hint="", max_cost=None)  # 非 Invoke 不携带路由参数
     hint = str(effect.payload.get("task_hint") or "")
     raw_meta = cast(_RouteMeta | None, effect.payload.get("meta"))
     max_cost: float | None = None

@@ -1,11 +1,11 @@
 """R1 多Agent原语回归：并行 CHILD 扇出/聚合/子会话ID唯一/预算分账。"""
 import asyncio
 
-from runtime import AgentState, Effect, EffectKind, Result, Runner, Session, Usage
+from runtime import AgentState, Effect, Result, Runner, Session, Usage, Invoke, Spawn, Terminate
 
 
 async def fake_call(effect, ctx):
-    if effect.kind is EffectKind.LLM:
+    if isinstance(effect, Invoke) and effect.port == "llm":
         return Result.success({"content": "ok"}, usage=Usage(prompt_tokens=2, cost_usd=0.01))
     return Result.success(None)
 
@@ -17,8 +17,8 @@ async def fake_dispatch(effect, ctx):
 def make_child(name: str):
     """无参工厂：子Agent的 program_factory 必须是 Callable[[], Program]。"""
     def child():
-        yield Effect(EffectKind.LLM, {"messages": []})
-        yield Effect(EffectKind.END, {"output": name})
+        yield Invoke(port="llm", payload={'messages': []})
+        yield Terminate(output=name)
     return child
 
 
@@ -27,12 +27,12 @@ def test_parallel_children_unique_ids_and_aggregate():
     async def run():
         def supervisor(state):
             results = yield [
-                Effect(EffectKind.CHILD, {"program_factory": make_child(n)})
+                Spawn(program_factory=make_child(n))
                 for n in ("a", "b", "c")
             ]
-            yield Effect(EffectKind.END, {"output": "|".join(str(r) for r in results)})
+            yield Terminate(output='|'.join((str(r) for r in results)))
 
-        runner = Runner(dispatch=fake_dispatch, call=fake_call)
+        runner = Runner(call=fake_call)
         s = Session(session_id="multi", program_factory=lambda: supervisor(AgentState()))
         result = await runner.run(s)
         assert result.status == "done", result.reason
@@ -46,10 +46,10 @@ def test_child_budget_hop_accounting():
     """每个子Agent派生时父预算扣 1 hop（预算分账由内核强制）。"""
     async def run():
         def parent(state):
-            results = yield Effect(EffectKind.CHILD, {"program_factory": make_child("x")})
-            yield Effect(EffectKind.END, {"output": str(results)})
+            results = yield Spawn(program_factory=make_child('x'))
+            yield Terminate(output=str(results))
 
-        runner = Runner(dispatch=fake_dispatch, call=fake_call)
+        runner = Runner(call=fake_call)
         s = Session(session_id="acct", program_factory=lambda: parent(AgentState()))
         result = await runner.run(s)
         assert result.status == "done"

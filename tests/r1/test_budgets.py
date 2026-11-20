@@ -3,7 +3,7 @@ import asyncio
 
 import pytest
 
-from runtime import AgentState, Budgets, Effect, EffectKind, Result, Runner, Session, Usage
+from runtime import AgentState, Budgets, Effect, Result, Runner, Session, Usage, Invoke
 
 DIMS = [
     ("turns", {"max_turns": 1}, {"turns": 1}),
@@ -26,7 +26,7 @@ async def fake_dispatch(effect, ctx):
 def infinite_program(state):
     """永不主动结束的 program，逼预算超限强制 END。"""
     while True:
-        yield Effect(EffectKind.LLM, {"messages": []})
+        yield Invoke(port="llm", payload={'messages': []})
 
 
 @pytest.mark.parametrize("name,limits,consumption", DIMS)
@@ -36,7 +36,7 @@ def test_budget_exceeded_forces_end(name, limits, consumption):
         init = AgentState(budgets=budgets)
         session = Session(session_id=f"b-{name}",
                           program_factory=lambda: infinite_program(init), state=init)
-        runner = Runner(dispatch=fake_dispatch, call=fake_call)
+        runner = Runner(call=fake_call)
         result = await runner.run(session)
         assert result.status == "done"
         assert "BUDGET_EXCEEDED" in result.reason, f"{name}: {result.reason}"

@@ -9,7 +9,6 @@ from hooks import (
     AuditPort,
     DisclosureIndex,
     DisclosurePacket,
-    Host,
     HumanPort,
     Registry,
     SandboxPort,
@@ -72,15 +71,13 @@ class ToolsCapability:
         else:
             self._disclosure = disclosure
 
-    def install(self, host: Host, reg: Registry) -> None:
-        """按 R2 Capability 契约把持有的 port 注册进 Registry（签名与协议一致）。
+    def install(self, reg: Registry) -> None:
+        """把持有的 port 注册进共用 Provider 注册表。
 
         参数：
-            host: R2 Host；R5 的 port 非 Plugin（无 apply），host 无 port 注册 API，
-                  故仅保留参数履约，不向宿主挂插件（披露触发属 R12，不在本能力范围）。
-            reg: Provider 注册表；按 R2 规范端口名注册 tool/disclosure/mcp/skill。
+            reg: 共用 Provider 注册表；按 port 名注册 tool/disclosure/mcp/skill。
         """
-        # 【v2.2】先装配期自动注册 @tool 待注册项，再注册各 Port；
+        # 先装配期自动注册 @tool 待注册项，再注册各 Port；
         # 为何在前：flush 可能抛重名/freeze，须在 Port 注册前暴露，避免半装配。
         self._registry.register_pending()
         # reg 提供 register(name, provider) 现成 API，直接注册持有的四个 port。

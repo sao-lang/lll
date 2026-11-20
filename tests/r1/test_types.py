@@ -1,10 +1,7 @@
 """R1-T08：核心类型与不变量（冻结、托管字段、信封、确定性序列化）。"""
 import pytest
 
-from runtime import (
-    AgentState, Budgets, Effect, EffectKind, Message, Result, Usage,
-    canonical, checkpoint, fingerprint, restore_checkpoint, Session,
-)
+from runtime import AgentState, Budgets, Effect, Message, Result, Usage, canonical, checkpoint, fingerprint, restore_checkpoint, Session, Invoke, Terminate
 
 
 def test_state_is_immutable():
@@ -36,10 +33,10 @@ def test_budget_consume():
 def test_checkpoint_preserves_idempotency_key():
     """B2：checkpoint 恢复须保留 Effect.idempotency_key，否则恢复后幂等失效。"""
     def program(state):
-        yield Effect(EffectKind.TOOL, {"call": {}}, idempotency_key="IDEM-KEY-123")
-        yield Effect(EffectKind.END, {"output": "done"})
+        yield Invoke(port="tool", payload={'call': {}}, idempotency_key='IDEM-KEY-123')
+        yield Terminate(output='done')
 
-    eff = Effect(EffectKind.TOOL, {"call": {}}, idempotency_key="IDEM-KEY-123")
+    eff = Invoke(port="tool", payload={'call': {}}, idempotency_key='IDEM-KEY-123')
     from runtime import Event
     event = Event(
         seq=1, session_id="s-idem", step=1, state_snapshot=AgentState(),
@@ -57,12 +54,7 @@ def test_batch_expand_preserves_idempotency_key():
     """B3：batch 展开的子 Effect 继承幂等键，否则副作用重试红线失效。"""
     from runtime.interpreter import _expand
 
-    parent = Effect(
-        EffectKind.TOOL,
-        {"calls": [{"call": 1}, {"call": 2}]},
-        batch=True,
-        idempotency_key="BATCH-KEY",
-    )
+    parent = Invoke(port="tool", payload={'calls': [{'call': 1}, {'call': 2}]}, batch=True, idempotency_key='BATCH-KEY')
     children = _expand(parent)
     assert len(children) == 2
     assert all(c.idempotency_key == "BATCH-KEY" for c in children), \
@@ -73,7 +65,7 @@ def test_checkpoint_restore_ignores_extra_usage_keys():
     """B5：快照 usage 含额外键（如 total_tokens）时恢复不应崩溃。"""
     from runtime import Event
 
-    eff = Effect(EffectKind.LLM, {})
+    eff = Invoke(port="llm", payload={})
     result = Result.success(
         "ok",
         usage=Usage(prompt_tokens=1, completion_tokens=2, cost_usd=0.01),
@@ -95,7 +87,7 @@ def test_fold_deducts_usage_tokens_into_budget():
     """B1：usage 的 token 必须和 cost 一样扣进预算，否则 token 维形同虚设。"""
     from runtime.fold import fold
 
-    effect = Effect(EffectKind.LLM, {"messages": []})
+    effect = Invoke(port="llm", payload={'messages': []})
     result = Result.success("ok", usage=Usage(prompt_tokens=100, completion_tokens=50, cost_usd=0.5))
     state = fold(AgentState(), [effect], [result])
     assert state.budgets.used_tokens == 150, \
@@ -120,7 +112,7 @@ def test_canonical_set_is_order_independent():
 
 def test_checkpoint_roundtrip():
     def program(state):
-        yield Effect(EffectKind.END, {"output": "done"})
+        yield Terminate(output='done')
     s = Session(session_id="s1", program_factory=program, state=AgentState(messages=(Message("user", "hi"),)))
     snap = checkpoint(s)
     restored = restore_checkpoint(snap, program)

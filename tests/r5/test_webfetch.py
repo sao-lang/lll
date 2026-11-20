@@ -42,7 +42,7 @@ def test_injection_refuses_and_audits(ctx: PortCtx, audit: FakeAudit) -> None:
     try:
         asyncio.run(tool.fetch("https://evil.com", ctx))
     except ValueError as e:
-        assert "注入" in str(e)
+        assert "Injection" in str(e)
     else:
         raise AssertionError("注入正文应拒载")
     assert audit.events[-1]["verdict"] == "injected"

@@ -175,7 +175,7 @@ class FileSkillProvider:
         text = target.read_text(encoding="utf-8")
         # 正文必过注入检测：命中即 fail closed，绝不把不可信正文交给模型。
         if self._detector.detect(text) is InjectionVerdict.INJECTED:
-            raise ValueError(f"技能 {name!r} 正文命中注入检测，拒绝披露")
+            raise ValueError(f"Injection detected in skill {name!r} body; disclosure refused")
         return text
 
     def _read_manifest(self, path: Path) -> SkillManifest:

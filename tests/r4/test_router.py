@@ -1,7 +1,7 @@
 """R4-T3 模型路由测试：按任务/难度/成本选模型 + 决策进 trace + 未注册目标拒绝。"""
 from __future__ import annotations
 
-from runtime import Effect, EffectKind
+from runtime import Effect, Invoke
 
 from harness.model import ModelRouter, RuleRouter, RouteDecision
 from tests.r4.conftest import pctx, req
@@ -14,7 +14,7 @@ class TestRuleRouter:
             routes={"code": "gpt-4", "chat": "gpt-3.5"},
             registered={"gpt-4", "gpt-3.5"},
         )
-        effect = Effect(EffectKind.LLM, {"messages": [], "task_hint": "code"})
+        effect = Invoke(port="llm", payload={'messages': [], 'task_hint': 'code'})
         d = router.route(effect, pctx())
         assert d.model == "gpt-4"
 
@@ -24,7 +24,7 @@ class TestRuleRouter:
             routes={"code": "gpt-4"}, default="gpt-3.5",
             registered={"gpt-4", "gpt-3.5"},
         )
-        effect = Effect(EffectKind.LLM, {"messages": [], "task_hint": "unknown"})
+        effect = Invoke(port="llm", payload={'messages': [], 'task_hint': 'unknown'})
         assert router.route(effect, pctx()).model == "gpt-3.5"
 
     def test_cost_tier_selection(self) -> None:
@@ -35,10 +35,7 @@ class TestRuleRouter:
             default="gpt-3.5",
             registered={"gpt-4", "gpt-3.5"},
         )
-        effect = Effect(EffectKind.LLM, {
-            "messages": [], "task_hint": "code",
-            "meta": {"max_cost_per_call": 0.01},
-        })
+        effect = Invoke(port="llm", payload={'messages': [], 'task_hint': 'code', 'meta': {'max_cost_per_call': 0.01}})
         assert router.route(effect, pctx()).model == "gpt-3.5"
 
     def test_unregistered_target_rejected(self) -> None:
@@ -50,7 +47,7 @@ class TestRuleRouter:
     def test_decision_carries_reason_for_trace(self) -> None:
         """路由决策带 reason，供 trace 记录。"""
         router = RuleRouter(routes={"code": "gpt-4"}, registered={"gpt-4"})
-        effect = Effect(EffectKind.LLM, {"messages": [], "task_hint": "code"})
+        effect = Invoke(port="llm", payload={'messages': [], 'task_hint': 'code'})
         d = router.route(effect, pctx())
         assert isinstance(d, RouteDecision)
         assert d.reason  # 非空，进 trace

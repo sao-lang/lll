@@ -1,6 +1,6 @@
 """R4-C7 流式编排测试：逐块转发 / 缓存命中 / 取消可中断 / 成本结算。
 
-按 R4 文档 §4.1 的 ModelGateway.stream() 契约（v1.1）。
+按 R4 文档 §4.1 的 ModelGateway.stream() 契约。
 """
 from __future__ import annotations
 
