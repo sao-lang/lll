@@ -16,5 +16,10 @@
 - 设计拍板决策：短期记忆归 R1/R10（R7 只读投影）；长期双轴＝温度 hot/warm/cold × 七类 episodic/semantic/procedural/profile/preference/entity/journal；四链（写入/召回/上下文/安全接线）全覆盖
 - 独立 review 结果：第一轮发现写入链「命名即实现」Blocker（ingest 缺失）→ 补 ingest/refine_kind/score_importance/冲突裁决/近重复去重 + 3 个行为测试 → 第二轮全新上下文复审确认 Blocker=0
 
+## 变更文件清单 / 验证结果（提交记录）
+- commit `0548634`：`feat(r7): 重构长期短期记忆与上下文管理并提交工作区全部变更`（38 files, +2575/-928）
+  - 含本次 R7 重构（memory/context 源码 + 三份设计文档 + 测试/门禁）与此前会话已验证交付的遗留改动（R4/R6 规格并入详设、插件/增强器指南拆分、扩展体系 aop/runtime 重构）——用户明确要求"提交全部"，工作区一次性提交
+  - 提交前核对：38 文件全部显式暂存（逐路径 add，未用盲加）、工作区干净、无敏感/构建产物；提交后核对 HEAD 文件实际内容（`MemoryKind`/`DefaultReinjector` 均存在）
+
 ## 交接
 - 脱敏声明：本文件不含密钥 / token / PII
