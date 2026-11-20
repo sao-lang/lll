@@ -1,4 +1,4 @@
-"""R4-T2 缓存可插拔后端测试（v1.4）：异步协议 + 可换 store + 可换 embedder。
+"""R4-T2 缓存可插拔后端测试：异步协议 + 可换 store + 可换 embedder。
 
 用 fake async store（模拟 Redis）和 fake embedder 验证可插拔性，不引入真实依赖。
 """
@@ -113,8 +113,8 @@ class TestSimilarityWithEmbedderAndStore:
         assert asyncio.run(cache.get(_req("java"))) is None  # 向量正交
 
     def test_without_embedder_uses_text_similarity(self) -> None:
-        """不注入 embedder 仍用 difflib 文本相似度（默认开箱即用）。"""
-        cache = SimilarityCache(threshold=0.7)
+        """显式 embedder=None 时用 difflib 文本相似度（无参默认已改为向量 embedder）。"""
+        cache = SimilarityCache(embedder=None, threshold=0.7)
         asyncio.run(cache.put(_req("what is the capital of france"), resp("Paris")))
         assert asyncio.run(cache.get(_req("what is capital of france"))) is not None
 

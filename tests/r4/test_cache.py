@@ -1,4 +1,4 @@
-"""R4-T2 缓存测试：精确缓存 + 语义相似度缓存（v1.4 异步协议）。
+"""R4-T2 缓存测试：精确缓存 + 语义相似度缓存。
 
 协议 CachePort.get/put/invalidate 是 async，收 LLMRequest 原文：
 - ExactCache：内部 sha256 精确匹配
@@ -49,8 +49,8 @@ class TestExactCache:
 
     def test_version_scoped(self) -> None:
         cache = ExactCache()
-        asyncio.run(cache.put(_req("k"), resp("v1-answer"), version="v1"))
-        assert asyncio.run(cache.get(_req("k"), version="v1")) is not None
+        asyncio.run(cache.put(_req("k"), resp("answer-1"), version="current"))
+        assert asyncio.run(cache.get(_req("k"), version="current")) is not None
         assert asyncio.run(cache.get(_req("k"), version="v2")) is None
 
     def test_implements_protocol(self) -> None:
@@ -76,8 +76,8 @@ class TestSimilarityCache:
 
     def test_version_scoped(self) -> None:
         cache = SimilarityCache()
-        asyncio.run(cache.put(_req("hello"), resp("v1"), version="v1"))
-        assert asyncio.run(cache.get(_req("hello"), version="v1")) is not None
+        asyncio.run(cache.put(_req("hello"), resp("answer-2"), version="current"))
+        assert asyncio.run(cache.get(_req("hello"), version="current")) is not None
         assert asyncio.run(cache.get(_req("hello"), version="v2")) is None
 
     def test_invalidate(self) -> None:

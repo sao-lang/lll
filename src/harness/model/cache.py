@@ -1,4 +1,4 @@
-"""R4 缓存：异步协议 + 可插拔存储工具 + 可插拔 embedding（v1.4）。
+"""R4 缓存：异步协议 + 可插拔存储工具 + 可插拔 embedding。
 
 三层可插拔（每层都有协议 + 默认实现，符合可插拔四要素）：
 1. CachePort：缓存策略协议（异步 get/put/invalidate，收 LLMRequest 原文）
@@ -8,10 +8,10 @@
    - InMemoryCacheStore：进程内默认
    - 用户可实现 RedisCacheStore / DBCacheStore（异步客户端直接可用）
 3. CacheEmbedder：embedding 模型协议（embed）
-   - 无默认 embedder：SimilarityCache 缺省用 difflib 文本相似度（开箱即用）
+   - 默认 HashCacheEmbedder：字符 bigram 哈希向量（零依赖、确定性），SimilarityCache 缺省走向量余弦
+   - 显式 embedder=None 时降级 difflib 文本相似度（零依赖退路）
    - 用户可注入 OpenAI/本地 embedding 实现，走向量余弦相似度
 
-版本沿革：v1.2 协议收 request 原文（语义缓存可达）；v1.4 协议异步化 + store/embedder 可插拔。
 """
 from __future__ import annotations
 
@@ -28,10 +28,20 @@ __all__ = [
     "CacheEmbedder",
     "CachePort",
     "CacheStore",
+    "DEFAULT_CACHE_EMBED_DIM",
     "ExactCache",
+    "HashCacheEmbedder",
     "InMemoryCacheStore",
+    "MAX_EMBED_CHARS",
     "SimilarityCache",
 ]
+
+# 默认 embedding 维度：定长向量才能被 _cosine 跨条目比较（具名常量，禁魔法值）。
+# 512 维而非 64 维：64 桶在长文本上哈希碰撞导致向量收敛为常量、不相关文本误命中
+# （独立 review Blocker-1 实测），512 维配合二值化与窗口截断后误命中归零。
+DEFAULT_CACHE_EMBED_DIM: int = 512
+# 输入窗口上限：超长文本取头尾各一半，从源头限制 bigram 数，防相似度随长度收敛。
+MAX_EMBED_CHARS: int = 512
 
 
 # --------------------------------------------------------------------------- #
@@ -48,15 +58,15 @@ class CachePort(Protocol):
 
     name: str
 
-    async def get(self, request: LLMRequest, *, version: str = "v1") -> LLMResponse | None:
+    async def get(self, request: LLMRequest, *, version: str = "current") -> LLMResponse | None:
         """命中返回响应，未命中 None。"""
         ...
 
-    async def put(self, request: LLMRequest, resp: LLMResponse, *, version: str = "v1") -> None:
+    async def put(self, request: LLMRequest, resp: LLMResponse, *, version: str = "current") -> None:
         """写入响应。"""
         ...
 
-    async def invalidate(self, request: LLMRequest, *, version: str = "v1") -> None:
+    async def invalidate(self, request: LLMRequest, *, version: str = "current") -> None:
         """失效该请求对应的缓存条目。"""
         ...
 
@@ -151,6 +161,95 @@ class CacheEmbedder(Protocol):
         ...
 
 
+# bigram 边界哨兵：让首/尾字符也参与成组，保留位置信息（具名常量）。
+_BIGRAM_START = "^"
+_BIGRAM_END = "$"
+
+
+class HashCacheEmbedder:
+    """默认 embedding：字符 bigram 哈希到定长向量，零依赖、确定性、中文友好。
+
+    不依赖分词库（中文无空格也能成 bigram）、不调用模型/网络/文件；用确定性的
+    多项式字符哈希（**不用**进程随机化的内置 hash()），保证跨进程同文本同向量。
+    向量 L2 归一化后可直接交给 _cosine 比较。
+
+    抗收敛设计（独立 review Blocker-1）：桶二值化（出现置 1.0，不累加频次）+
+    512 维 + 512 字符头尾窗口。若用计数累加，长文本各桶计数趋同为 n/64，
+    向量收敛为常量导致不相关文本余弦趋近 1.0；二值化+窗口实测长文本误命中归零。
+    """
+
+    name: str = "hash_cache_embedder"
+
+    def __init__(self, dim: int = DEFAULT_CACHE_EMBED_DIM) -> None:
+        """构造默认 embedder。
+
+        Args:
+            dim: 向量维度，必须为正整数。
+
+        Raises:
+            ValueError: dim <= 0。
+        """
+        if dim <= 0:
+            raise ValueError("dim must be a positive integer")
+        self.dim = dim
+
+    @staticmethod
+    def _bigrams(text: str) -> list[str]:
+        """把文本切成带边界的字符 bigram；空文本回退为单个哨兵组。
+
+        边界哨兵让单字符文本也有向量，首字符（^x）与尾字符（x$）各成一组。
+        """
+        padded = _BIGRAM_START + text.lower() + _BIGRAM_END
+        return [padded[i : i + 2] for i in range(len(padded) - 1)]
+
+    def _hash_bucket(self, gram: str) -> int:
+        """确定性字符哈希 → [0, dim) 桶号（多项式 31 进制，非进程随机 hash）。"""
+        code = 0
+        for char in gram:
+            code = (code * 31 + ord(char)) % self.dim
+        return code
+
+    async def embed(self, text: str) -> tuple[float, ...]:
+        """文本 → L2 归一化的定长向量（二值化 + 头尾窗口截断）。
+
+        Args:
+            text: 待向量化文本；空文本返回零向量（_cosine 保守判 0.0）。
+
+        Returns:
+            长度 self.dim 的浮点元组，各分量为 0 或 1/sqrt(命中桶数)。
+        """
+        # 空文本显式返回零向量：_bigrams("") 会产出 "^$" 单位向量，
+        # 两个空 query 余弦=1.0 会误命中，故在源头短路（review Should-2）。
+        if not text:
+            return (0.0,) * self.dim
+        # 超长取头尾各半：保留首尾位置信息，同时把 bigram 数限制在窗口内，
+        # 防计数收敛导致不相关长文本高相似度（review Blocker-1）。
+        source = text
+        if len(source) > MAX_EMBED_CHARS:
+            half = MAX_EMBED_CHARS // 2
+            source = source[:half] + source[-half:]
+        buckets: list[float] = [0.0] * self.dim
+        for gram in self._bigrams(source):
+            # 二值化：桶出现过置 1.0，不按频次累加——避免长文本各桶计数趋同。
+            buckets[self._hash_bucket(gram)] = 1.0
+        norm = math.sqrt(sum(v * v for v in buckets))
+        # 理论上非空文本至少有 1 个 bigram，norm>0；保留零向量防御避免除零。
+        if norm == 0.0:
+            return tuple(buckets)
+        return tuple(v / norm for v in buckets)
+
+
+class _Unset:
+    """哨兵类型：区分"embedder 未传"（用默认）与"显式 None"（降级 difflib）。"""
+
+    def __repr__(self) -> str:
+        """返回稳定标识，便于诊断。"""
+        return "<UNSET>"
+
+
+_UNSET = _Unset()
+
+
 def _cosine(a: tuple[float, ...], b: tuple[float, ...]) -> float:
     """余弦相似度；维度不符或零向量返回 0.0（保守，不误命中）。"""
     if len(a) != len(b) or not a:
@@ -231,7 +330,7 @@ class ExactCache:
         """精确身份 = request 的 sha256（含版本）。"""
         return build_cache_key(request, prompt_version=version).value
 
-    async def get(self, request: LLMRequest, *, version: str = "v1") -> LLMResponse | None:
+    async def get(self, request: LLMRequest, *, version: str = "current") -> LLMResponse | None:
         """命中 +1 返回响应；未命中 +1 返回 None。"""
         key = _store_key("exact", version, self._identity(request, version))
         raw = await self._store.get(key)
@@ -241,12 +340,12 @@ class ExactCache:
         self.hits += 1
         return LLMResponse.model_validate_json(raw)
 
-    async def put(self, request: LLMRequest, resp: LLMResponse, *, version: str = "v1") -> None:
+    async def put(self, request: LLMRequest, resp: LLMResponse, *, version: str = "current") -> None:
         """写入精确键 → 响应 JSON。"""
         key = _store_key("exact", version, self._identity(request, version))
         await self._store.put(key, resp.model_dump_json(), ttl=self._ttl)
 
-    async def invalidate(self, request: LLMRequest, *, version: str = "v1") -> None:
+    async def invalidate(self, request: LLMRequest, *, version: str = "current") -> None:
         """删除精确键。"""
         key = _store_key("exact", version, self._identity(request, version))
         await self._store.delete(key)
@@ -256,9 +355,10 @@ class ExactCache:
 # 默认实现 2：语义相似度缓存
 # --------------------------------------------------------------------------- #
 class SimilarityCache:
-    """语义相似度缓存：可注入 embedder（向量余弦）与 store，缺省纯 Python 文本相似度。
+    """语义相似度缓存：可注入 embedder（向量余弦）与 store，缺省用默认向量 embedder。
 
-    不注入 embedder 时用 difflib（开箱即用，零依赖）；注入后走向量相似度，语义更强。
+    缺省用 HashCacheEmbedder（字符 bigram 哈希，零依赖确定性）走向量余弦；
+    显式传 embedder=None 时降级 difflib 文本相似度（零依赖退路）。
     两种模式都把候选存进 CacheStore（可 Redis/DB），跨实例共享。
     """
 
@@ -269,21 +369,27 @@ class SimilarityCache:
         *,
         threshold: float = 0.85,
         store: CacheStore | None = None,
-        embedder: CacheEmbedder | None = None,
+        embedder: CacheEmbedder | None | _Unset = _UNSET,
         ttl: int | None = None,
     ) -> None:
         """装配语义缓存。
 
         参数：
             threshold: 命中最低相似度（0~1），越高越保守。
-            store: 存储工具（缺省内存）。embedder: 向量模型（缺省 difflib 文本相似度）。
+            store: 存储工具（缺省内存）。
+            embedder: 向量模型；未传用 HashCacheEmbedder（向量余弦），
+                显式 None 降级 difflib 文本相似度，其他值按注入实现使用。
             ttl: 条目生存秒数。
         """
         if not 0.0 < threshold <= 1.0:
             raise ValueError("threshold must be in (0, 1]")
         self._threshold = threshold
         self._store = store if store is not None else InMemoryCacheStore()
-        self._embedder = embedder
+        # 哨兵区分"未传"与"显式 None"：未传用默认哈希 embedder，显式 None 保留 difflib 降级。
+        if isinstance(embedder, _Unset):
+            self._embedder: CacheEmbedder | None = HashCacheEmbedder()
+        else:
+            self._embedder = embedder
         self._ttl = ttl
         self.hits = 0
         self.misses = 0
@@ -296,7 +402,7 @@ class SimilarityCache:
         """有 embedder 才算向量；否则 None（走文本路径）。"""
         return await self._embedder.embed(text) if self._embedder is not None else None
 
-    async def get(self, request: LLMRequest, *, version: str = "v1") -> LLMResponse | None:
+    async def get(self, request: LLMRequest, *, version: str = "current") -> LLMResponse | None:
         """按相似度找最匹配条目；≥ threshold 才命中。"""
         query = _query_text(request)
         q_vec = await self._vector_of(query)
@@ -321,7 +427,7 @@ class SimilarityCache:
         self.misses += 1
         return None
 
-    async def put(self, request: LLMRequest, resp: LLMResponse, *, version: str = "v1") -> None:
+    async def put(self, request: LLMRequest, resp: LLMResponse, *, version: str = "current") -> None:
         """写入条目（原文 + 可选向量 + 响应 JSON）到存储工具。"""
         query = _query_text(request)
         vec = await self._vector_of(query)
@@ -338,7 +444,7 @@ class SimilarityCache:
         key = _store_key("semantic", version, identity)
         await self._store.put(key, json.dumps(entry, ensure_ascii=False), ttl=self._ttl)
 
-    async def invalidate(self, request: LLMRequest, *, version: str = "v1") -> None:
+    async def invalidate(self, request: LLMRequest, *, version: str = "current") -> None:
         """删除相似度 ≥ threshold 的条目（语义失效）。"""
         query = _query_text(request)
         q_vec = await self._vector_of(query)
