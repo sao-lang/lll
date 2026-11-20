@@ -40,3 +40,6 @@ build/
 tmp/
 .cache/
 .workbuddy
+# Local overview backup & session pointer
+.overview-archive/
+.conductor-session.json
