@@ -17,7 +17,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from enum import Enum
 
-from .errors import AgentKitError, ChainAborted, PortMissing, ProgramCrashed, ProgramInvalid
+from .errors import AgentKitError, PortMissing, ProgramCrashed, ProgramInvalid
 from .fold import field, fold, replay_events
 from .interpreter import EffectBatch, InterpreterImpl, SendResult
 from .types import (

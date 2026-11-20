@@ -1,44 +1,90 @@
-<svg viewBox="0 0 680 440" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
-  <title>ModelGateway.complete 调用主链路</title>
-  <desc>缓存查询、singleflight与成本预留、路由解析、后端调用与校验修复、结算与写缓存五个阶段</desc>
+<svg viewBox="0 0 680 692" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
+  <title>ModelGateway 调用主链路（as_call 适配 + complete 五阶段）</title>
+  <desc>上层 as_call：读 Invocation.meta 的 typed RoutingTarget → before_model → REFUSE/降级解析 → complete → after_model（所有出口恰好发一次、payload 标 error）→ Result 折叠；下层 complete 五阶段：缓存、singleflight+成本预留（cost_guard）、路由解析、后端调用+校验修复、结算+写缓存</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
       <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
     </marker>
   </defs>
-  <text x="40" y="28" font-family="var(--font-sans)" font-size="14" font-weight="500" fill="#2C2C2A">ModelGateway.complete() 主链路</text>
+  <text x="40" y="26" font-family="var(--font-sans)" font-size="14" font-weight="500" fill="#2C2C2A">R4 ModelGateway · as_call 适配层（AOP 中心调用）</text>
+
+  <rect x="40" y="42" width="600" height="256" rx="12" fill="#E1F5EE" stroke="#1D9E75" stroke-width="0.5"/>
+  <text x="56" y="62" font-family="var(--font-sans)" font-size="12" font-weight="500" fill="#085041">as_call(inv) · 注入 Runner 的 call 槽 · typed 降级路径</text>
 
   <g>
-    <rect x="140" y="50" width="400" height="50" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
-    <text x="340" y="69" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="14" font-weight="500" fill="#0C447C">1 · 缓存查询</text>
-    <text x="340" y="87" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="12" fill="#185FA5">cache.get 命中即短路，不路由不记账</text>
+    <rect x="56" y="74" width="168" height="50" rx="8" fill="#9FE1CB" stroke="#0F6E56" stroke-width="0.5"/>
+    <text x="140" y="92" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#04342C">读 typed 目标</text>
+    <text x="140" y="110" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#085041">inv.routing_target()</text>
   </g>
-  <line x1="340" y1="100" x2="340" y2="128" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="224" y1="99" x2="256" y2="99" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <g>
+    <rect x="258" y="74" width="168" height="50" rx="8" fill="#9FE1CB" stroke="#0F6E56" stroke-width="0.5"/>
+    <text x="342" y="92" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#04342C">before_model</text>
+    <text x="342" y="110" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#085041">纯通知 · 不拦截</text>
+  </g>
+  <line x1="426" y1="99" x2="458" y2="99" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <g>
+    <rect x="460" y="74" width="164" height="50" rx="8" fill="#B5D4F4" stroke="#185FA5" stroke-width="0.5"/>
+    <text x="542" y="92" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#042C53">目标三态</text>
+    <text x="542" y="110" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#0C447C">refuse / 注册名 / 空</text>
+  </g>
+
+  <path d="M542 124 L542 148" fill="none" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <g>
+    <rect x="440" y="150" width="184" height="40" rx="8" fill="#FCEBEB" stroke="#A32D2D" stroke-width="0.5"/>
+    <text x="532" y="170" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="12" font-weight="500" fill="#791F1F">REFUSE → 真拒答（零后端调用）</text>
+  </g>
+  <g>
+    <rect x="216" y="150" width="204" height="40" rx="8" fill="#FAEEDA" stroke="#BA7517" stroke-width="0.5"/>
+    <text x="318" y="170" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="12" font-weight="500" fill="#633806">未注册名 → TargetUnresolved 不回退</text>
+  </g>
 
   <g>
-    <rect x="140" y="130" width="400" height="50" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
-    <text x="340" y="149" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="14" font-weight="500" fill="#0C447C">2 · 并发合并 + 成本预留</text>
-    <text x="340" y="167" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="12" fill="#185FA5">singleflight 同 key 共享一次调用 · CostGuard.reserve</text>
+    <rect x="56" y="210" width="568" height="50" rx="8" fill="#85B7EB" stroke="#0C447C" stroke-width="0.5"/>
+    <text x="340" y="228" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#042C53">await complete(request, ctx, degrade_target=target) · 见下方五阶段</text>
+    <text x="340" y="246" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#0C447C">try / except BaseException（记 error 后原样抛穿） / finally（发 after_model）</text>
   </g>
-  <line x1="340" y1="180" x2="340" y2="208" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
 
   <g>
-    <rect x="140" y="210" width="400" height="50" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
-    <text x="340" y="229" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="14" font-weight="500" fill="#0C447C">3 · 路由解析</text>
-    <text x="340" y="247" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="12" fill="#185FA5">router 选模型 → registry 映射真实 LLMPort 实例</text>
+    <rect x="56" y="270" width="568" height="16" rx="4" fill="#9FE1CB" stroke="#0F6E56" stroke-width="0.5"/>
+    <text x="340" y="278" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#04342C">after_model：所有出口恰好发一次，payload.error = 后端错误 / 异常类名:消息 / REFUSED / 正常为空</text>
   </g>
-  <line x1="340" y1="260" x2="340" y2="288" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <text x="40" y="330" font-family="var(--font-sans)" font-size="14" font-weight="500" fill="#2C2C2A">ModelGateway.complete() 五阶段</text>
 
   <g>
-    <rect x="140" y="290" width="400" height="50" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
-    <text x="340" y="309" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="14" font-weight="500" fill="#0C447C">4 · 后端调用 + 结构化校验/修复</text>
-    <text x="340" y="327" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="12" fill="#185FA5">llm.complete → check → repair（最多 max_repair 次）</text>
+    <rect x="140" y="346" width="400" height="48" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+    <text x="340" y="364" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#0C447C">1 · 缓存查询</text>
+    <text x="340" y="382" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#185FA5">cache.get 命中即短路，不路由不记账</text>
   </g>
-  <line x1="340" y1="340" x2="340" y2="368" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="340" y1="394" x2="340" y2="410" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
 
   <g>
-    <rect x="140" y="370" width="400" height="50" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
-    <text x="340" y="389" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="14" font-weight="500" fill="#0C447C">5 · 结算 + 写缓存</text>
-    <text x="340" y="407" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="12" fill="#185FA5">commit 按实结清 · ledger 记账 · 非法输出不写缓存</text>
+    <rect x="140" y="412" width="400" height="48" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+    <text x="340" y="430" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#0C447C">2 · 并发合并 + 成本硬闸预留</text>
+    <text x="340" y="448" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#185FA5">singleflight 共享一次调用 · CostGuard.reserve（capability 构造透传）</text>
   </g>
+  <line x1="340" y1="460" x2="340" y2="476" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <g>
+    <rect x="140" y="478" width="400" height="48" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+    <text x="340" y="496" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#0C447C">3 · 路由解析</text>
+    <text x="340" y="514" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#185FA5">degrade_target 优先 → registry 映射真实 LLMPort 实例</text>
+  </g>
+  <line x1="340" y1="526" x2="340" y2="542" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <g>
+    <rect x="140" y="544" width="400" height="48" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+    <text x="340" y="562" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#0C447C">4 · 后端调用 + 结构化校验/修复</text>
+    <text x="340" y="580" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#185FA5">llm.complete → check → repair（最多 max_repair 次）</text>
+  </g>
+  <line x1="340" y1="592" x2="340" y2="608" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <g>
+    <rect x="140" y="610" width="400" height="48" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+    <text x="340" y="628" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#0C447C">5 · 结算 + 写缓存</text>
+    <text x="340" y="646" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#185FA5">CostGuard.commit 按实结清 · ledger 记账 · 非法输出不写缓存</text>
+  </g>
+
+  <text x="40" y="682" font-family="var(--font-sans)" font-size="11" fill="#5F5E5A">ModelCapability 为生产装配入口：install 注册 llm/router/cache，container() 构造共用 Registry 的 AOP 容器（core=gateway.as_call）</text>
 </svg>

@@ -32,7 +32,7 @@ flowchart TD
     subgraph 在线检索
         Q["Query"] --> RW["查询改写: 多查询/HyDE/step-back"]
         RW --> QR["查询路由: 是否检索/检哪个库"]
-        QR --> RC["多路召回: 向量+BM25+关键词"] --> RF["RRF 融合"]
+        QR --> RC["多路召回: 向量+词面关键词（可注入 BM25/倒排替换）"] --> RF["RRF 融合"]
         RF --> RR["重排: cross-encoder"] --> MM["MMR 去冗余"]
         MM --> FL["权限/时效过滤"] --> AS["预算拼接+乱序修复"]
         AS --> CT["引用溯源 [doc:chunk]"]
@@ -40,7 +40,7 @@ flowchart TD
     subgraph 横切
         CA["语义缓存"] -.-> RW
         FB["空结果降级"] -.-> CT
-        INJ["注入检测(R9)"] -.-> CT
+        INJ["注入检测(复用 R5 检测器 / R9 策略)"] -.-> CT
         EV["RAG评测: 召回/MRR/NDCG"] -.-> AS
     end
     CT --> OUT["注入 LLM 上下文"]
@@ -58,10 +58,10 @@ class Embedder(Protocol):
 class VectorStore(Protocol):
     name: str
     async def upsert(self, chunks: list[Chunk]) -> None: ...
-    async def search(self, vec, top_k, filters) -> list[Hit]: ...
+    async def search(self, vec, top_k, filters: dict[str, object] | None = None) -> list[Hit]: ...
 class Retriever(Protocol):
     name: str
-    async def retrieve(self, query: Query) -> list[Hit]: ...
+    async def retrieve(self, query: Query, vec: Vector) -> list[Hit]: ...   # 查询向量由 pipeline 用同一 embedder 预算后传入（B1），召回器不自行向量化
 class Reranker(Protocol):
     name: str
     def rerank(self, hits: list[Hit], query: Query) -> list[Hit]: ...
@@ -70,8 +70,8 @@ class QueryRewriter(Protocol):
     async def rewrite(self, query: Query) -> list[Query]: ...
 class PostProcessor(Protocol):
     name: str
-    def filter(self, hits: list[Hit]) -> list[Hit]: ...
-    def assemble(self, hits: list[Hit], budget: TokenBudget) -> RAGResult: ...
+    async def filter(self, hits: list[Hit], *, detector: InjectionDetector | None = None, filters: dict | None = None) -> list[Hit]: ...
+    async def assemble(self, hits: list[Hit], budget: TokenBudget, *, detector: InjectionDetector | None = None, filters: dict | None = None) -> RAGResult: ...
 
 class RAGPipeline:
     """履约 RAGPort（PORT_PROTOCOLS['rag']）；签名对齐 src/hooks/protocols.py。"""
@@ -102,7 +102,7 @@ class RAGPipeline:
 | Hit | {chunk,score,source,ts} | 检索命中 |
 | Query | {text,filters,top_k,token_budget,purpose} | purpose 区分问答/记忆召回 |
 | RAGResult | {context,citations,hits,empty,tokens_used} | empty=True 固定提示文本 |
-| TokenBudget | int \| None（None=不限，0=无预算） | 从 R1 Budgets 派生（max_tokens−used_tokens） |
+| TokenBudget | pydantic 模型 `{limit: int \| None}`（None=不限，0=无预算） | 从 R1 Budgets 派生（max_tokens−used_tokens） |
 | RRF 常数 k | 60 | RRF(d)=Σ weight/(k+rank) |
 
 **20 项能力**（口径对齐 §1，5+9+6=20）：
@@ -122,26 +122,26 @@ class RAGPipeline:
 
 ## 6. 可插拔契约
 
-可替换点共 **8 个**（5 段主协议 + 3 个增强协议），与 `RAGPipeline.__init__` 的 8 个构造参数一一对应；其余能力（RRF 融合/MMR/过滤/预算拼接/引用溯源/缓存/降级/注入接入）为默认实现内部步骤，不单独暴露协议——故 §1 "每段可单独替换"指这 8 个注入点。
+可替换点共 **9 个**（5 段主协议 + 3 个增强协议 + 注入检测器 detector），与 `RAGPipeline.__init__` 的 9 个构造参数（`splitter/embedder/store/retriever/post/rewrite/rerank/cache/detector`）一一对应；其余能力（RRF 融合/MMR/过滤/预算拼接/引用溯源/缓存/降级）为默认实现内部步骤，不单独暴露协议——故 §1 "每段可单独替换"指这 9 个注入点。
 
 | 注入点 | 协议 | 默认 | 校验 |
 |--------|------|------|------|
 | 切分 | Splitter | 递归 | 返回 Chunk 列表 |
-| 向量化 | Embedder | OpenAI-compat（可注入 client） | 维度匹配 |
+| 向量化 | Embedder | HashEmbedder（内置确定性哈希 client，零依赖）；生产可注入 OpenAI-compat | 维度匹配 |
 | 存储 | VectorStore | InMemoryVectorStore | upsert/search 齐全 |
 | 召回 | Retriever | 混合（向量+词面关键词，RRF 融合） | 返回 Hit 结构；两通道同施 filters |
 | 后处理 | PostProcessor | 默认（meta/注入兜底过滤+预算拼接+引用） | 不超预算、带引用 |
 | 重排 | Reranker | 词面覆盖近似（可注入 cross-encoder） | 返回 Hit 结构 |
 | 改写 | QueryRewriter | 规则改写（同义词替换+子查询分解，无模型，词表可注入；详见[改写器加厚设计规格](./R6-改写器加厚-设计规格.md)） | 不引入原问题没有的实体（同义词映射视为等价词） |
-| 缓存 | CachePort（R6 本地协议，语义同 R4 CachePort 的精确缓存） | InMemoryCache | 命中/invalidate 生效；ingest 按 key 精准失效（本实例写入的 key 逐个失效，不清空整表，详见[缓存按 key 失效设计规格](./R6-缓存按key失效-设计规格.md)） |
+| 缓存 | CachePort（R6 本地协议，语义同 R4 CachePort 的精确缓存） | InMemoryCache | 命中/invalidate 生效；ingest 按 key 精准失效（本实例写入的 key 逐个失效，不清空整表；with_ 换 cache 才重置账本，invalidate(key) 幂等，详见[缓存按 key 失效设计规格](./R6-缓存按key失效-设计规格.md)） |
 
-> 注入检测**不是**第 9 个替换点：复用 R5 `InjectionDetector`，通过 `detector=` 构造参数传入（`RAGPipeline.__init__` 第 8 位之后的预留参数），默认由装配层给 `KeywordInjectionDetector`，缺席 fail-closed。
+> 注入检测是第 9 个可替换参数（复用 R5 `InjectionDetector`）：通过 `detector=` 构造参数传入（`RAGPipeline.__init__` 白名单含 detector），默认由装配层给 `KeywordInjectionDetector`，缺席 fail-closed。
 
 ## 7. 模块内闭环核对（CL-1~CL-5）
 
 | 条件 | 实现 | 证据 |
 |------|------|------|
-| CL-1 契约自足 | 依赖 R1 types + R2 Hook + 五段 Protocol | import 扫描 |
+| CL-1 契约自足 | 依赖 R1 types + R2 协议/Registry + 五段 Protocol + AOP/Lifecycle | import 扫描 |
 | CL-2 自带 fake | FakeEmbedder + InMemoryVectorStore | fake 用例 |
 | CL-3 自带测试 | tests/r6/ 覆盖门禁（R6-T01~T07） | 覆盖率报告 |
 | CL-4 独立 demo | `make demo-r6` 入库→查询→带引用 | demo 冒烟 |
@@ -168,7 +168,7 @@ RAG 不是一个组件，是**可分层评测、逐层优化**的流水线。核
 |----|------|------|------|
 | 切分 | chunk_size / overlap / parent_child | 512 / 64 / True | 父子块兼顾精度与上下文 |
 | 改写 | n_variants / synonyms（策略固定为规则改写，无 strategy 入参） | 3（最多变体数，含原串）/ 内置精简词表可注入 | 同义词替换+标点/连接词拆子句；无模型（详见[设计规格](./R6-改写器加厚-设计规格.md)） |
-| 召回 | top_k_per_channel / channels | — | 向量+BM25+关键词并行 |
+| 召回 | top_k_per_channel / channels | — | 向量+词面关键词并行（可注入 BM25/倒排替换） |
 | RRF | k / weights | 60 / 均等 | `RRF(d)=Σ w/(k+rank)`，融合不同量纲 |
 | 重排 | model / candidates / top_n | cross-encoder / 50 / 5 | 精排 top_n |
 | MMR | lambda / sim_threshold | 0.7 / — | 相关性 vs 多样性权衡 |

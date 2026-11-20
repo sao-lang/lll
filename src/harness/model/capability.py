@@ -13,7 +13,7 @@ from .gateway import ModelGateway
 from .registry import InMemoryModelRegistry, ModelRegistry
 from .router import RuleRouter
 from .structured import SchemaValidator
-from .types import StructuredOutputSpec
+from .types import CostGuard, StructuredOutputSpec
 
 __all__ = ["ModelCapability"]
 
@@ -37,14 +37,20 @@ class ModelCapability:
         validator: SchemaValidator | None = None,
         registry: ModelRegistry | None = None,
         bus: LifecycleBus | None = None,
+        cost_guard: CostGuard | None = None,
     ) -> None:
-        """装配能力：llm 必填，其余策略可替换。"""
+        """装配能力：llm 必填，其余策略可替换。
+
+        参数：
+            cost_guard: 成本硬闸；透传给 gateway 使生产链路可启用（默认 None 不限制）。
+        """
         self._llm = llm
         self._router = router
         self._cache = cache
         self._spec = spec
         self._validator = validator
         self._bus = bus
+        self._cost_guard = cost_guard
         # 默认建 ModelRegistry 并注册 "primary"，让降级目标可解析。
         self._model_registry = registry or InMemoryModelRegistry()
         self._model_registry.register_llm("primary", llm)
@@ -84,6 +90,7 @@ class ModelCapability:
             llm=self._llm, router=self._router, cache=self._cache,
             spec=self._spec, validator=self._validator,
             registry=self._model_registry, bus=self._bus,
+            cost_guard=self._cost_guard,
         )
 
     def container(self) -> AOPContainer:

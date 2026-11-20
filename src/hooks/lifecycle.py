@@ -19,10 +19,11 @@ if TYPE_CHECKING:  # 仅类型检查期引用，运行期不依赖 aop（避免�
     from aop.invocation import Invocation
 
 __all__ = [
+    "PHASE_COUNT",
+    "ErrorHook",
+    "LifecycleBus",
     "LifecyclePhase",
     "Notice",
-    "LifecycleBus",
-    "PHASE_COUNT",
     "runner_notifier",
 ]
 
@@ -110,17 +111,26 @@ class Notice:
 type NoticeFn = Callable[[Notice], None]
 """订阅者签名：收 Notice、无返回值（返回值框架不消费）。"""
 
+type ErrorHook = Callable[[str, LifecyclePhase, Exception], None]
+"""订阅者异常钩子：(订阅者名, 相位, 异常)；由装配层决定是否接 R10 trace。"""
+
 
 class LifecycleBus:
     """通知总线：按相位注册订阅者，emit 时异常就地隔离、不阻断其余订阅者。
 
     同步语义：emit 不返回 awaitable；订阅者是同步副作用（记录/观测/审计）。
+    异常默认静默隔离；可选 on_error 钩子让装配层接可观测（R10）。
     """
-    __slots__ = ("_subscribers",)
+    __slots__ = ("_on_error", "_subscribers")
 
-    def __init__(self) -> None:
-        """初始化空订阅表（phase → 订阅者列表）。"""
+    def __init__(self, on_error: ErrorHook | None = None) -> None:
+        """初始化空订阅表（phase → 订阅者列表）。
+
+        参数：
+            on_error: 可选订阅者异常钩子；缺省 None 保持静默隔离（向后兼容）。
+        """
         self._subscribers: dict[LifecyclePhase, list[tuple[str, NoticeFn]]] = {}
+        self._on_error = on_error
 
     def on(self, phase: LifecyclePhase, fn: NoticeFn, *, name: str = "") -> LifecycleBus:
         """订阅一个相位。
@@ -145,8 +155,16 @@ class LifecycleBus:
         for name, fn in self._subscribers.get(notice.phase, ()):
             try:
                 fn(notice)
-            except Exception:  # 通知型 hook：异常就地隔离，绝不抛穿  # noqa: BLE001, S110
+            except Exception as exc:  # 通知型 hook：异常就地隔离，绝不抛穿  # noqa: BLE001
                 # 通知不消费返回值、不拦截主流程；订阅者自身的错误是其内部责任。
+                # 可选钩子把异常交给装配层观测（R10 trace），默认 None 时保持静默。
+                # 钩子自身的异常同样就地隔离——except 块内新异常不会被本 try 捕获，
+                # 若不二次包裹会从 emit 抛穿，破坏"绝不抛穿"铁律并覆盖调用方结果。
+                if self._on_error is not None:
+                    try:
+                        self._on_error(name, notice.phase, exc)
+                    except Exception:  # 错误钩子自身异常同样隔离  # noqa: BLE001, S110
+                        pass
                 continue
 
     def subscribe(self, plugin: object) -> LifecycleBus:

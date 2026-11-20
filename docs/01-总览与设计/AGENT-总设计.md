@@ -288,7 +288,8 @@ Verdict = (allowed: bool, reason: str)   # R9 安全域四态用 SafetyVerdict
 
 | 插件 | 角色 | 说明 |
 |------|------|------|
-| KillSwitch / Watchdog / Idempotency / RateLimit / CircuitBreaker.check | Warden | 标志/循环/幂等/令牌/熔断命中 → `Verdict(allowed=False)` |
+| KillSwitch / Watchdog / Idempotency / RateLimit | Warden | 标志/循环/幂等/令牌命中 → `Verdict(allowed=False)` 终止拒绝 |
+| CircuitBreaker.check | Warden | 熔断命中 → 写 `FaultRecord(reason, failed_target)` + `Verdict(allowed=True)` 降级放行，由 Degradation(Salvage) 切 backup/refuse（保 P9） |
 | RetryPolicy / Timeout / Bulkhead / CircuitBreaker.observe | Envelope | 循环 next / wait_for / acquire+finally release / 后置记数 |
 | BudgetGuard | Refiner | 产新 Invocation，不改 State |
 | Degradation | Salvage | 降级唯一裁决者，保四个历史修复点（P9） |
@@ -452,12 +453,13 @@ DONE = _Done()
 
 # ---- 执行器 ----
 class Runner:
-    def __init__(self, call: CallFn, *, dispatch: DispatchFn|None=None,
+    def __init__(self, call: CallFn, *,
                  store: EventStore|None=None,
                  ctx_factory=None, checkpoint_every=1, max_steps=1000,
-                 cancellation: CancellationToken | None = None): ...
-    # dispatch 槽已退化：默认"放行"，不再承载上层判决（P1）；主调用链只剩 call。
-    # Invoke 经装配层 AOPContainer 编排；退化的 dispatch 仅为历史注入点占位，默认恒放行。
+                 cancellation: CancellationToken | None = None,
+                 notify: NotifyFn | None = None): ...
+    # 主调用链只有 call（Port 注入）；Invoke 经装配层 AOPContainer 编排。
+    # notify 为 Lifecycle 通知回调 (相位名, 只读投影)，缺省 no-op；装配层用 runner_notifier(bus) 桥接。
     def cancel(self, reason: str) -> None: ...   # 运行期取消，下一 step 生效（内部 _CancellationHolder）
     async def run(self, session: Session) -> RunResult: ...
     async def step(self, session: Session) -> StepReport: ...
@@ -471,11 +473,11 @@ def checkpoint(session) -> JsonSnapshot: ...
 def restore_checkpoint(snapshot, program_factory) -> Session: ...
 def fingerprint(events) -> str: ...
 
-DispatchFn = Callable[[Effect, DynamicValue], Awaitable[DynamicValue]]  # 退化注入点：默认放行，不承载判决（P1）
+NotifyFn = Callable[[str, Mapping[str, object]], None]   # Lifecycle 通知回调（相位名, 只读投影）
 CallFn = Callable[[Effect, DynamicValue], Awaitable[Result]]            # Port 注入
 ```
 
-> **执行契约（命脉）**：R1 主调用链只剩 `call`（Port 注入）。`dispatch` 槽已退化为默认放行，不再承载上层判决。`Invoke` 类 Effect 由装配层 `AOPContainer` 经统一 `Invocation` 上下文编排增强器：Warden 产出 `Verdict(allowed, reason)`（放行/拒绝），拒绝或异常由容器强制发 `invoke_rejected` 通知；RETRY/TIMEOUT 由 Envelope 包裹中心调用实现；降级由 Degradation 实例（Salvage）唯一裁决、故障上下文经 `Invocation.meta` 具名记录直传，R1 内核不解释增强器与降级目标。`Spawn`/`Suspend`/`Terminate` 走内核路径，不进 AOP 链。
+> **执行契约（命脉）**：R1 主调用链只剩 `call`（Port 注入），会话/轮次/控制流及 tool 相位通知经 `notify` 回调发出（内核不感知总线）。`Invoke` 类 Effect 由装配层 `AOPContainer` 经统一 `Invocation` 上下文编排增强器：Warden 产出 `Verdict(allowed, reason)`（放行/拒绝），拒绝或异常由容器强制发 `invoke_rejected` 通知；RETRY/TIMEOUT 由 Envelope 包裹中心调用实现；降级由 Degradation 实例（Salvage）唯一裁决、故障上下文经 `Invocation.meta` 具名记录直传，R1 内核不解释增强器与降级目标。`Spawn`/`Suspend`/`Terminate` 走内核路径，不进 AOP 链。
 
 ### R1.5 元数据与核心字段
 
@@ -507,9 +509,9 @@ CallFn = Callable[[Effect, DynamicValue], Awaitable[Result]]            # Port �
 | 注入点 | 协议 | 默认 | 入口 |
 |--------|------|------|------|
 | call | CallFn（Port 调用） | 无（必注入） | `Runner(call=...)` |
-| dispatch（退化） | DispatchFn | 默认放行 | `Runner(dispatch=...)`（仅占位，不承载判决） |
 | checkpoint 存储 | EventStore | InMemoryEventStore | `Runner(store=...)` |
 | 上下文工厂 | ctx_factory | RuntimeCtx | `Runner(ctx_factory=...)` |
+| Lifecycle 通知 | notify | NotifyFn | `Runner(notify=...)`（装配层用 runner_notifier(bus) 桥接） |
 
 ### R1.7 验收门禁
 
@@ -1192,21 +1194,21 @@ class RAGPipeline:                      # 履约 RAGPort（PORT_PROTOCOLS['rag']
 ```mermaid
 flowchart TD
     subgraph 上下文
-        AS["before_model: 分段组装<br/>system+工具目录+检索+记忆+历史+输入"]
+        AS["Lifecycle:before_model 分段组装<br/>system+工具目录+检索+记忆+历史+输入"]
         AS --> BUD["Token 预算分配（预留输出）"]
         BUD --> COMP{"超压缩阈值?"}
         COMP -->|是| PIN["钉住 system+最近N轮+高价值消息"]
         PIN --> SUM["摘要其余历史 → 结构化摘要"]
-        SUM --> REINJ["after_compact: 重注入项目规则"]
+        SUM --> REINJ["重注入规则（编排内部步骤，无通知点）"]
         COMP -->|否| OFF
-        REINJ --> OFF["after_tool: 大结果卸载到 StorePort<br/>上下文留句柄"]
+        REINJ --> OFF["Lifecycle:after_tool 大结果卸载到 BlobPort<br/>上下文留句柄"]
     end
     subgraph 记忆
-        M1["session_end: 提炼值得长存的事实"]
+        M1["Lifecycle:session_end 提炼值得长存的事实"]
         M1 --> M2["去重/冲突消解/重要性评分"]
         M2 --> M3["写 warm（LLM 低成本提炼）"]
         M2 --> M4["写 cold（完整 transcript）"]
-        M3 --> MR["before_model: 语义召回注入"]
+        M3 --> MR["Lifecycle:before_model 语义召回注入"]
         MR --> M5["晋升/降级/TTL 遗忘"]
     end
     M4 -.->|先写全文| COMP
@@ -1242,7 +1244,7 @@ class MemoryPort(Protocol):                       # 已定义（【变更·2026-
 
 @dataclass(frozen=True)
 class MemoryItem:
-    kind: Literal["episodic","semantic","procedural"]
+    kind: MemoryKind   # StrEnum: episodic/semantic/procedural（见 src/harness/memory/types.py）
     content: str; importance: float; ts: int; source: str
 ```
 
@@ -1272,7 +1274,7 @@ class MemoryItem:
 | 门禁 | 条目 | 达标标准 | 级别 |
 |------|------|---------|------|
 | R7-G1 | 覆盖 | 组装/压缩/卸载/记忆单测 ≥85% | G1 |
-| R7-G2 | 压缩 | 超阈值触发；钉住消息保留；after_compact 重注入规则 | G2 |
+| R7-G2 | 压缩 | 超阈值触发；钉住消息保留；压缩视图供 assemble 使用（压缩为编排内部步骤，无通知点） | G2 |
 | R7-G2 | 记忆 | 分层晋升/降级/遗忘各有用例 | G2 |
 | R7-G3 | 集成 | 先写 cold 再压缩的顺序确定性 | G3 |
 | R7-红线 | 一致 | 压缩不改 messages；secret 进记忆 → 拒绝 | 红线 |

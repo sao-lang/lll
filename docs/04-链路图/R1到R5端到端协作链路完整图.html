@@ -1,43 +1,92 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<title>R1到R5端到端协作链路完整图（已作废）</title>
-<style>
-  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #2C2C2A; line-height: 1.7; padding: 24px 32px; max-width: 960px; }
-  .void { border-left: 4px solid #A32D2D; background: #FCEBEB; color: #791F1F; padding: 12px 16px; margin-bottom: 20px; }
-  h1 { font-size: 20px; font-weight: 600; }
-  h2 { font-size: 16px; font-weight: 600; margin-top: 24px; }
-  code { background: #F1EFE8; padding: 2px 4px; border-radius: 4px; }
-  pre { background: #F7F6F2; border: 1px solid #DDD9D0; border-radius: 8px; padding: 16px; overflow-x: auto; font-size: 13px; }
-  .note { color: #5F5E5A; font-size: 13px; }
-</style>
-</head>
-<body>
-<div class="void"><strong>【已作废】</strong>本图按旧的两个注入点模型绘制，含已删除的裁决/目标桥接符号，已随扩展体系重构整体作废，不再维护。原图保留仅作历史留痕，不得作为设计或实现依据。</div>
+<svg viewBox="0 0 680 636" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
+  <title>R1–R6 端到端协作链路（三体系正交版）</title>
+  <desc>装配层 composition root 编译 Program；R1 Runner 唯一执行循环 match 分派；仅 Invoke 进 AOP 五角色链再到 Port（R4 模型/R5 工具技能/R6 RAG/R7 上下文）；结果经 fold 写回 State；Spawn/Suspend/Terminate 走内核快路径；Lifecycle 16 通知与 Degradation 降级为旁路。依赖方向：插件/增强器→装配层→内核</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+  <text x="40" y="26" font-family="var(--font-sans)" font-size="14" font-weight="500" fill="#2C2C2A">R1–R6 端到端协作链路 · 三体系正交（依赖方向：插件/增强器 → 装配层 → 内核）</text>
 
-<h1>R1–R5 端到端协作链路（三体系新版）</h1>
-<p class="note">设计依据：<code>docs/01-总览与设计/扩展体系重构规格-20261120.md</code>（P1~P6、P12）与 R1~R5 各模块详设、<code>docs/01-总览与设计/AGENT-总设计.md</code>。依赖方向恒定：插件/增强器 → 装配层 → 内核，内核零依赖扩展组件。</p>
+  <g>
+    <rect x="200" y="42" width="280" height="44" rx="8" fill="#F1EFE8" stroke="#888780" stroke-width="0.5"/>
+    <text x="340" y="58" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#2C2C2A">R12 composition root · Agent.build()</text>
+    <text x="340" y="75" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#5F5E5A">static_check + compile → Program；装配 AOP/Lifecycle</text>
+  </g>
+  <line x1="340" y1="86" x2="340" y2="102" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
 
-<h2>新链路（文字 / mermaid 式描述）</h2>
-<pre>
-flowchart TD
-    C["R12 composition root：Agent.build()<br/>static_check + compile → Program"]
-    C --> R1["R1 Runner 唯一执行循环<br/>Interpreter 展开 EffectBatch → match 分派"]
-    R1 -->|Invoke| AOP["AOP 五角色链<br/>Prelude → Warden → Envelope前 → Refiner<br/>→ Port call → Envelope后 / Salvage异常"]
-    AOP --> PORT["Port call（what）"]
-    PORT --> M["R4 模型网关：LLMRequest → LLMPort<br/>工具目录注入 / 结构化校验 / 成本记账"]
-    PORT --> T["R5 工具与技能：Invoke(port=tool/skill)"]
-    PORT --> G["R6 RAG / 其他能力：Invoke(port=rag/...)"]
-    M --> FOLD["R1 fold 写回 AgentState<br/>Event + checkpoint + fingerprint"]
-    T --> FOLD
-    G --> FOLD
-    R1 -->|Spawn| CH["子 Session 递归（预算分账 / trace 父 span）"]
-    R1 -->|Suspend| HI["wait_human / resumed 通知 + 外部审批"]
-    R1 -->|Terminate| EN["结束：Result(output, reason)"]
-    LC["LifecycleBus 16 通知点（when）<br/>能力装配层触发：R4 发 model 系列<br/>R5 发 tool 系列 / R7 发记忆系列<br/>Runner 发会话与控制流 / AOP 发 invoke_rejected<br/>不消费 / 只做事 / 异常就地隔离"] -.旁路.-> R1
-    DEG["Degradation 实例（P9）<br/>读 Invocation.meta 具名故障记录<br/>select 选级，唯一裁决者"] -.失败报告.-> AOP
-</pre>
-<p class="note">要点：只有 <code>Invoke</code> 进 AOP 链，<code>Spawn</code>/<code>Suspend</code>/<code>Terminate</code> 走内核快路径；<code>Notice</code> 是 <code>Invocation</code> 的只读投影，不另建状态；降级 target 经 typed 路径与 Registry 同源进入网关，未注册目标不静默回退。</p>
-</body>
-</html>
+  <g>
+    <rect x="200" y="104" width="280" height="56" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+    <text x="340" y="121" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#0C447C">R1 Runner 唯一执行循环</text>
+    <text x="340" y="139" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#185FA5">Interpreter 展开 EffectBatch → match 分派</text>
+    <text x="340" y="153" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#185FA5">只认 call(effect,ctx) + notify 两个注入</text>
+  </g>
+
+  <line x1="340" y1="160" x2="340" y2="184" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <g>
+    <rect x="180" y="186" width="320" height="62" rx="8" fill="#B5D4F4" stroke="#185FA5" stroke-width="0.5"/>
+    <text x="340" y="204" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#042C53">AOP 五角色链（仅 Invoke 进入）</text>
+    <text x="340" y="222" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#0C447C">Prelude → Warden → Envelope前 → Refiner → Port call</text>
+    <text x="340" y="238" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#0C447C">→ Envelope后 / Salvage异常（链外重路由切 backup）</text>
+  </g>
+
+  <line x1="340" y1="248" x2="340" y2="272" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="340" y="266" text-anchor="middle" font-family="var(--font-sans)" font-size="11" fill="#5F5E5A">Port call（what）</text>
+  <g>
+    <rect x="40" y="274" width="146" height="56" rx="8" fill="#E6F1FB" stroke="#378ADD" stroke-width="0.5"/>
+    <text x="113" y="292" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="12" font-weight="500" fill="#0C447C">R4 模型网关</text>
+    <text x="113" y="310" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#185FA5">as_call · typed 降级</text>
+  </g>
+  <g>
+    <rect x="194" y="274" width="146" height="56" rx="8" fill="#E6F1FB" stroke="#378ADD" stroke-width="0.5"/>
+    <text x="267" y="292" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="12" font-weight="500" fill="#0C447C">R5 工具/技能</text>
+    <text x="267" y="310" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#185FA5">Invoke(port=tool/skill)</text>
+  </g>
+  <g>
+    <rect x="348" y="274" width="146" height="56" rx="8" fill="#E6F1FB" stroke="#378ADD" stroke-width="0.5"/>
+    <text x="421" y="292" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="12" font-weight="500" fill="#0C447C">R6 RAG</text>
+    <text x="421" y="310" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#185FA5">ingest / query 双轨</text>
+  </g>
+  <g>
+    <rect x="502" y="274" width="138" height="56" rx="8" fill="#E6F1FB" stroke="#378ADD" stroke-width="0.5"/>
+    <text x="571" y="292" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="12" font-weight="500" fill="#0C447C">R7 上下文/记忆</text>
+    <text x="571" y="310" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#185FA5">显式编排（订阅副作用）</text>
+  </g>
+  <line x1="113" y1="330" x2="113" y2="356" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="267" y1="330" x2="267" y2="356" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="421" y1="330" x2="421" y2="356" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="571" y1="330" x2="571" y2="356" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <g>
+    <rect x="180" y="358" width="320" height="48" rx="8" fill="#E1F5EE" stroke="#1D9E75" stroke-width="0.5"/>
+    <text x="340" y="375" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="13" font-weight="500" fill="#085041">R1 fold 写回 AgentState</text>
+    <text x="340" y="393" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#0F6E56">Event + checkpoint + fingerprint · 回填 Program</text>
+  </g>
+
+  <g>
+    <rect x="40" y="426" width="190" height="66" rx="8" fill="#F1EFE8" stroke="#888780" stroke-width="0.5"/>
+    <text x="135" y="444" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="12" font-weight="500" fill="#2C2C2A">内核快路径（不进 AOP）</text>
+    <text x="135" y="463" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#5F5E5A">Spawn → 子 Session 递归</text>
+    <text x="135" y="480" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#5F5E5A">Suspend → wait_human / resumed</text>
+  </g>
+  <g>
+    <rect x="242" y="426" width="190" height="66" rx="8" fill="#F1EFE8" stroke="#888780" stroke-width="0.5"/>
+    <text x="337" y="444" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="12" font-weight="500" fill="#2C2C2A">Terminate · 结束</text>
+    <text x="337" y="463" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#5F5E5A">Result(output, reason)</text>
+    <text x="337" y="480" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#5F5E5A">session_end 通知</text>
+  </g>
+  <g>
+    <rect x="444" y="426" width="196" height="66" rx="8" fill="#FCEBEB" stroke="#A32D2D" stroke-width="0.5"/>
+    <text x="542" y="444" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="12" font-weight="500" fill="#791F1F">Degradation 降级（旁路）</text>
+    <text x="542" y="463" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#A32D2D">唯一选级者 · P9 四坑</text>
+    <text x="542" y="480" text-anchor="middle" dominant-baseline="central" font-family="var(--font-sans)" font-size="11" fill="#A32D2D">typed RoutingTarget → 网关切后端</text>
+  </g>
+
+  <rect x="40" y="510" width="600" height="90" rx="12" fill="#E1F5EE" stroke="#1D9E75" stroke-width="0.5"/>
+  <text x="56" y="529" font-family="var(--font-sans)" font-size="12" font-weight="500" fill="#085041">LifecycleBus · 16 通知相位（when）· 纯通知、不消费返回值、异常就地隔离</text>
+  <text x="56" y="549" font-family="var(--font-sans)" font-size="11" fill="#04342C">Runner 发：session/user_prompt · state_fold/budget_check · before/after_tool/tool_error · cancelled/wait_human/resumed · child_spawn/done</text>
+  <text x="56" y="567" font-family="var(--font-sans)" font-size="11" fill="#04342C">R4 gateway 发：before_model/after_model（所有出口都发）· AOP 容器发：invoke_rejected · 装配桥接：runner_notifier(bus)</text>
+  <text x="56" y="585" font-family="var(--font-sans)" font-size="11" fill="#04342C">Notice = Invocation 只读投影；on_error 可选钩子交装配层观测（默认静默）</text>
+
+  <text x="40" y="616" font-family="var(--font-sans)" font-size="11" fill="#5F5E5A">内核零依赖扩展组件：Runner 不 import hooks/aop，只认 call + notify；增强器随实例持有状态，不声明 priority</text>
+</svg>

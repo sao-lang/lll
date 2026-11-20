@@ -212,33 +212,42 @@ class ModelGateway:
             if routing is not None:
                 ctx.meta.setdefault("degrade_reason", []).append(routing.reason)
 
-            self._notify_model(LifecyclePhase.BEFORE_MODEL, LLMRequest(
-                messages=list(effect.payload.get("messages", [])),
-                model=str(effect.payload.get("model") or "") or None,
-            ), as_port_ctx(ctx))
-
-            if target == REFUSE_TARGET:
-                # 拒答优先于缓存与后端：零解析零调用。
-                return RefuseExecution("degraded to refusal; no backend invoked").to_result()
-
+            port_ctx = as_port_ctx(ctx)
             payload = effect.payload
             request = LLMRequest(
                 messages=list(payload.get("messages", [])),
                 model=str(payload.get("model") or "") or None,
                 task_hint=str(payload.get("task_hint") or "") or None,
             )
-            port_ctx = as_port_ctx(ctx)
-            response = await self.complete(request, port_ctx, degrade_target=target)
-            self._notify_model(LifecyclePhase.AFTER_MODEL, request, port_ctx,
-                               extra={"error": response.error or ""})
-            # 后端错误（E3）：折叠为失败 Result，让 R3 的重试/熔断/降级能看到。
-            if response.error:
-                return Result.failure(response.error.split(":")[0], response.error)
-            return Result.success({
-                "content": response.content,
-                "tool_calls": response.tool_calls,
-                "usage": response.usage,
-            })
+            self._notify_model(LifecyclePhase.BEFORE_MODEL, LLMRequest(
+                messages=list(payload.get("messages", [])),
+                model=str(payload.get("model") or "") or None,
+            ), port_ctx)
+
+            # after_model 在所有出口恰好发一次（正常/后端错误/REFUSE/异常），payload 标 error。
+            # complete 在 try 内，异常时记 error 后 re-raise，由 finally 统一补发 after（R4 §5.1）。
+            error_text = ""
+            try:
+                if target == REFUSE_TARGET:
+                    # 拒答优先于缓存与后端：零解析零调用。after payload 标 REFUSED 以便与成功路径区分。
+                    error_text = REFUSED_CODE
+                    return RefuseExecution("degraded to refusal; no backend invoked").to_result()
+                response = await self.complete(request, port_ctx, degrade_target=target)
+                error_text = response.error or ""
+                # 后端错误（E3）：折叠为失败 Result，让 R3 的重试/熔断/降级能看到。
+                if response.error:
+                    return Result.failure(response.error.split(":")[0], response.error)
+                return Result.success({
+                    "content": response.content,
+                    "tool_calls": response.tool_calls,
+                    "usage": response.usage,
+                })
+            except BaseException as exc:  # 含 CancelledError：异常路径也要发 after，随后原样抛穿
+                error_text = error_text or f"{type(exc).__name__}: {exc}"
+                raise
+            finally:
+                self._notify_model(LifecyclePhase.AFTER_MODEL, request, port_ctx,
+                                   extra={"error": error_text})
 
         return adapter
 

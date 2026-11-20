@@ -1,7 +1,7 @@
 # R5：工具·MCP·技能（tools）
 
 > **实现状态**：已实现（含装配期自动注册）。`src/harness/tools/` + `src/harness/skills/` 已落地；测试 `tests/r5/`、demo `tests/demos/demo_r5.py`、门禁 key `r5` 全部就绪。
-> **本次变更**：技能调用并入 `Invoke(port="skill")`（P5）；装配入口 `install` 改 AOP 注册（P3）；工具调用前后发 `before_tool` / `after_tool` / `tool_error` 通知（P2）。遵守三体系正交与依赖方向 插件/增强器 → 装配层 → 内核。
+> **本次变更**：技能调用并入 `Invoke(port="skill")`（P5）；装配入口 `install` 把 tool/disclosure/mcp/skill 注册进共用 Registry（P3；工具/Warden/Envelope 增强器由 R9 安全域与 R12 composition root 统一注册，R5 无自有增强器）；Runner 在 `Invoke(port=tool)` 执行点发 `before_tool` / `after_tool` / `tool_error` 通知（P2）。遵守三体系正交与依赖方向 插件/增强器 → 装配层 → 内核。
 
 
 > **权威来源**：[《AGENT 总设计》](../../01-总览与设计/AGENT-总设计.md) §R5 D+E 域 §3~§6。本文为模块级拆分详设。
@@ -26,7 +26,7 @@
 
 **Effect 统一入口（P5）**：技能调用不再单独成类，而是并入 `Invoke(port="skill")`——`payload` 携带 `name`/`part`，与 `Invoke(port="tool")` 共用 AOP 链（Warden 准入/Envelope 包裹/Refiner 改写）。新增工具/技能种类只需注册 `PORT_PROTOCOLS` 并用对应 port，内核零改动。
 
-**tool 通知（P2）**：工具/技能调用由装配层在调用前后发 `before_tool` / `after_tool` 通知，失败发 `tool_error`；通知为纯通知（异常就地隔离、返回值不消费），插件可借此做观测，不能拦截调用。拦截/改写/包裹类语义归 AOP 角色（Warden/Envelope/Refiner），不由通知承担。
+**tool 通知（P2）**：Runner 在 `Invoke(port="tool")` 执行点经 `notify` 回调（装配层用 `runner_notifier(bus)` 桥接）发 `before_tool` / `after_tool` / `tool_error`（技能 `port="skill"` 不发 tool 通知）；通知为纯通知（异常就地隔离、返回值不消费），插件可借此做观测，不能拦截调用。拦截/改写/包裹类语义归 AOP 角色（Warden/Envelope/Refiner），不由通知承担。
 
 R5 不自带沙盒/审批/审计实现：三者在 ToolRegistry 构造期注入（缺席即拒绝，见 §4/§6）。`DisclosureIndex` 协议归 R2 `protocols.py` 并登记 `PORT_PROTOCOLS["disclosure"]`，默认实现 ToolIndex 在 R5。装配类 ToolsCapability（§11）把上述组件与 R9 三 Port 组装为可插拔能力。
 
@@ -46,7 +46,7 @@ flowchart TD
         L2 --> L3["L3: 技能正文→注入检测→正文"]
     end
     subgraph 调用期
-        F["ToolCall.danger 经 DangerLevel.coerce 归一<br/>未知值→CRITICAL"] --> V["参数校验 extra=forbid"]
+        F["ToolCall.danger 归一（路由以 ToolSpec.danger 为准，忽略 call.danger 防伪造降级）<br/>未知值→CRITICAL"] --> V["参数校验 extra=forbid"]
         V --> DR{"DangerLevel 四级路由"}
         DR -->|SAFE| EX["直接执行"]
         DR -->|LOW| AU["AuditPort.record 审计<br/>缺席→降级直执行 + meta.audit_missing"]
@@ -96,7 +96,7 @@ class ToolPort(Protocol):
 class ToolRegistry:                      # ToolPort 默认实现
     # 构造注入 R9 三 Port：缺席即拒绝（不抛穿，返回 ToolResult 失败）
     def __init__(
-        self, *,
+        self, *, name: str = "tools",
         sandbox: SandboxPort | None = None,
         human: HumanPort | None = None,
         audit: AuditPort | None = None,
@@ -170,7 +170,7 @@ class DisclosureIndex(Protocol):         # 协议归 R2 protocols.py + PORT_PROT
     def disclose(self, names: list[str], skills: list[SkillManifest]) -> DisclosurePacket: ...
 
 class ToolIndex:                         # DisclosureIndex 默认实现（src/harness/tools/index.py）
-    name: str = "tool-index"
+    name: str = "disclosure"
     def disclose(self, names: list[str], skills: list[SkillManifest]) -> DisclosurePacket: ...
 
 # ---- 技能正文注入检测（R5 本地协议，不依赖 R9 的 SecurityCtx）----
@@ -221,7 +221,7 @@ class KeywordInjectionDetector:          # 默认实现：关键词/正则启发
 
 | 条件 | 实现 | 证据 |
 |------|------|------|
-| CL-1 契约自足 | 依赖 R1 types + R2 Hook + Port | import 扫描 |
+| CL-1 契约自足 | 依赖 R1 types + R2 协议/Registry + AOP 五角色 + Lifecycle + Port | import 扫描 |
 | CL-2 自带 fake | tests/r5/conftest.py（FakeSandbox/Human/Audit/Injection/Fetcher/Transport）+ fake transport | fake 用例 |
 | CL-3 自带测试 | tests/r5/ 覆盖门禁 | 覆盖率报告 |
 | CL-4 独立 demo | `make demo-r5` | demo 冒烟 |
@@ -264,7 +264,7 @@ class KeywordInjectionDetector:          # 默认实现：关键词/正则启发
 
 ## 11. 装配类 ToolsCapability
 
-R5 提供统一装配类，把工具/MCP/技能/披露与 R9 三 Port 组装为一个可插拔能力（遵循 R2 `Capability` 契约）。装配时除注册各 Port 外，还把工具/技能的 Warden/Envelope/Refiner 增强器注册进 `AOPContainer`，并订阅 `before_tool`/`after_tool`/`tool_error` 通知的插件：
+R5 提供统一装配类，把工具/MCP/技能/披露与 R9 三 Port 组装为一个可插拔能力（遵循 R2 `Capability` 契约）。`install` 只把四个 Port 注册进共用 Registry；工具/Warden/Envelope 增强器由 R9 安全域与 R12 composition root 统一注册（R5 无自有增强器）；tool 相位通知由 Runner 经 `runner_notifier(bus)` 在 `Invoke(port=tool)` 执行点发：
 
 ```python
 class ToolsCapability:
@@ -282,16 +282,16 @@ class ToolsCapability:
         human: HumanPort | None = None,
         audit: AuditPort | None = None,
     ) -> None: ...   # 构造注入；R9 三 Port 的缺席拒绝在 ToolRegistry.call 兑现
-    def install(self, container: AOPContainer, bus: LifecycleBus, reg: Registry) -> None: ...
+    def install(self, container: AOPContainer | None, reg: Registry) -> None: ...
         # 注册各 Port/协议实例（R2 Capability 契约）；先调 self._registry.register_pending() 再注册各 Port
-        # 并向 AOPContainer 注册工具增强器、向 LifecycleBus 注册 tool 通知插件（AOP 注册，非旧扩展点订阅）
+        # 增强器由 R9 安全域 / R12 composition root 统一注册；本能力只注册 Port
     def registry(self) -> ToolRegistry: ...
     def manager(self) -> MCPManager: ...
     def index(self) -> DisclosureIndex: ...
     def disclose(self, names: list[str]) -> DisclosurePacket: ...   # 委托 index + skills
 ```
 
-> **披露触发**：披露由装配层在 `before_model` 通知点调用 `disclose(names)` 生成上下文段（通知为纯通知、返回不消费，故披露动作在订阅者的实现内完成）；R5 自身闭环可独立测试。技能调用走 `Invoke(port="skill")`，与工具共用 AOP 链与 tool 通知。
+> **披露触发**：披露由装配层在 `before_model` 通知点调用 `disclose(names)` 生成上下文段（通知为纯通知、返回不消费，故披露动作在订阅者的实现内完成）；R5 自身闭环可独立测试。技能调用走 `Invoke(port="skill")`，与工具共用 AOP 链（不发 tool 通知）。
 
 ---
-*R5 模块详设 · 派生自 AGENT-总设计与《扩展体系重构规格（2026-11-20）》P2/P3/P5 · 门禁 key=r5 · 本次变更：SKILL 并入 Invoke(port=skill)；install 改 AOP 注册；发 before_tool/after_tool/tool_error 通知*
+*R5 模块详设 · 派生自 AGENT-总设计与《扩展体系重构规格（2026-11-20）》P2/P3/P5 · 门禁 key=r5 · 本次变更：SKILL 并入 Invoke(port=skill)；install 注册四 Port 进共用 Registry（增强器由 R9/R12 统一注册）；Runner 在 Invoke(port=tool) 执行点发 before_tool/after_tool/tool_error 通知*

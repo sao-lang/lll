@@ -90,3 +90,19 @@ class TestRegistryIdempotency:
         reg.register_llm("primary", FakeLLM("a"))
         with pytest.raises(HookBusError, match="different instance"):
             reg.register_llm("primary", FakeLLM("b"))
+
+
+class TestCostGuardWiring:
+    def test_capability_injects_cost_guard_into_gateway(self) -> None:
+        """ModelCapability 构造注入的 cost_guard 必须透传到 gateway（生产成本硬闸可用）。"""
+        from harness.model import CostGuard
+
+        guard = CostGuard(max_cost_usd=0.001)
+        cap = ModelCapability(llm=FakeLLM("primary"), cost_guard=guard)
+        gw = cap.gateway()
+        # 行为断言：预算极低 + 预估超预算 → 调用前被硬闸拦截（非后端返回）。
+        out = asyncio.run(gw.complete(
+            LLMRequest(messages=[{"role": "user", "content": "hi"}]),
+            pctx(), degrade_target=None,
+        ))
+        assert out.error is not None and "COST" in out.error.upper()

@@ -87,3 +87,48 @@ def test_subscription_by_name_and_plugin_contract():
 
     with pytest.raises(ValueError):
         bus.subscribe(object())  # 缺 name/register
+
+
+def test_error_hook_receives_subscriber_exception():
+    """订阅者异常隔离时，可选 on_error 钩子收到 (订阅者名, 相位, 异常)；默认静默。"""
+    errors: list[tuple[str, str, str]] = []
+    bus = LifecycleBus(on_error=lambda name, phase, exc: errors.append((name, phase.value, str(exc))))
+
+    def bad(notice: Notice) -> None:
+        raise RuntimeError("boom")
+
+    def good(notice: Notice) -> None:
+        errors.append(("good", notice.phase.value, "ok"))
+
+    bus.on(LifecyclePhase.AFTER_TOOL, bad, name="bad")
+    bus.on(LifecyclePhase.AFTER_TOOL, good, name="good")
+    bus.emit(Notice(phase=LifecyclePhase.AFTER_TOOL))
+
+    assert errors[0][0] == "bad" and errors[0][1] == "after_tool" and "boom" in errors[0][2]
+    assert errors[1][0] == "good"  # 异常隔离仍成立：坏订阅者不影响好订阅者
+
+
+def test_default_bus_is_silent_on_error():
+    """未注入 on_error 时，异常仍就地静默隔离（向后兼容）。"""
+    bus = LifecycleBus()
+    bus.on(LifecyclePhase.AFTER_TOOL, lambda n: (_ for _ in ()).throw(RuntimeError("x")), name="bad")
+    bus.on(LifecyclePhase.AFTER_TOOL, lambda n: None, name="good")
+    bus.emit(Notice(phase=LifecyclePhase.AFTER_TOOL))  # 不抛穿即通过
+
+
+def test_error_hook_self_exception_does_not_escape():
+    """on_error 钩子自身抛异常时被二次隔离，绝不从 emit 抛穿（铁律），后续订阅者照常收到。"""
+    seen: list[str] = []
+
+    def bad_hook(name, phase, exc):
+        raise RuntimeError("hook itself exploded")
+
+    bus = LifecycleBus(on_error=bad_hook)
+
+    def bad_sub(notice: Notice) -> None:
+        raise RuntimeError("sub exploded")
+
+    bus.on(LifecyclePhase.AFTER_MODEL, bad_sub, name="bad")
+    bus.on(LifecyclePhase.AFTER_MODEL, lambda n: seen.append("good"), name="good")
+    bus.emit(Notice(phase=LifecyclePhase.AFTER_MODEL))  # 不抛穿即通过
+    assert seen == ["good"]
