@@ -17,7 +17,9 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from enum import Enum
 
-from .errors import AgentKitError, PortMissing, ProgramCrashed, ProgramInvalid
+from .errors import (
+    AgentKitError, BudgetExceeded, PortMissing, ProgramCrashed, ProgramInvalid,
+)
 from .fold import field, fold, replay_events
 from .interpreter import EffectBatch, InterpreterImpl, SendResult
 from .types import (
@@ -59,12 +61,50 @@ class _StepStatus(str, Enum):
     DONE = "done"
     SUSPENDED = "suspended"
     ERROR = "error"
+    CANCELLED = "cancelled"
 
 
 class _ErrCode(str, Enum):
     """Runner 内部折叠错误码：值与 errors.py 的稳定 code 对齐。"""
     PORT_CRASHED = "PORT_CRASHED"
     PROGRAM_CRASHED = "PROGRAM_CRASHED"
+    UNKNOWN = "UNKNOWN"
+    CHILD_PROGRAM_MISSING = "CHILD_PROGRAM_MISSING"
+
+
+class _Phase(str, Enum):
+    """Runner 发出的 Lifecycle 相位名（13 个）；取值与 hooks.LifecyclePhase 一致。
+
+    内核零依赖 hooks，故在此具名对齐而非 import；新增相位须同步两处枚举。
+    """
+    BEFORE_TOOL = "before_tool"
+    AFTER_TOOL = "after_tool"
+    TOOL_ERROR = "tool_error"
+    CHILD_SPAWN = "child_spawn"
+    CHILD_DONE = "child_done"
+    CANCELLED = "cancelled"
+    BUDGET_CHECK = "budget_check"
+    WAIT_HUMAN = "wait_human"
+    STATE_FOLD = "state_fold"
+    SESSION_START = "session_start"
+    USER_PROMPT = "user_prompt"
+    RESUMED = "resumed"
+    SESSION_END = "session_end"
+
+
+# 稳定原因码：进 Event.reason / RunResult.reason，值一旦发布不可更改。
+_REASON_PROGRAM_RETURNED = "program_returned"
+_REASON_WAIT_HUMAN = "wait_human"
+_REASON_TERMINATED = "terminated"
+_REASON_PARALLEL_CHILDREN = "parallel_children"
+
+# 子会话 id 分隔符：<parent>{_CHILD_SESSION_SEPARATOR}<seq>。
+_CHILD_SESSION_SEPARATOR = ":child:"
+
+# Usage 动态字段名：读错字段会静默丢成本/token，故具名收敛。
+_USAGE_COST_FIELD = "cost_usd"
+_USAGE_PROMPT_TOKENS_FIELD = "prompt_tokens"
+_USAGE_COMPLETION_TOKENS_FIELD = "completion_tokens"
 
 
 @dataclass
@@ -275,7 +315,7 @@ class Runner:
         # 内核只认 notify 回调与 PortName 枚举，不 import hooks。
         is_tool = isinstance(effect, Invoke) and effect.port == PortName.TOOL.value
         if is_tool:
-            self._notify("before_tool", {
+            self._notify(_Phase.BEFORE_TOOL.value, {
                 "session_id": session.session_id, "port": PortName.TOOL.value,
             })
         try:
@@ -283,7 +323,7 @@ class Runner:
         except AgentKitError as exc:
             # 框架异常：用自身 code 折叠为失败信封。
             if is_tool:
-                self._notify("tool_error", {
+                self._notify(_Phase.TOOL_ERROR.value, {
                     "session_id": session.session_id, "port": PortName.TOOL.value,
                     "error": exc.code,
                 })
@@ -291,7 +331,7 @@ class Runner:
         except Exception as exc:  # 异常绝不抛穿运行时  # noqa: BLE001
             # 未预期异常统一折叠，保留异常类型名便于诊断。
             if is_tool:
-                self._notify("tool_error", {
+                self._notify(_Phase.TOOL_ERROR.value, {
                     "session_id": session.session_id, "port": PortName.TOOL.value,
                     "error": _ErrCode.PORT_CRASHED.value,
                 })
@@ -300,13 +340,13 @@ class Runner:
             ), ()
         if is_tool:
             if result.ok:
-                self._notify("after_tool", {
+                self._notify(_Phase.AFTER_TOOL.value, {
                     "session_id": session.session_id, "port": PortName.TOOL.value,
                 })
             else:
-                self._notify("tool_error", {
+                self._notify(_Phase.TOOL_ERROR.value, {
                     "session_id": session.session_id, "port": PortName.TOOL.value,
-                    "error": result.error.code if result.error else "UNKNOWN",
+                    "error": result.error.code if result.error else _ErrCode.UNKNOWN.value,
                 })
         return result, ()
 
@@ -322,23 +362,25 @@ class Runner:
             (以子 run 的 output 为 data 的 Result, 子会话全部事件)。
         """
         # 通知：子 Agent 创建。
-        self._notify("child_spawn", {"session_id": session.session_id})
+        self._notify(_Phase.CHILD_SPAWN.value, {"session_id": session.session_id})
         factory = effect.program_factory
         if factory is None:
-            return Result.failure("CHILD_PROGRAM_MISSING", "spawn needs program_factory"), ()
+            return Result.failure(
+                _ErrCode.CHILD_PROGRAM_MISSING.value, "spawn needs program_factory"
+            ), ()
         child_state: AgentState = effect.state or session.state
         child_state = child_state.with_(budgets=child_state.budgets.consume(hops=1))  # 子 Agent 深度 +1
         # 用单调递增序号作子会话 id 后缀，保证同批并发 Spawn 的 id 唯一。
         seq = self._child_seq.get(session.session_id, 0)
         self._child_seq[session.session_id] = seq + 1
         child = Session(
-            session_id=f"{session.session_id}:child:{seq}",
+            session_id=f"{session.session_id}{_CHILD_SESSION_SEPARATOR}{seq}",
             program_factory=factory,
             state=child_state,
         )
         res = await self.run(child)  # 递归跑完整子会话（含其自身的 Spawn）
         # 通知：子 Agent 完成。
-        self._notify("child_done", {"session_id": session.session_id, "status": res.status})
+        self._notify(_Phase.CHILD_DONE.value, {"session_id": session.session_id, "status": res.status})
         return Result.success(res.output, usage=Usage()), tuple(res.events)
 
     def cancel(self, reason: str) -> None:
@@ -370,15 +412,15 @@ class Runner:
                 state_snapshot=session.state,
                 effects=(),
                 results=(),
-                status="cancelled",
+                status=_StepStatus.CANCELLED.value,
                 reason=reason,
             ))
-            self._notify("cancelled", {"session_id": session.session_id, "reason": reason})
+            self._notify(_Phase.CANCELLED.value, {"session_id": session.session_id, "reason": reason})
             self._reasons[session.session_id] = reason
             return StepReport(
                 step=0,
                 state=session.state,
-                status="cancelled",
+                status=_StepStatus.CANCELLED.value,
                 reason=reason,
                 events=tuple(session.events),
             )
@@ -408,14 +450,14 @@ class Runner:
         # 0. 预算预检：超限强制 Terminate（内核硬强制，Program 无法绕过）
         exceeded = state.budgets.exceeded()
         if exceeded:
-            reason = f"BUDGET_EXCEEDED:{exceeded}"
+            reason = f"{BudgetExceeded.code}:{exceeded}"
             effects = (Terminate(reason=reason),)
             results = (Result.success(None),)
             status = _StepStatus.DONE.value
-            self._notify("budget_check", {"session_id": session.session_id, "exceeded": exceeded})
+            self._notify(_Phase.BUDGET_CHECK.value, {"session_id": session.session_id, "exceeded": exceeded})
         else:
             # 通知：预算检查通过（纯函数判定，读 state.budgets）。
-            self._notify("budget_check", {"session_id": session.session_id, "exceeded": ""})
+            self._notify(_Phase.BUDGET_CHECK.value, {"session_id": session.session_id, "exceeded": ""})
             # 1. 推进解释器，拿到下一批 Effect 或 DONE。
             try:
                 batch = rt.interpreter.send(rt.last_value)
@@ -430,7 +472,7 @@ class Runner:
 
             if status == _StepStatus.RUNNING.value and batch is DONE:
                 # Program 已 return：合成一个 Terminate 收尾。
-                status, reason = _StepStatus.DONE.value, "program_returned"
+                status, reason = _StepStatus.DONE.value, _REASON_PROGRAM_RETURNED
                 effects = (Terminate(reason=reason),)
                 results = (Result.success(None),)
             elif status == _StepStatus.RUNNING.value:  # 仍在运行且非 DONE
@@ -442,7 +484,7 @@ class Runner:
                     for i, e in enumerate(batch.effects)
                 )
                 if state.budgets.check_parallel(len(effects)):  # 并行度是内核硬预算
-                    reason = "BUDGET_EXCEEDED:parallel_children"
+                    reason = f"{BudgetExceeded.code}:{_REASON_PARALLEL_CHILDREN}"
                     effects = (Terminate(reason=reason),)
                     results = (Result.success(None),)
                     status = _StepStatus.DONE.value
@@ -453,15 +495,15 @@ class Runner:
                     assert isinstance(first_term, Terminate)
                     status, reason = (
                         _StepStatus.DONE.value,
-                        str(first_term.reason or "terminated"),
+                        str(first_term.reason or _REASON_TERMINATED),
                     )
                 elif effects and all(isinstance(e, Suspend) for e in effects):
                     # 人工在环：整批都是 Suspend 才挂起（混合批含可执行 Effect 不能被吞）。
                     results = tuple(Result.success(None) for _ in effects)
-                    status, reason = _StepStatus.SUSPENDED.value, "wait_human"
+                    status, reason = _StepStatus.SUSPENDED.value, _REASON_WAIT_HUMAN
                     first_suspend = effects[0]
                     assert isinstance(first_suspend, Suspend)
-                    self._notify("wait_human", {
+                    self._notify(_Phase.WAIT_HUMAN.value, {
                         "session_id": session.session_id,
                         "question": first_suspend.question,
                     })
@@ -493,12 +535,15 @@ class Runner:
         new_state = fold(state, effects, results, reason)
         session.state = new_state
         # 通知：状态折叠完成。
-        self._notify("state_fold", {"session_id": session.session_id, "step": step_no})
+        self._notify(_Phase.STATE_FOLD.value, {"session_id": session.session_id, "step": step_no})
         # 3. 汇总本步 usage（成本/token），写入事件供可观测使用。
-        cost = sum(float(field(r.usage, "cost_usd", 0.0) or 0.0) for r in results if r.usage)
+        cost = sum(
+            float(field(r.usage, _USAGE_COST_FIELD, 0.0) or 0.0)
+            for r in results if r.usage
+        )
         tokens = sum(
-            (field(r.usage, "prompt_tokens", 0) or 0)
-            + (field(r.usage, "completion_tokens", 0) or 0)
+            (field(r.usage, _USAGE_PROMPT_TOKENS_FIELD, 0) or 0)
+            + (field(r.usage, _USAGE_COMPLETION_TOKENS_FIELD, 0) or 0)
             for r in results
             if r.usage
         )
@@ -547,9 +592,9 @@ class Runner:
             _StepStatus.SUSPENDED.value,
         ):
             return self._result(session)  # 终态幂等：不重复跑
-        self._notify("session_start", {"session_id": session.session_id})
+        self._notify(_Phase.SESSION_START.value, {"session_id": session.session_id})
         # user_prompt：会话启动即收到用户提示（Program 首轮的输入相位）。
-        self._notify("user_prompt", {"session_id": session.session_id})
+        self._notify(_Phase.USER_PROMPT.value, {"session_id": session.session_id})
         try:
             return await self._loop(session)
         except (ProgramInvalid, ProgramCrashed) as exc:
@@ -593,7 +638,7 @@ class Runner:
             return self._program_error(session, exc)
         self._runtimes[session.session_id] = rt
         self._replay(session, rt, answer=answer)
-        self._notify("resumed", {"session_id": session.session_id, "answer": answer})
+        self._notify(_Phase.RESUMED.value, {"session_id": session.session_id, "answer": answer})
         try:
             return await self._loop(session, initial_value=answer)
         except (ProgramInvalid, ProgramCrashed) as exc:
@@ -620,7 +665,7 @@ class Runner:
         result = self._result(session)
         # 通知：会话结束（终态）；挂起不计结束，resume 后会再次 run。
         if result.status in (_StepStatus.DONE.value, _StepStatus.ERROR.value):
-            self._notify("session_end", {
+            self._notify(_Phase.SESSION_END.value, {
                 "session_id": session.session_id, "status": result.status,
             })
         return result

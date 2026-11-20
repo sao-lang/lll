@@ -3,7 +3,7 @@
 ## L0 索引卡（续接时先读这一段，≤12 行）
 - 场景 / 路径：链 ①场景3 补充设计（文档）→ 闸门 → ②场景6 设计驱动重构（改码） / 改码
 - 当前闸门：设计闸门已过（用户拍板3决策+spec已写+4份文档已同步）；代码门禁未过
-- 交付产物：docs/02-模块详设/Agent/R4-CacheEmbedder默认实现-设计规格.md；R4详设(4处)/总设计§728/协议审查§60/R13§110 已同步
+- 交付产物：docs/02-模块详设/Agent/R4-模型与推理.md §13；R4详设(4处)/总设计§728/协议审查§60/R13§110 已同步
 - 未完成项：①HashCacheEmbedder 未实现 ②SimilarityCache 默认未改 ③测试/门禁/review 未动
 - 下一步：S3 TDD（读编码规则→写失败测试→实现→门禁）
 
@@ -81,7 +81,7 @@
 
 - 审查员：独立审查（全新上下文，未参与实现）
 - 日期：2026-11-20
-- 意图源：`docs/02-模块详设/Agent/R4-CacheEmbedder默认实现-设计规格.md`（§1、§5 FR-1~FR-7、§13）
+- 意图源：`docs/02-模块详设/Agent/R4-模型与推理.md §13`（§1、§5 FR-1~FR-7、§13）
 - 审查范围：`src/harness/model/cache.py`、`src/harness/model/__init__.py`、`tests/r4/test_cache_embedder_default.py`、`tests/tools/gate_check.py`，以及 4 处文档同步
 - 实测环境：`.venv/Scripts/python.exe`（Python 3.13.14），直接 import 真实 `HashCacheEmbedder` / `SimilarityCache` / `_cosine`；探针脚本留存于 `tmp/r4_embedder_probe.py`、`tmp/r4_embedder_probe2.py`
 
@@ -190,7 +190,7 @@ difflib 基线对照（12 对/档）：len=100 时 hash-cos 0.6487 / difflib 0.1
 
 ### [Nit-3] 设计规格 FR-6 所载实测数值与真实实现不符
 
-**位置**：`docs/02-模块详设/Agent/R4-CacheEmbedder默认实现-设计规格.md:54`。
+**位置**：`docs/02-模块详设/Agent/R4-模型与推理.md §13`。
 
 **后果**：规格写"near 0.886、distant 0.084"，真实实现实测为 near 0.9491、distant 0.4339（exact 1.0 一致）。验收结论虽不变，但作为调参依据的规格数值失真，易误导后续维护。
 
@@ -224,7 +224,7 @@ difflib 基线对照（12 对/档）：len=100 时 hash-cos 0.6487 / difflib 0.1
 
 - 复审员：独立复审（全新上下文，未参与实现，未参与上一轮审查；未复用上一轮结论）
 - 日期：2026-11-20
-- 意图源：`docs/02-模块详设/Agent/R4-CacheEmbedder默认实现-设计规格.md`（FR-2/FR-2算法约束/FR-3/U-4/§13 已记录修复）
+- 意图源：`docs/02-模块详设/Agent/R4-模型与推理.md §13`（FR-2/FR-2算法约束/FR-3/U-4/§13 已记录修复）
 - 上一轮报告：`overviews/2026-11-20/20261120-0352-r4-cache-embedder-default.review.md`（含 fix loop 轮次 1 记录） 〔报告已内嵌本文件「独立 review 报告」章节〕
 - 复审范围：`src/harness/model/cache.py`、`src/harness/model/__init__.py`、`tests/r4/test_cache_embedder_default.py`、`tests/r4/test_cache.py`、`tests/r4/test_cache_backends.py`、`tests/tools/gate_check.py`，以及设计规格同步点
 - 实测环境：项目 `.venv`，直接 import 真实 `HashCacheEmbedder` / `SimilarityCache` / `_cosine`；独立探针脚本留存 `tmp/r4_review2_probe.py`、`tmp/r4_review2_cn.py`、`tmp/r4_review2_compare.py`（只读验证，未改生产代码）
@@ -276,7 +276,7 @@ difflib 基线对照（12 对/档）：len=100 时 hash-cos 0.6487 / difflib 0.1
 
 ### [Should-2] 中文近义召回在 threshold=0.7 下 0/10 命中，规格所载验收数值不可复现
 
-**位置**：设计规格 `docs/02-模块详设/Agent/R4-CacheEmbedder默认实现-设计规格.md:52`（FR-2 算法约束声称"中文近义 0.727≥0.7"）；实现 `src/harness/model/cache.py:197-240`（字符 bigram 哈希）。
+**位置**：设计规格 `docs/02-模块详设/Agent/R4-模型与推理.md §13`（FR-2 算法约束声称"中文近义 0.727≥0.7"）；实现 `src/harness/model/cache.py:197-240`（字符 bigram 哈希）。
 
 **实测**（`tmp/r4_review2_cn.py`，10 组常见中文近义/改写对）：threshold=0.7 下命中 **0/10**，例如"机器学习神经网络"vs"深度学习神经元网络"=0.6325、"如何烘焙面包"vs"怎样制作面包"=0.2857、"总结这篇文章"vs"帮我概括这段文字"=0.0000。复核"修复前后对比"（`tmp/r4_review2_compare.py`）：旧 64 维计数累加算法在同样文本对上同样基本 <0.7（0.6674/0.5040/0.6396/0.5000/0.2857/0.0000）。
 
@@ -288,7 +288,7 @@ difflib 基线对照（12 对/档）：len=100 时 hash-cos 0.6487 / difflib 0.1
 
 ### [Nit-1] 规格 FR-6 数值未同步，与 FR-2 算法约束自相矛盾
 
-**位置**：`docs/02-模块详设/Agent/R4-CacheEmbedder默认实现-设计规格.md:56`（FR-6）。
+**位置**：`docs/02-模块详设/Agent/R4-模型与推理.md §13`（FR-6）。
 
 **实测**：FR-6 仍写"near 0.886≥0.7、distant 0.084<0.9、exact 1.0"，而本次实测为 near=0.9285 / distant=0.1879 / exact=1.0；FR-2 算法约束（:52）已更新为"near 0.928 / distant 0.188"，与实测吻合。即规格内部同一指标两套数值，FR-6 是上一轮 Nit-3 未修的残留。
 

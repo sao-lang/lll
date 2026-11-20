@@ -485,12 +485,14 @@ CallFn = Callable[[Effect, DynamicValue], Awaitable[Result]]            # Port �
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| messages | tuple[Message,...] | 对话历史，只增不减（裁剪是视图层的事，R7） |
-| scratch | Mapping | 用户/插件自定义键（phase/cursor/steps…），冻结只读 |
+| messages | tuple[Message,...] | 对话历史，只增不减（裁剪是视图层的事，R7）；**短期记忆主体** |
+| scratch | Mapping | 用户/插件自定义键（phase/cursor/steps…），冻结只读；**短期记忆组成** |
 | budgets | Budgets | 多维预算，每 fold 由 Runner 强制扣减 |
-| version | str | program+prompt+架构版本，进 trace 供回放对齐 |
+| version | str | program+prompt+架构版本，进 trace 供回放对齐；**压缩视图重建规则随 fingerprint 对齐（R7）** |
 | output | DynamicValue | Terminate Effect 最终产出（框架托管字段） |
-| last_* | DynamicValue | 最近一次 Invoke(port=skill)/Spawn/Suspend 结果（框架托管） |
+| last_* | DynamicValue | 最近一次 Invoke(port=skill)/Spawn/Suspend 结果（框架托管）；**短期记忆组成** |
+
+> **【变更·2026-11-20 晚 · 短期记忆权威口径】** 短期记忆 = `messages` + `scratch` + `last_*`，归 **R1 内核持有、R10 checkpoint 可恢复**；R7 对其**只读投影**产短期视图，不另建 SessionBuffer、不改 messages。长期记忆（跨 session、双轴分类）归 R7 MemoryPort。二者边界见 R7.1 与 [R7 详设 §12.1](../02-模块详设/Agent/R7-上下文与记忆.md)。
 
 **Event 核心字段**：
 
@@ -1139,7 +1141,7 @@ class RAGPipeline:                      # 履约 RAGPort（PORT_PROTOCOLS['rag']
 ```
 
 > **R6.4 补注（2026-11-19）**：`ingest`/`retrieve` 签名必须与 `src/hooks/protocols.py:RAGPort` 逐字一致，装配期 `isinstance(p, PORT_PROTOCOLS["rag"])` 校验；`query()` 为富入口返回 `RAGResult`。注入检测复用 R5 `InjectionDetector`（非第 9 个替换点）。
-> **R6.4 补注（2026-11-20）**：缓存失效改为按 key 精准失效——`RAGPipeline` 记账自身写入的缓存 key，`ingest` 后逐个 `invalidate(key)`，不再无参全表清空（避免共享 CachePort 误伤他人条目）；详见 R6 详设「缓存按 key 失效设计规格」。
+> **R6.4 补注（2026-11-20）**：缓存失效改为按 key 精准失效——`RAGPipeline` 记账自身写入的缓存 key，`ingest` 后逐个 `invalidate(key)`，不再无参全表清空（避免共享 CachePort 误伤他人条目）；详见 R6 模块详设 §12（缓存按 key 精准失效）。
 
 ### R6.5 元数据与核心字段
 
@@ -1160,7 +1162,7 @@ class RAGPipeline:                      # 履约 RAGPort（PORT_PROTOCOLS['rag']
 |--------|------|------|------|
 | 五段 | Splitter/Embedder/... | 递归/OpenAI-compat/内存... | 方法齐全；DTO 对齐；维度匹配 |
 | 重排 | Reranker | cross-encoder | 返回 Hit 结构 |
-| 改写 | QueryRewriter | 规则改写（同义词替换+子查询分解，无模型、词表可注入；详见 R6 改写器加厚设计规格） | 不引入原问题没有的实体（同义词映射视为等价词） |
+| 改写 | QueryRewriter | 规则改写（同义词替换+子查询分解，无模型、词表可注入；详见 R6 模块详设 §11） | 不引入原问题没有的实体（同义词映射视为等价词） |
 
 ### R6.7 验收门禁
 
@@ -1176,42 +1178,54 @@ class RAGPipeline:                      # 履约 RAGPort（PORT_PROTOCOLS['rag']
 
 ## R7 上下文与记忆
 
-> 层：L1 · 依赖：R1+R2 · 源码包：`harness/context/` + memory/ · 详见 R7 模块详设
+> 层：L1 · 依赖：R1+R2 · 源码包：`harness/context/` + memory/ · 详见 [R7 模块详设](../02-模块详设/Agent/R7-上下文与记忆.md)
+> **【变更·2026-11-20 晚 · 完整性修订】** 用户拍板后本章权威口径：短期记忆归 R1/R10（R7 只读投影）；长期记忆双轴分类（温度三层 × 内容七类）；四条优化链全覆盖。原「hot=会话内 / 三类 kind」表述作废，以本章 + R7 详设 §12 为准。
 
 ### R7.1 职责与边界
 
-**做**：上下文组装/压缩 compaction/大结果卸载 offloading/渐进披露（披露执行在 R5）；长期记忆 hot/warm/cold 三层 × episodic/semantic/procedural 三类、写入提炼/召回/遗忘/晋升。
-**不做**：改 State.messages（裁剪是视图层，messages 只增不减）。
+**做**：① 上下文工程——分段组装、统一 Token 预算、相关性筛选、压缩 compaction、语义摘要、重注入、大结果卸载、可重放视图；② **长期记忆**——温度三层（hot 近期热层 / warm 结构化 / cold 全文归档）× 内容七类（episodic/semantic/procedural/profile/preference/entity/journal），含写入提炼/去重/冲突消解/评分/召回重排/遗忘/晋升降级的完整优化链。
+**不做**：
+- **短期记忆不属于 R7**——短期记忆 = `State.messages`（只增）+ `scratch` + `last_*`，归 R1 内核持有、R10 checkpoint 可恢复；R7 只读投影、不改 messages、不另建 SessionBuffer。
+- 披露执行（R5，R7 提供上下文段）；checkpoint 语义（R10）；生产装配（R12 阶段 A）。
 
 ### R7.2 设计架构
 
-上下文窗口是稀缺 RAM（context rot：越长质量越差），本模块像 OS 管理内存：分段组装 + 配额 + 阈值压缩 + 大结果卸载。记忆分三层（hot 会话内/warm 结构化摘要/cold 全文归档），写入与压缩都在会话边界触发，**顺序必须是先写 cold 全文再压缩**（否则细节丢失无法提炼）。
+上下文窗口是稀缺 RAM（context rot），本模块像 OS 管理内存：分段组装 + 配额 + 相关性筛选 + 阈值压缩 + 语义摘要 + 重注入 + 大结果卸载，全程视图层投影（不改 messages，保证回放确定性）。
 
-> **【变更·2026-11-20】触发方式（结论保留）**：按 P7，上下文压缩不进内核——压缩视图仍走"投影点"（`ctx_factory` 或 `Refiner` 改写入口），**不写回 `State.messages`**（只增不减是回放/指纹前提）。R7.3 流程图中 before_model / after_tool / session_end 现为真实 Lifecycle 通知点，而压缩相关节点（原 after_compact 等）为 R7 内部步骤、非通知点；压缩/记忆提炼仍由 `ContextMemoryManager` **显式编排**，`commit_and_compact()` 方法体内固定"先 write cold 再 compact"，单测锁顺序；框架不声明 priority。详见 R7 详设与[实现落地设计规格](../02-模块详设/Agent/R7-上下文与记忆-实现落地设计规格.md)。
+记忆**双轴模型**（解决原 hot 归属打架）：**温度轴 tier** = hot 近期热层（短 TTL、高频）/ warm 结构化主检索 / cold 全文归档（长 TTL），**三层均属长期记忆**；**内容轴 kind** = 七类（原三类 + profile 画像 / preference 偏好 / entity 实体 / journal 工作日志决策），各类独立提炼规则与召回场景。两轴正交：一条 MemoryItem 必属某 tier × 某 kind。
+
+**四条优化链**（缺一不可）：写入链（规范化→递归脱敏/注入→去重→冲突消解→评分→分层落库→增量 upsert）、召回链（scope/ACL 过滤→混合召回→rerank→MMR→预算裁剪→注入检测）、上下文链（统一 token→预算贪心→相关性筛选→压缩钉住→语义摘要→重注入→卸载→可重放）、安全与接线链（tenant 双向校验 + R12 装配 + 回放一致性）。逐链契约见 R7 详设 §12.3~§12.6。
+
+> **触发方式（保留 11-20 结论）**：压缩相关节点（原 after_compact 等）为 R7 内部步骤、非通知点；`before_model`/`after_tool`/`session_end` 是真实 Lifecycle 通知点（纯通知、异常隔离、返回值不消费）。压缩与记忆写入由 `ContextMemoryManager` 显式编排，`commit_and_compact()` 内固定"先写 cold 全文再压缩"，代码结构保证顺序、trace 快照锁定；框架不声明 priority。
 
 ### R7.3 流程图
 
 ```mermaid
 flowchart TD
-    subgraph 上下文
-        AS["Lifecycle:before_model 分段组装<br/>system+工具目录+检索+记忆+历史+输入"]
-        AS --> BUD["Token 预算分配（预留输出）"]
-        BUD --> COMP{"超压缩阈值?"}
-        COMP -->|是| PIN["钉住 system+最近N轮+高价值消息"]
-        PIN --> SUM["摘要其余历史 → 结构化摘要"]
-        SUM --> REINJ["重注入规则（编排内部步骤，无通知点）"]
-        COMP -->|否| OFF
-        REINJ --> OFF["Lifecycle:after_tool 大结果卸载到 BlobPort<br/>上下文留句柄"]
+    subgraph SHORT["短期记忆（R1 内核 · R7 只读投影）"]
+        SM["State.messages 只增 + scratch + last_*<br/>R10 checkpoint 可恢复"] -.->|只读投影| AS
     end
-    subgraph 记忆
-        M1["Lifecycle:session_end 提炼值得长存的事实"]
-        M1 --> M2["去重/冲突消解/重要性评分"]
-        M2 --> M3["写 warm（LLM 低成本提炼）"]
-        M2 --> M4["写 cold（完整 transcript）"]
-        M3 --> MR["Lifecycle:before_model 语义召回注入"]
-        MR --> M5["晋升/降级/TTL 遗忘"]
+    subgraph 上下文["上下文优化链（视图层，不改 messages）"]
+        AS["Lifecycle:before_model 分段组装<br/>system+任务+工具目录+检索+记忆+历史+输入"]
+        AS --> BUD["统一 token 计数 + 预算预留输出 + 贪心装入"]
+        BUD --> REL["相关性筛选：rerank 取 top + 历史滑窗+重要性"]
+        REL --> CP{"超压缩阈值?"}
+        CP -->|是| PIN["钉住 system+未完成事项+最近N轮+高价值"]
+        PIN --> SUM["语义摘要（独立 role/pinned 标记，防沉淀）"]
+        SUM --> REINJ["重注入：摘要+钉住+未完成任务 → assemble（内部步骤）"]
+        CP -->|否| OFF
+        REINJ --> OFF["Lifecycle:after_tool 大结果卸载到 BlobPort"]
+        OFF --> OBS["trace：各段 token/裁剪原因/压缩前后/召回命中率"]
     end
-    M4 -.->|先写全文| COMP
+    subgraph 记忆["长期记忆优化链（跨 session · 双轴分类）"]
+        SE["Lifecycle:session_end 触发提炼"] --> W1["①写入链：规范化→递归脱敏/注入→去重→冲突→评分"]
+        W1 --> W2["②分层落库：hot/warm/cold × 七类 kind"]
+        W2 --> W3["稳定 chunk_id 增量 upsert"]
+        W3 --> MR["Lifecycle:before_model 语义召回注入"]
+        MR --> R1["③召回链：scope 过滤→混合召回→rerank→MMR→预算裁剪"]
+        R1 --> M5["④治理：晋升/降级/独立 TTL 遗忘"]
+    end
+    W2 -.->|先写 cold 全文| CP
 ```
 
 ### R7.4 API 接口
@@ -1220,32 +1234,39 @@ flowchart TD
 class ContextAssembler(Protocol):
     name: str
     def assemble(self, sections: list[ContextSection], budget: TokenBudget) -> list[Message]: ...
-
 class CompactionPolicy(Protocol):
     name: str
     def should_compact(self, state: AgentState) -> bool: ...
     def compact(self, messages: tuple[Message,...]) -> tuple[Message,...]: ...
-
-class BlobPort(Protocol):                         # 【新增·2026-11-20】卸载存储（原 offload 误用 StorePort）
+class Reinjector(Protocol):                       # 【新增】重注入（内部步骤，无通知点；不进 PORT_PROTOCOLS）
+    name: str
+    def reinject(self, view: tuple[Message,...], summary: Message | None, tasks: tuple[str,...], budget: TokenBudget) -> tuple[Message,...]: ...  # 按 budget 二次装入，不绕过预算
+class TokenCounter(Protocol):                     # 【新增】统一 token 计数（assemble/compaction 共用）
+    name: str
+    def count(self, text: str) -> int: ...
+class BlobPort(Protocol):
     name: str
     async def put(self, value: DynamicValue) -> str: ...
     async def get(self, handle: str) -> DynamicValue | None: ...
     async def delete(self, handle: str) -> None: ...
 class Offloader(Protocol):
     name: str
-    async def offload(self, value: DynamicValue, store: BlobPort) -> str: ...  # 返回句柄 store://id
-
-class MemoryPort(Protocol):                       # 已定义（【变更·2026-11-20】ns→namespace + 补全标注 + 加 recall）
+    async def offload(self, value: DynamicValue, store: BlobPort) -> str: ...
+class MemoryPort(Protocol):
     name: str
     async def read(self, namespace: str, key: str, ctx: PortCtx) -> DynamicValue: ...
     async def write(self, namespace: str, key: str, value: DynamicValue, ctx: PortCtx) -> None: ...
     async def forget(self, namespace: str, key: str, ctx: PortCtx) -> None: ...
-    async def recall(self, query: "MemoryQuery", ctx: PortCtx) -> list["MemoryItem"]: ...  # R7 自有 DTO
+    async def recall(self, query: "MemoryQuery", ctx: PortCtx) -> list["MemoryItem"]: ...
 
 @dataclass(frozen=True)
+class MemoryScope:                                # 【新增】tenant 必填 + user/session 可选，双向校验
+    tenant: str; user: str | None = None; session: str | None = None
+@dataclass(frozen=True)
 class MemoryItem:
-    kind: MemoryKind   # StrEnum: episodic/semantic/procedural（见 src/harness/memory/types.py）
-    content: str; importance: float; ts: int; source: str
+    item_id: str; kind: MemoryKind; content: str  # 稳定 id；七类 kind
+    importance: float; confidence: float          # 评分/置信，参与 rerank（非恒定 1.0）
+    ts: int; tier: MemoryTier; scope: MemoryScope; source: str; access_count: int = 0
 ```
 
 ### R7.5 元数据与核心字段
@@ -1253,31 +1274,44 @@ class MemoryItem:
 | 字段 | 说明 |
 |------|------|
 | ContextSection | section 名/内容/配额/优先级/裁剪策略 |
-| CompactionPolicy 参数 | trigger_tokens(窗口70%)/trigger_turns(12)/keep_recent(4)/pin_patterns |
-| MemoryTier | hot(Redis/短TTL) / warm(PG+pgvector/结构化) / cold(对象存储/全文) |
-| MemoryItem.kind | episodic 情节 / semantic 事实 / procedural 流程 |
+| CompactionPolicy 参数 | trigger_tokens(窗口70%)/trigger_turns(12)/keep_recent(4)/pin_patterns；摘要独立 role/pinned 标记，禁止沉淀 |
+| TokenCounter | assemble/compaction 共用唯一 token 计数口径 |
+| Reinjector | 摘要+钉住片段+未完成任务的回注契约 |
+| MemoryTier | hot 近期热层(短TTL) / warm 结构化主检索 / cold 全文归档(长TTL)——**三层均长期记忆**；目标后端 Redis/PG+pgvector/对象存储，当前默认内存 |
+| MemoryKind | **七类**：episodic 情节 / semantic 事实 / procedural 流程 / profile 画像 / preference 偏好 / entity 实体 / journal 工作日志决策 |
+| MemoryItem | item_id / importance / confidence / ts 真实时刻 / tier / scope / access_count |
+| MemoryScope | tenant 必填 + user/session 可选；写入与召回双向校验 |
 | offload 句柄 | store://id + 摘要，模型按需再读 |
 
 ### R7.6 可插拔契约
 
 | 注入点 | 协议 | 默认 | 校验 |
 |--------|------|------|------|
-| 组装 | ContextAssembler | 默认分段 | system 段不可被覆盖 |
-| 压缩 | CompactionPolicy | 阈值摘要 | 压缩后保留进度与未完成任务；不改 messages |
-| 卸载 | Offloader → BlobPort（2026-11-20 变更） | 阈值卸载 / InMemoryBlobStore | 句柄必须可读（put/get/delete） |
-| 记忆 | MemoryPort | MemoryStore（内存分层） | 写入内容过 R5 注入检测；secret 不写；recall 语义召回 |
-| 快照 | StorePort | InMemoryStorePort | save/load round-trip |
-| 编排 | ContextMemoryManager | 默认装配 | 显式调用；先 cold 后 compact 顺序由代码固定 |
+| 组装 | ContextAssembler | 默认分段 | system 不可覆盖；超预算降级裁剪 |
+| 压缩 | CompactionPolicy | 阈值语义摘要 | 钉住进度与未完成任务；不改 messages；摘要不沉淀 |
+| 重注入 | Reinjector | 默认回注 | 摘要+钉住+未完成任务按预算装入 |
+| token 计数 | TokenCounter | 统一口径 | assemble/compaction 同口径 |
+| 卸载 | Offloader → BlobPort | 阈值卸载 / InMemoryBlobStore | 句柄必须可读（put/get/delete） |
+| 记忆 | MemoryPort | MemoryStore（双轴分层 + 七类） | 递归注入/secret 检测；tenant/ACL 双向校验；完整召回链 |
+| 快照 | StorePort | InMemoryStorePort | save/load round-trip；与 memory 分离（短期 vs 长期） |
+| 编排 | ContextMemoryManager | 默认装配 | 显式调用；先 cold 后 compact；视图可重放 |
+
+> **R12 装配点（登记）**：生产装配必须显式构造 `ContextMemoryManager`，并挂 `session_end`（提交：写 cold + 提炼）、`before_model`（召回注入 + 组装）、`after_tool`（工具结果返回时大结果卸载）三个通知点；通知点纯通知（返回值不消费），副作用在订阅者内经 `ContextMemoryManager` 显式方法完成。
+>
+> **tenant 传递（路径唯一，R1/R2 零改）**：`MemoryScope.tenant` 经 `PortCtx.meta["scope"]` 传入（dto.py 已有 `meta`，符合 D-2 扩展口径），由 R12 装配层构造 PortCtx 时强制注入；R7 的 `ScopeResolver.resolve(ctx)` 缺省或 tenant 为空即 fail-closed。不改 PortCtx 结构。
 
 ### R7.7 验收门禁
 
+> 门禁分级沿用工具实际语义（G5 已删，不另造级别）；新增四链用例与符号属场景6 coding 阶段同步补 `gate_check.py`/`ast_scan.py`，详见 R7 详设 §9/§10。
+
 | 门禁 | 条目 | 达标标准 | 级别 |
 |------|------|---------|------|
-| R7-G1 | 覆盖 | 组装/压缩/卸载/记忆单测 ≥85% | G1 |
-| R7-G2 | 压缩 | 超阈值触发；钉住消息保留；压缩视图供 assemble 使用（压缩为编排内部步骤，无通知点） | G2 |
-| R7-G2 | 记忆 | 分层晋升/降级/遗忘各有用例 | G2 |
-| R7-G3 | 集成 | 先写 cold 再压缩的顺序确定性 | G3 |
-| R7-红线 | 一致 | 压缩不改 messages；secret 进记忆 → 拒绝 | 红线 |
+| R7-G0 | 契约符号 | 既有符号 + Reinjector/TokenCounter/MemoryScope/ScopeResolver（场景6补符号表） | G0 |
+| R7-G1 | 覆盖 | 组装/压缩/卸载/记忆/四链单测 ≥85% | G1 |
+| R7-G2 | 压缩/记忆/四链 | 超阈值触发；钉住保留；摘要不沉淀；七类×三层独立 TTL；写入/召回/上下文链行为用例（场景6补） | G2 |
+| R7-G3 | 集成 | 先写 cold 再压缩顺序确定；压缩视图纯函数可重放；跨 tenant 串味拒绝（场景6补） | G3 |
+| R7-G4 | 装配文档 | demo_r7 PASS；文档八要素完整；R12 装配点已登记（文档断言） | G4 |
+| R7-红线 | 一致 | 压缩改 messages / secret 进记忆（含嵌套）/ 注入串放行 / 跨 tenant 串味 → 拒绝 | 红线 |
 
 ## R8 认知与多 Agent 编排
 
@@ -1484,7 +1518,9 @@ class ApprovalFlow:                                # HITL 审批流
 
 ### R10.2 设计架构
 
-**质量飞轮**：运行期产事件 → trace/metric/事件流 → eval（CI gate + 生产采样）→ 失败回流测试集 → 改进 prompt/模型/架构 → 重新评测。持久化与记忆分离：**checkpoint 是短期 thread 内恢复，memory 是长期跨 thread 知识**。回放底座 = 事件溯源 + 录制 LLMPort 重放。
+**质量飞轮**：运行期产事件 → trace/metric/事件流 → eval（CI gate + 生产采样）→ 失败回流测试集 → 改进 prompt/模型/架构 → 重新评测。持久化与记忆分离：**checkpoint 是短期 thread 内恢复（State.messages + scratch + last_*），memory 是长期跨 thread 知识（R7 双轴分类）**。回放底座 = 事件溯源 + 录制 LLMPort 重放。
+
+> **【变更·2026-11-20 晚】短期记忆边界**：短期记忆归 R1 状态 + R10 checkpoint，长期记忆归 R7；R7 压缩视图为 `state → view` 纯函数投影，**不写进 checkpoint 状态**，但重建规则随 `State.version` fingerprint 对齐——同 fingerprint 回放必得同视图（R7-G3 断言）。禁止把 memory 混入 checkpoint，也禁止 R7 另建会话缓冲冒充短期记忆。
 
 ### R10.3 流程图
 
@@ -1716,7 +1752,7 @@ lifecycle_plugin = MyAudit(); lifecycle_plugin.register(bus)
 | R4 | LLMRequest/Response / cache key / 成本归因维度 |
 | R5 | ToolSpec{danger,source} / ToolResultMeta / DisclosurePacket{L1,L2,L3,token_cost} |
 | R6 | Chunk / Hit / Query / RAGResult{empty,citations} / TokenBudget / RRF k=60 |
-| R7 | ContextSection / MemoryTier / MemoryItem{kind,importance} / offload 句柄 |
+| R7 | ContextSection / MemoryTier / MemoryKind(七类) / MemoryItem{item_id,kind,tier,importance,confidence,scope} / MemoryScope(tenant) / Reinjector / TokenCounter / offload 句柄 |
 | R8 | IntentResult / Critique / Step / ChildHandle / JoinStrategy / StaticCheckReport |
 | R9 | DangerLevel / SafetyReport / AuditEvent / secret_refs / PII 字段 |
 | R10 | TraceSpan / topic / EvalCase / CheckpointSnapshot |
@@ -1775,8 +1811,8 @@ lifecycle_plugin = MyAudit(); lifecycle_plugin.register(bus)
 
 | 协议（接口体 `...`） | 默认实现类 | 归属模块 | 源码位置（模块开发时创建） | 回头动作 |
 |------|------|---------|------|------|
-| MemoryPort | MemoryStore | R7 记忆 | `src/harness/memory/` | R7 开发时实现 read/write/forget（hot/warm/cold） |
-| StorePort | InMemoryStorePort | R7 记忆 | `src/harness/memory/` | R7 开发时实现 save/load（可复用 InMemoryEventStore） |
+| MemoryPort | MemoryStore | R7 记忆 | `src/harness/memory/` | 已实现骨架（2026-11-20）；完整性修订待补双轴七类 + 四链优化（R7 详设 §12） |
+| StorePort | InMemoryStorePort | R7 记忆 | `src/harness/memory/` | 已实现 save/load（短期 checkpoint 用，与 memory 分离） |
 | SandboxPort | LocalSandbox | R9 安全 | `src/harness/security/` | R9 开发时实现 run（进程/容器隔离） |
 | AuditPort | AuditLogger | R9 安全 | `src/harness/security/` | R9 开发时实现 record（不可篡改留痕） |
 | HumanPort | ConsoleHumanPort | R9 HITL | `src/harness/security/` | R9 开发时实现 ask（审批/挂起/resume） |
@@ -1860,7 +1896,7 @@ lifecycle_plugin = MyAudit(); lifecycle_plugin.register(bus)
 | R4 | ≥85% | 结构化/缓存 | 换 Port 零改动 | 预算不绕过 |
 | R5 | ≥95% | 合并/披露 | danger 四级路由 | 审批/披露红线 |
 | R6 | 五段替换 | 预算/降级 | 召回基线 | 引用/注入红线 |
-| R7 | ≥85% | 压缩/记忆分层 | 顺序确定性 | 不改messages/secret |
+| R7 | ≥85% | 压缩/七类×三层/四链 | 顺序确定性+视图可重放 | 不改messages/secret(含嵌套)/跨tenant |
 | R8 | 端到端 | 装配检查/幂等 | 嵌套/换架构 | 无直接IO/自数轮次 |
 | R9 | ≥85% | 注入/审批 | 审计100% | secret/CRITICAL/审计 |
 | R10 | ≥85% | 回放/checkpoint | 留名/续读 | 一致性/memory分离 |
@@ -1880,6 +1916,9 @@ lifecycle_plugin = MyAudit(); lifecycle_plugin.register(bus)
 | DimensionKey | 按目标隔离计数/熔断/限流的键 |
 | 缺席即降级 | 未装能力时功能降级而非崩溃 |
 | context rot | 上下文越长召回与推理质量越差 |
+| 短期记忆 | `State.messages` + `scratch` + `last_*`，R1 内核持有、R10 checkpoint 可恢复；R7 只读投影（非 R7 实体） |
+| 长期记忆 | 跨 session 持久记忆，R7 MemoryPort 持有；双轴分类＝温度三层 hot/warm/cold × 内容七类 episodic/semantic/procedural/profile/preference/entity/journal |
+| MemoryScope | 记忆隔离域：tenant 必填 + user/session 可选；写入与召回双向校验 |
 | Durable Execution | 长任务 checkpoint + 断点续跑 + 幂等 |
 
 ---

@@ -137,9 +137,16 @@ MODULES = {
             "DefaultCompactionPolicy", "count_tokens", "BlobPort", "Offloader",
             "InMemoryBlobStore", "DefaultOffloader", "BLOB_HANDLE_SCHEME",
             "make_handle", "parse_handle", "ContextMemoryManager",
+            "Reinjector", "DefaultReinjector", "TokenCounter", "DefaultTokenCounter",
+            "estimate_tokens", "MemoryScope", "ScopeResolver", "make_item_id",
         ],
-        "behavior": ["test_types.py", "test_assembly.py", "test_compaction.py"],
-        "integration": ["test_offload.py", "test_memory.py", "test_wiring.py"],
+        "behavior": [
+            "test_types.py", "test_assembly.py", "test_compaction.py",
+            "test_optimization_chains.py",
+        ],
+        "integration": [
+            "test_offload.py", "test_memory.py", "test_wiring.py",
+        ],
         "extra_cov": ["harness.memory"],
         "required_defaults": {
             "memory": DEFAULT_IMPL_CONTRACTS["memory"],

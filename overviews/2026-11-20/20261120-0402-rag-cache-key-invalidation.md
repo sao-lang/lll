@@ -65,7 +65,7 @@
 - suggested skills：grill-design（若需拷问设计）、coding-rules-python（S3 写码前）。
 
 ## L2 详情引用（用到才按路径加载）
-- 设计规格：docs/02-模块详设/Agent/R6-缓存按key失效-设计规格.md
+- 设计规格：docs/02-模块详设/Agent/R6-RAG检索增强.md §12
 - 独立 review 轮1：`overviews/2026-11-20/20261120-0402-rag-cache-key-invalidation.review.md` 〔报告已内嵌本文件「独立 review 报告」章节〕
 - fix-loop 自核：`overviews/2026-11-20/20261120-0402-rag-cache-key-invalidation.review2.md` 〔报告已内嵌本文件「独立 review 报告」章节〕
 - 独立复审轮2：`overviews/2026-11-20/20261120-0402-rag-cache-key-invalidation.review3.md`（已内嵌于本文件「独立 review 报告」章节）
@@ -102,7 +102,7 @@
 | 3 | 并发边界 | **无实际竞态，但有注释误导** | `invalidate_cache`（`:273-285`）与 query 写回段（`:235-238`）均无 await，asyncio 单线程下无法交错；§8.3 的 query 写回竞态仍在，但旧/新实现的暴露窗口均为"直到下次 ingest"，**未被本改动恶化**。详见 Nit-1 |
 | 4 | 测试充分性 | 禁止无参、账本身份已锁住；**行为级覆盖有缺口** | `test_cache_invalidation.py:64-66` 锁住"只传具体 key + 账本清空"；`:81-87` 锁住账本共享/重置对象身份。缺口见 Should-1/2、Nit-2/3 |
 | 5 | 契约兼容 | **一致，公开 API 无变化** | `CachePort.invalidate` docstring（`:58-64`）与 `InMemoryCache.invalidate`（`:84-89`，`pop(key,None)` 幂等）及测试替身 `_SpyCache`（`test_cache_invalidation.py:31-37`）一致；构造参数与方法签名未变 |
-| 6 | 已知边界 A1 | **实现与声明一致，但无测试覆盖** | 规格 §10 A1（`R6-缓存按key失效-设计规格.md:72`）明示接受；实现 `pipeline.py:283-285` 只遍历本实例账本，符合声明。测试缺口见 Should-2 |
+| 6 | 已知边界 A1 | **实现与声明一致，但无测试覆盖** | 规格 §10 A1（`R6-RAG检索增强.md §12`）明示接受；实现 `pipeline.py:283-285` 只遍历本实例账本，符合声明。测试缺口见 Should-2 |
 
 ---
 
@@ -119,14 +119,14 @@
 - **证据**
   - 实现：`src/harness/rag/pipeline.py:269-270` —— `if new._cache is self._cache: new._cache_keys = self._cache_keys`，共享的是同一个 `set` 对象。
   - 测试：`tests/r6/test_cache_invalidation.py:80-82` —— 仅断言 `q_same._cache_keys is p._cache_keys` 与 `q_same._cache is p._cache`，**没有任何一侧 ingest 后对另一侧缓存条目的失效断言**。
-  - 声明：`docs/02-模块详设/Agent/R6-缓存按key失效-设计规格.md:73`（A2）、`:78`（S4 红线）。
+  - 声明：`docs/02-模块详设/Agent/R6-RAG检索增强.md §12.4`（A2 明示假设）、`§12`（S4 红线审查记录）。
 - **后果**：若后续实现被改成 `new._cache_keys = set(self._cache_keys)`（复制账本）或只在原实例保留账本，现有测试仍全绿，但新实例 ingest 将失效不到旧实例写入的 key，直接破 A2 与 S4——而这是 FR-5 存在的核心理由。测试只覆盖了"引用相同"，没覆盖"引用相同带来的效果"。
 - **建议改法**：在 `test_with_shares_or_resets_ledger` 中补行为断言：`p` 写入 key1、`q_same` 写入 key2 → 调 `q_same.ingest()` → 断言 `_SpyCache.data` 中 key1、key2 均被移除且共享账本为空 → 再令 `p.query` 同一 query 验证重算（新文档可见）。
 
 ### Should-2：A1 明示边界（别实例写入的 key 不被本实例 ingest 失效）无测试锁定
 
 - **证据**
-  - 声明：`docs/02-模块详设/Agent/R6-缓存按key失效-设计规格.md:72` 明示接受"共享 cache 下其他实例写入的 key 不在本实例账本内，本实例 ingest 不会失效它们"。
+  - 声明：`docs/02-模块详设/Agent/R6-RAG检索增强.md §12` 明示接受"共享 cache 下其他实例写入的 key 不在本实例账本内，本实例 ingest 不会失效它们"。
   - 实现：`src/harness/rag/pipeline.py:283-285` 只遍历 `self._cache_keys`，符合 A1。
   - 测试缺口：`tests/r6/test_cache_invalidation.py:40-87` 全程只有一个实例 + 一个 `_SpyCache`，未在 cache 中预置"别实例的 key"；`tests/r6/test_wiring.py:101-112` 也只验证单个自定义 cache 被委托，未构造共享 cache 多实例场景。
 - **后果**：本轮改动的**核心卖点**是"不误删共享缓存中他人的 key"，但没有任何测试证明这一点。若有人回退全表 clear、或在 `with_` 中错误扩大账本范围，A1 契约漂移不会被测试发现；同时 review 无法用测试证据确认 S4 之外的"不误伤"承诺。
@@ -210,7 +210,7 @@
 > 复审方式：只读。未修改任何源码/测试/文档（本报告为唯一新增文件）。
 > 复审输入：
 > - `overviews/2026-11-20/20261120-0402-rag-cache-key-invalidation.review.md`（2 Should + 4 Nit） 〔报告已内嵌本文件「独立 review 报告」章节〕
-> - `docs/02-模块详设/Agent/R6-缓存按key失效-设计规格.md`（FR-1~FR-7、A1/A2、S4）
+> - `docs/02-模块详设/Agent/R6-RAG检索增强.md §12`（FR-1~FR-7、A1/A2、S4）
 > - `git diff -- src/harness/rag/pipeline.py`
 > - `tests/r6/test_cache_invalidation.py`（4 用例，含 fix-loop 补的 2 个行为级测试）
 > - `overviews/2026-11-20/20261120-0402-rag-cache-key-invalidation.review2.md`（实现方 fix 记录） 〔报告已内嵌本文件「独立 review 报告」章节〕

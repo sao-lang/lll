@@ -21,6 +21,7 @@ from .protocols import (
     FailureClass,
     Prelude,
     Refiner,
+    Role,
     Salvage,
     Warden,
 )
@@ -29,5 +30,5 @@ __all__ = [
     "AOPContainer",
     "Invocation", "Next", "Verdict", "FaultRecord", "RoutingTarget",
     "FAULT_KEY", "ROUTING_TARGET_KEY",
-    "Prelude", "Warden", "Envelope", "Refiner", "Salvage", "FailureClass", "ROLE_NAMES",
+    "Prelude", "Warden", "Envelope", "Refiner", "Salvage", "FailureClass", "Role", "ROLE_NAMES",
 ]

@@ -114,7 +114,7 @@ class RAGPipeline:
 
 **实现覆盖状态**（v2.1，2026-11-19 独立 review 后如实登记，禁止把占位当已实现）：
 - ✅ **完整实现**：向量化、RRF 融合、预算拼接、引用溯源、乱序修复、空结果降级、注入检测接入、查询/入库向量同源。
-- 🟡 **简化/近似实现（可注入替换升级）**：切分（递归+overlap，无语义/父子块）；存储与索引（向量点积 + meta 精确匹配，关键词通道是词面覆盖扫描、非真 BM25/倒排索引）；重排（词面覆盖近似、非真 cross-encoder，协议可注入替换）；查询改写（默认规则改写=同义词替换+子查询分解，无模型、词表可注入，已非复制占位；语义改写 HyDE/step-back 仍需注入替换，详见[设计规格](./R6-改写器加厚-设计规格.md)）；缓存（**精确缓存** InMemoryCache/CachePort，非语义相似缓存）。
+- 🟡 **简化/近似实现（可注入替换升级）**：切分（递归+overlap，无语义/父子块）；存储与索引（向量点积 + meta 精确匹配，关键词通道是词面覆盖扫描、非真 BM25/倒排索引）；重排（词面覆盖近似、非真 cross-encoder，协议可注入替换）；查询改写（默认规则改写=同义词替换+子查询分解，无模型、词表可注入，已非复制占位；语义改写 HyDE/step-back 仍需注入替换，详见本文 §11）；缓存（**精确缓存** InMemoryCache/CachePort，非语义相似缓存，按 key 精准失效详见本文 §12）。
 - ⚪ **未实现 / 归其他模块**（设计保留能力，非当前模块缺陷）：查询路由（未实现，待 R12 装配决策）；MMR 去冗余（未实现）；权限/时效过滤的**语义判定**（当前仅做 meta 键值精确匹配与注入检测，复杂时效/权限规则归 R9）；自检索（未实现）；RAG 评测 Recall/MRR/NDCG（归 R10 EvalPort）；增量去重（当前 upsert 为追加，按 chunk_id/doc_id 覆盖语义未实现）。
 - **红线保障**：引用溯源 / 预算不超 / 空结果确定性 / 注入 fail-closed 四项均真实实现并有测试；其中注入检测复用 R5 检测器，逐块检测后对融合候选统一兜底过滤（filters + 注入），跨块切断注入串属已知边界（拼接插入引用串与换行降低可利用性，评估归 R9 输入护栏统一处理）。
 
@@ -132,8 +132,8 @@ class RAGPipeline:
 | 召回 | Retriever | 混合（向量+词面关键词，RRF 融合） | 返回 Hit 结构；两通道同施 filters |
 | 后处理 | PostProcessor | 默认（meta/注入兜底过滤+预算拼接+引用） | 不超预算、带引用 |
 | 重排 | Reranker | 词面覆盖近似（可注入 cross-encoder） | 返回 Hit 结构 |
-| 改写 | QueryRewriter | 规则改写（同义词替换+子查询分解，无模型，词表可注入；详见[改写器加厚设计规格](./R6-改写器加厚-设计规格.md)） | 不引入原问题没有的实体（同义词映射视为等价词） |
-| 缓存 | CachePort（R6 本地协议，语义同 R4 CachePort 的精确缓存） | InMemoryCache | 命中/invalidate 生效；ingest 按 key 精准失效（本实例写入的 key 逐个失效，不清空整表；with_ 换 cache 才重置账本，invalidate(key) 幂等，详见[缓存按 key 失效设计规格](./R6-缓存按key失效-设计规格.md)） |
+| 改写 | QueryRewriter | 规则改写（同义词替换+子查询分解，无模型，词表可注入；详见本文 §11） | 不引入原问题没有的实体（同义词映射视为等价词） |
+| 缓存 | CachePort（R6 本地协议，语义同 R4 CachePort 的精确缓存） | InMemoryCache | 命中/invalidate 生效；ingest 按 key 精准失效（本实例写入的 key 逐个失效，不清空整表；with_ 换 cache 才重置账本，invalidate(key) 幂等，详见本文 §12） |
 
 > 注入检测是第 9 个可替换参数（复用 R5 `InjectionDetector`）：通过 `detector=` 构造参数传入（`RAGPipeline.__init__` 白名单含 detector），默认由装配层给 `KeywordInjectionDetector`，缺席 fail-closed。
 
@@ -167,7 +167,7 @@ RAG 不是一个组件，是**可分层评测、逐层优化**的流水线。核
 | 层 | 参数 | 默认 | 作用 |
 |----|------|------|------|
 | 切分 | chunk_size / overlap / parent_child | 512 / 64 / True | 父子块兼顾精度与上下文 |
-| 改写 | n_variants / synonyms（策略固定为规则改写，无 strategy 入参） | 3（最多变体数，含原串）/ 内置精简词表可注入 | 同义词替换+标点/连接词拆子句；无模型（详见[设计规格](./R6-改写器加厚-设计规格.md)） |
+| 改写 | n_variants / synonyms（策略固定为规则改写，无 strategy 入参） | 3（最多变体数，含原串）/ 内置精简词表可注入 | 同义词替换+标点/连接词拆子句；无模型（详见本文 §11） |
 | 召回 | top_k_per_channel / channels | — | 向量+词面关键词并行（可注入 BM25/倒排替换） |
 | RRF | k / weights | 60 / 均等 | `RRF(d)=Σ w/(k+rank)`，融合不同量纲 |
 | 重排 | model / candidates / top_n | cross-encoder / 50 / 5 | 精排 top_n |
@@ -206,5 +206,81 @@ RAG 不是一个组件，是**可分层评测、逐层优化**的流水线。核
 | R6-G3 | 质量 | 混合召回高于纯向量基线 | G3 |
 | R6-红线 | 安全 | 无溯源/空结果编造/未过注入检测→拒绝 | 红线 |
 
+## 11. 补充设计规格 A：查询改写器加厚
+
+> 本章由独立文件 `R6-改写器加厚-设计规格.md` 完整并入（2026-11-20 合并），派生自 `overviews/2026-11-20/20261120-0335-thicken-rag-rewriter.md`（用户拍板 5 决策 + 两轮独立 review Blocker 清零）。对应本文 §5 实现覆盖状态、§6 改写行、§7.6 改写参数行。状态：已实现（`tests/r6/test_rewrite.py` 锁行为）。
+
+### 11.1 目标与红线
+- 目标：默认改写器从"近似占位"加厚为**无模型、确定性、可解释**的真实增益改写——同义词替换 + 按标点/连接词子查询分解。
+- 红线（保留）：**不引入原问题没有的实体**；同义词映射的值定义为原词的等价词，不违反该红线。
+- 禁止：不引入 LLM 调用；不复制占位实现；不新增类/别名（直接改造 `MultiQueryRewriter`）。
+
+### 11.2 用户拍板的 5 项决策
+| 项 | 决策 |
+|---|---|
+| 策略 | 规则扩展：同义词替换 + 子查询分解（标点/连接词切分） |
+| 词表 | 内置精简表（≥8 组中文同义词）+ 构造注入替换 |
+| 类名 | 直接改造 `MultiQueryRewriter`（不新增类/别名） |
+| 红线 | 保留"不引入原问题没有的实体"，同义词值=等价词 |
+| 分解符 | 标点 `。？！，,;；、` + 连接词 `和/与/及/以及/并/and/or/then` |
+
+### 11.3 功能需求
+- **FR-1** `_SPLIT_TOKENS` 具名常量：分解标点与连接词全集，禁魔法字符串散落。
+- **FR-2** `_DEFAULT_SYNONYMS` 具名常量：内置精简同义词表（≥8 组），构造可注入替换（`dict` 浅拷贝持有，防外部按引用改动）。
+- **FR-3** `_split_subqueries(text)`：迭代扫描切分子句，保留连续子串，去空白。
+- **FR-4** `_synonym_variants(text)`：对整串与子句做同义替换，产等价变体。
+- **FR-5** `MultiQueryRewriter.rewrite`：交错排序（原串/同义/子句交错），去重保序，按 `n_variants`（上限）截断。
+- **FR-6** 两轮填充（复审 S-R1/S-R2 修复）：基础轮=原串 + 1 同义 + 全部子句；增益轮=同义余量 + 子句同义。保证 N=6 时 4 个子句全部入窗，N=10 再填增益。
+- **FR-7** 整串同义保底 1 席（Blocker B1 修复）：默认 N=3 时不能被子句挤出截断窗，避免退化为近似占位。
+- **FR-8** docstring 责任声明：同义词映射为等价词，不改实体语义。
+
+### 11.4 非功能需求
+- **NFR-1** 确定性：同输入同输出，不依赖进程随机。
+- **NFR-2** 零模型依赖：不调用任何 LLM/Embedding。
+- **NFR-3** 可解释：变体来源（原串/同义/子句）可追溯。
+
+### 11.5 行为契约（测试锁定）
+- 默认 N=3 输出形如 `[原串, 同义变体, 子句1]`，两类策略均入窗。
+- N=6 时全部子句优先于子句同义入窗（FR-6 基础轮）。
+- N=10 再填子句同义增益（FR-6 增益轮）。
+- 注入词表按浅拷贝持有；注入 dict 后续改动不影响已构造的改写器。
+- 回归测试：`test_sr1_all_subqueries_survive_before_synonym_filler`。
+
+### 11.6 变更记录
+- v1.0（2026-11-20）：初版，5 决策拍板 + 8 FR + 3 NFR。
+- 两轮独立 review：轮1 Blocker B1（默认 N 同义变体被挤出）→ 交错排序 + 整串同义保底修复；轮2 Should S-R1/S-R2（多子句后段被挤/大 N 增益弱）→ 两轮填充修复。Blocker 清零。
+
+## 12. 补充设计规格 B：缓存按 key 精准失效
+
+> 本章由独立文件 `R6-缓存按key失效-设计规格.md` 完整并入（2026-11-20 合并），派生自 `overviews/2026-11-20/20261120-0402-rag-cache-key-invalidation.md`（用户拍板"清空对应的 key，即使内存也应清空对应 key" + 两轮独立 review Blocker 清零）。对应本文 §6 缓存行。状态：已实现（`tests/r6/test_cache_invalidation.py`）。
+
+### 12.1 背景与问题
+- 现状（改造前）：`pipeline.ingest` 后 `invalidate_cache()` 调无参 `CachePort.invalidate()` → `InMemoryCache.invalidate(None)` 整表 `_data.clear()`，误伤共享缓存中他人 key。
+- `CachePort.invalidate(key=None)` 契约本就支持单 key，只是 pipeline 没用。
+- `with_` 注释称"缓存内容不迁移（新实例空缓存）"与实际共享 cache 对象不一致（账本归属问题）。
+
+### 12.2 设计决策（§6 Approaches 四选一）
+- **选定：账本 + 逐 key 失效**。`RAGPipeline` 增 `_cache_keys` 账本，登记本实例写入的 key；ingest 后逐个 `invalidate(key)`，不再全清。
+- 否决：全表 clear（误伤共享 key）、前缀匹配（无统一前缀）、版本号（键无语料版本维度）。
+
+### 12.3 功能需求
+- **FR-1** 构造建 `_cache_keys` 账本（set）。
+- **FR-2** `query()` 写入缓存时登记 key 到账本。
+- **FR-3** `invalidate_cache()` 逐 key `invalidate(key)`，并用差集清账本。
+- **FR-4** `with_` 账本归属：cache 实例未替换 → 新实例共享同一账本（否则新实例 ingest 失效不到旧实例写入的 key，破 S4 新文档可见）；cache 被替换 → 新实例空账本。
+- **FR-5** `CachePort.invalidate(key)` 对不存在 key 幂等（默认实现 `pop(key, None)` 已满足）；pipeline 仅依赖单键语义，不再依赖 None 全清能力。
+- **FR-6** 门禁与测试：`tests/r6/test_cache_invalidation.py`（命中/invalidate 按 key、共享账本、幂等）。
+- **FR-7** 命名：`test_invalidate_by_key_not_all` 落地为 `test_ingest_invalidates_by_key_not_whole_cache`（纯命名偏差，复审确认不阻断）。
+
+### 12.4 明示假设（供否决，未被否决）
+- **A1**：共享 cache 场景下"别实例写入的 key"不在本实例账本内，本实例 ingest 不会失效它们——按 key 方案的固有取舍（全表 clear 才覆盖）。接受。
+- **A2**：`with_` 未换 cache 时共享账本（FR-4）。接受。
+
+### 12.5 已知边界
+- A1 的跨实例 key 不失效是有意取舍；若要求跨实例全覆盖需注入共享账本或全清（违背本次用户决策）。
+
+### 12.6 变更记录
+- v1.0（2026-11-20）：账本+逐key 方案，FR-1~7。两轮独立 review：轮1 2 项 Should（共享账本行为、别实例 key 不误删）补行为级测试；轮2 Blocker 0 通过。
+
 ---
-*R6 模块详设 v2.1 · 2026-11-19 修订（RAGPort 履约/注入职责/测试目录口径）+ 代码已实现 · 派生自 AGENT-总设计*
+*R6 模块详设 v2.1 · 2026-11-19 修订（RAGPort 履约/注入职责/测试目录口径）+ 代码已实现 · 派生自 AGENT-总设计 · 2026-11-20 合并：改写器加厚、缓存按 key 失效两份补充规格完整并入 §11/§12*

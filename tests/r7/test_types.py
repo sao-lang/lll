@@ -42,7 +42,9 @@ def test_trim_policy_is_named_enum() -> None:
 def test_memory_enums() -> None:
     """FR-9：三层三类枚举取值固定。"""
     assert [t.value for t in MemoryTier] == ["hot", "warm", "cold"]
-    assert set(k.value for k in MemoryKind) == {"episodic", "semantic", "procedural"}
+    assert set(k.value for k in MemoryKind) == {
+        "episodic", "semantic", "procedural", "profile", "preference", "entity", "journal"
+    }
 
 
 def test_memory_item_frozen() -> None:

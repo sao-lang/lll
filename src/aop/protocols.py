@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import Protocol, runtime_checkable
 
 from runtime import Result
@@ -26,6 +27,7 @@ __all__ = [
     "Refiner",
     "Salvage",
     "FailureClass",
+    "Role",
     "ROLE_NAMES",
 ]
 
@@ -84,5 +86,17 @@ class Salvage(Protocol):
     async def recover(self, exc: Exception, inv: Invocation) -> Result: ...
 
 
-ROLE_NAMES = ("prelude", "warden", "envelope", "refiner", "salvage")
-"""五角色注册名（AOPContainer 内部分组键）。"""
+class Role(str, Enum):
+    """五角色注册名（AOPContainer.register 分派用；有限集合，禁用魔法串）。
+
+    继承 str 保持与既有字符串配置/装配层入参兼容（Role("warden") 可解析）。
+    """
+    PRELUDE = "prelude"
+    WARDEN = "warden"
+    ENVELOPE = "envelope"
+    REFINER = "refiner"
+    SALVAGE = "salvage"
+
+
+ROLE_NAMES = tuple(r.value for r in Role)
+"""五角色注册名的值元组（从 Role 派生，避免与 Enum 双源漂移）。"""

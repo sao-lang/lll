@@ -19,12 +19,42 @@ from types import MappingProxyType
 from typing import Any, Protocol, TypedDict, cast
 
 __all__ = [
-    "DONE", "AgentState", "BudgetDelta", "Budgets", "CallFn", "DispatchFn",
-    "Disposition", "DoneSentinel", "DynamicValue", "Effect", "EffectPayload", "Event",
-    "EventStore", "Invoke", "JsonSnapshot", "Message", "Payload", "PortError", "PortName",
-    "Program", "Result", "RunResult", "RuntimeCtx", "Scratchpad", "Session",
-    "Spawn", "StateSnapshot", "StepReport", "Suspend", "Terminate", "Usage",
-    "CancellationToken", "canonical", "checkpoint", "fingerprint", "restore_checkpoint",
+    "DONE",
+    "AgentState",
+    "BudgetDelta",
+    "Budgets",
+    "CallFn",
+    "CancellationToken",
+    "DispatchFn",
+    "Disposition",
+    "DoneSentinel",
+    "DynamicValue",
+    "Effect",
+    "EffectPayload",
+    "Event",
+    "EventStore",
+    "Invoke",
+    "JsonSnapshot",
+    "Message",
+    "Payload",
+    "PortError",
+    "PortName",
+    "Program",
+    "Result",
+    "RunResult",
+    "RuntimeCtx",
+    "Scratchpad",
+    "Session",
+    "Spawn",
+    "StateSnapshot",
+    "StepReport",
+    "Suspend",
+    "Terminate",
+    "Usage",
+    "canonical",
+    "checkpoint",
+    "fingerprint",
+    "restore_checkpoint",
 ]
 
 # --------------------------------------------------------------------------- #
@@ -530,7 +560,7 @@ class Terminate:
 Effect = Invoke | Spawn | Suspend | Terminate
 """Effect tagged union：内核按具体类型分派，只有 Invoke 走 AOP 增强链。"""
 
-_EFFECT_BY_DISPOSITION: Mapping[str, type[Invoke] | type[Spawn] | type[Suspend] | type[Terminate]] = MappingProxyType({
+_EFFECT_BY_DISPOSITION: Mapping[str, type[Invoke | Spawn | Suspend | Terminate]] = MappingProxyType({
     Disposition.INVOKE.value: Invoke,
     Disposition.SPAWN.value: Spawn,
     Disposition.SUSPEND.value: Suspend,

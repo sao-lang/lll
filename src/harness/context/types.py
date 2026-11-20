@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 __all__ = [
+    "SYSTEM_SECTION_NAME",
     "TrimPolicy",
     "ContextSection",
     "TRIGGER_RATIO",
@@ -16,6 +17,9 @@ __all__ = [
     "DEFAULT_KEEP_RECENT",
     "DEFAULT_PIN_PATTERNS",
 ]
+
+# system 段名（具名常量，禁止裸魔法串；由 assembler 重导出保持 API 兼容）。
+SYSTEM_SECTION_NAME = "system"
 
 
 class TrimPolicy(StrEnum):

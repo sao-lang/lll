@@ -13,15 +13,20 @@ from __future__ import annotations
 import inspect
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 from hooks.lifecycle import LifecycleBus, LifecyclePhase, Notice
 from runtime import Effect, Result
 
 from .invocation import (
-    FAULT_KEY, ROUTING_TARGET_KEY, FaultRecord, Invocation, Next, Verdict,
+    FAULT_KEY,
+    ROUTING_TARGET_KEY,
+    FaultRecord,
+    Invocation,
+    Next,
+    Verdict,
 )
-from .protocols import Envelope, Prelude, Refiner, Salvage, Warden
+from .protocols import Envelope, Prelude, Refiner, Role, Salvage, Warden
 
 __all__ = ["AOPContainer"]
 
@@ -48,8 +53,14 @@ class AOPContainer:
     """按角色注册增强器并固定顺序编排；共用 Registry；降级裁决接 Salvage。"""
 
     __slots__ = (
-        "registry", "_preludes", "_wardens", "_envelopes", "_refiners",
-        "_salvages", "_core", "_bus",
+        "_bus",
+        "_core",
+        "_envelopes",
+        "_preludes",
+        "_refiners",
+        "_salvages",
+        "_wardens",
+        "registry",
     )
 
     def __init__(
@@ -102,26 +113,27 @@ class AOPContainer:
         self._salvages.append(p)
         return self
 
-    def register(self, role: str, p: object) -> AOPContainer:
-        """按角色名注册（装配期从 extra_plugins 分派用）。
+    def register(self, role: Role | str, p: object) -> AOPContainer:
+        """按角色注册（装配期从 extra_plugins 分派用）。
 
         参数：
-            role: 五角色名之一。
+            role: Role 成员或等值字符串（装配层从配置读到的仍是 str，故兼容）。
             p: 增强器实例（须有 name）。
         异常：
             ValueError: 未知角色。
         """
-        if role == "prelude":
-            return self.add_prelude(p)  # type: ignore[arg-type]
-        if role == "warden":
-            return self.add_warden(p)  # type: ignore[arg-type]
-        if role == "envelope":
-            return self.add_envelope(p)  # type: ignore[arg-type]
-        if role == "refiner":
-            return self.add_refiner(p)  # type: ignore[arg-type]
-        if role == "salvage":
-            return self.add_salvage(p)  # type: ignore[arg-type]
-        raise ValueError(f"unknown aop role: {role}")
+        try:
+            r = role if isinstance(role, Role) else Role(role)
+        except ValueError as exc:
+            raise ValueError(f"unknown aop role: {role}") from exc
+        adders: dict[Role, Callable[[Any], AOPContainer]] = {
+            Role.PRELUDE: self.add_prelude,
+            Role.WARDEN: self.add_warden,
+            Role.ENVELOPE: self.add_envelope,
+            Role.REFINER: self.add_refiner,
+            Role.SALVAGE: self.add_salvage,
+        }
+        return adders[r](p)
 
     def _emit_rejected(self, inv: Invocation, reason: str) -> None:
         """发 invoke_rejected 通知（堵审计盲区；异常隔离由总线保证）。
@@ -177,7 +189,7 @@ class AOPContainer:
             inv = await r.refine(inv)
         try:
             result = await _await_result(self._core(inv))
-        except Exception as exc:  # 中心异常进 Salvage  # noqa: BLE001
+        except Exception as exc:  # 中心异常进 Salvage
             salvaged = await self._apply_salvage(inv, exc)
             if salvaged is None:
                 raise
