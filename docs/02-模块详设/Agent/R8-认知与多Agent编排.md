@@ -23,7 +23,15 @@
 flowchart TD
     subgraph 认知
         UI["用户意图"] --> INT["IntentStrategy 识别 label/confidence/gaps"]
-        INT --> CLR{"信息不足?"}
+        INT -->|默认四级级联 详见 R13| C1["L1 关键词匹配"] --> C2{"达阈值?"}
+        C2 -->|否| C3["L2 语义匹配(采样库)"] --> C4{"达阈值?"}
+        C4 -->|否| C5["L3 便宜模型"] --> C6{"达阈值?"}
+        C6 -->|否| C7["L4 主模型兜底"]
+        C2 -->|是| CLR
+        C4 -->|是| CLR
+        C6 -->|是| CLR
+        C7 --> CLR
+        CLR{"信息不足?"}
         CLR -->|是| ASK["Suspend(question/options) 澄清<br/>发 wait_human 通知，resumed 后继续"]
         CLR -->|否| PLAN["Planner 产出 steps"] --> EXEC["Executor 逐 step 调度"]
         EXEC --> F{"失败超阈值/环境变化?"}
@@ -43,9 +51,12 @@ flowchart TD
 ## 4. API 规范（完整接口）
 
 ```python
-class IntentStrategy(Protocol):
+class IntentStrategy(Protocol):                     # 整体意图策略；默认四级级联，注入即整包替换
     name: str
-    async def recognize(self, text, ctx) -> IntentResult: ...   # label/confidence/gaps
+    async def recognize(self, text, ctx) -> IntentResult: ...   # label/confidence/gaps[/trace]
+# 默认四级级联 CascadeIntentStrategy 的四个可注入部件（协议+默认+入口+校验 见 R13 §4/§4.1）：
+#   KeywordMatcher(L1 关键词) / IntentSampleStore(L2 采样库) / CheapIntentModel(L3) / PrimaryIntentModel(L4)
+#   build() -> Program 逐级 yield Effect，命中阈值即停；经 intent_as_program 供 Router 单入口消费
 class ReflectStrategy(Protocol):
     name: str
     async def critique(self, draft, goal, ctx) -> Critique: ...  # passed/score/comments
@@ -76,7 +87,7 @@ seq / par / branch / race / retry / map_state / budget
 
 | 字段 | 说明 |
 |------|------|
-| IntentResult | label/confidence(0~1)/gaps（信息缺口触发澄清） |
+| IntentResult | label/confidence(0~1)/gaps（信息缺口触发澄清）；可选 trace（命中级 + 逐级 label/confidence，观察语义、非内核必填） |
 | Critique | passed/score/comments |
 | Step | 可执行步骤（明确动作+校验条件） |
 | ChildHandle | child_session_id/budget 分账/trace 父 span |
@@ -89,7 +100,8 @@ seq / par / branch / race / retry / map_state / budget
 
 | 注入点 | 协议 | 默认 | 校验 |
 |--------|------|------|------|
-| 意图/反思/规划 | IntentStrategy 等 | LLM 分类/critic/分解 | 返回结构完整；缺 name 拒绝 |
+| 意图 | `IntentStrategy`（整体替换）/ 四部件 `KeywordMatcher`·`IntentSampleStore`·`CheapIntentModel`·`PrimaryIntentModel`（仅默认级联内可注入） | 默认四级级联 `CascadeIntentStrategy`（关键词→语义→便宜模型→主模型，R13 §4.1）；其余 LLM 分类/critic/分解 | 返回结构完整；缺 name 拒绝 |
+| 反思/规划 | ReflectStrategy/Planner 等 | LLM critic/分解 | 返回结构完整；缺 name 拒绝 |
 | 子 Agent | ChildSpec | ReAct 子 | 并发上限/预算分账 |
 | 架构 | Arch | 10 内置（详见 R12） | static_check 查悬空边/环/缺 port |
 
@@ -115,6 +127,7 @@ seq / par / branch / race / retry / map_state / budget
 | 功能点 | 用例 ID | 验证方式 | 通过标准 |
 |--------|---------|---------|---------|
 | 意图识别 | R8-T01 | `pytest tests/r8/test_intent.py -q` | 分类+置信度+gaps |
+| 意图四级级联 | R8-T08 | `pytest tests/r8/test_intent.py -q` | 默认四级逐级短路/兜底/四部件注入/strategy 整体替换（详见 R13-T06/T07） |
 | 规划执行 | R8-T02 | `pytest tests/r8/test_plan.py -q` | steps 游标正确 |
 | 反思轮换 | R8-T03 | `pytest tests/r8/test_reflect.py -q` | max_rounds 处结束 |
 | 10 架构 | R8-T04 | `pytest tests/r12/test_archs.py -q` | 各端到端通过 |

@@ -6,6 +6,7 @@
 > **配套**：模块详设 `docs/02-模块详设/Agent/`（由本文按 R1~R13 拆分派生，每模块模块内闭环、含 API/字段/门禁）；能力全集见[《能力域全景》](./能力域全景.md)（含自查补齐内容，见附录 B.1 待办清单）。
 > **状态**：设计定稿——**算子核心架构**（依据 `docs/01-总览与设计/组合式工具层重构规格-20261121.md` P1~P9 / D-1~D-10）。R1 一行不改；R2 取消（文档《算子与装配》承接其能力）；组合层 = 算子核心；工具层 R3~R9 可挑选可组合；对外 API 不变。依赖方向恒为 **工具层 → 组合层（算子 + call） → 内核 R1**，R1 零依赖上层。
 > **版本记录**：
+> - 2026-11-21（意图识别默认四级级联路由）：意图策略默认实现由单级"规则/LLM 分类"改为**四级级联 `CascadeIntentStrategy`**（L1 关键词→L2 语义/采样库→L3 便宜模型→L4 主模型，逐级置信度阈值短路 + 兜底）；四个部件 `KeywordMatcher`/`IntentSampleStore`/`CheapIntentModel`/`PrimaryIntentModel` 各自可按接口注入，`strategy=` 整体注入则整包替换默认级联（两级注入共存）；修 R12 Router/RouterSkill 裂缝——统一经 `intent_as_program()` 单入口消费 `IntentResult`，不再把 classifier 塞进 prompt 解析。IntentResult 加可选 trace（观察语义，不下沉内核）。同步 R8/R12/R13/总设/能力域全景；纯文档变更无代码改动。
 > - 2026-11-21（R7 D4/D5 新增方案）：R7 上下文管理补两项正交增强——**D4 大 tool 结果落盘而非截断**（`OffloadPolicy` 阈值判定 + BlobPort 句柄，`mode="truncate"` 构造即拒绝，不留兼容层）；**D5 KV cache 命中率一等可观测指标**（`CacheTelemetry` hits/misses/label/hit_rate 挂 `ContextMemoryManager.cache_telemetry` 观测面，可进 R10 trace、无访问 0.0 不产 NaN）。同步 R7 详设 §11.6/§12.5/§4 与总设 §R7。9 个 TDD 测试 + gate r7 15/15，全量绿、R1 零改动。
 > - 2026-11-21（算子核心架构重构）：框架核心由 AOP 五角色容器改为**算子核心**。核心定性——能力（169 项，做什么）与承载形态（7 种，怎么实现）二维分类，"算子"专指 ① 组合算子（`Program → Program`）；A 类算子恰好 10 个（seq/par/branch/race/loop/map_state/map_effect/fallback/gate/retry 流程级），纯函数、状态进 `State.scratch` 的 `x-*`，resume 靠 program_factory 重建；②有状态守卫 + ③call 装饰器取代原 AOP 五角色固定链（③在调用前后驱动②的 check/observe）；④notify 是 R1 既有回调；⑤Port/⑥组件可插拔；⑦内核机制不进算子层。R1 零改动（代价：call 拦不到 Spawn/Suspend/Terminate，靠 notify 观察，D-7）；领域字段净化登记技术债（D-9）；整体替换不留兼容层（D-10），R6 先试点。本次重写总纲 §1.2/§2/§5、R1（加定位节）、R2（《算子与装配》）、R12（10 算子 + 装配期边界）、R13（ToolLayer + Port 归位），R3~R7 按 7 承载形态归位。
 > - 2026-11-20（扩展体系重构，已被上条取代）：三体系正交——Port（what）/ AOP 增强器（how，五角色固定链）/ Lifecycle 通知（when，16 通知点）；Effect 拆为 `Invoke|Spawn|Suspend|Terminate` tagged union。AOP 五角色固定链本次已被"call 装饰器链 + 有状态守卫"取代，16 通知相位保留为 R1 notify 回调。
@@ -1352,7 +1353,15 @@ class MemoryItem:
 flowchart TD
     subgraph 认知服务
         UI["用户意图"] --> INT["IntentStrategy 识别<br/>label/confidence/gaps"]
-        INT --> CLR{"信息不足?"}
+        INT -->|默认四级级联 详见 R13| C1["L1 关键词匹配"] --> C2{"达阈值?"}
+        C2 -->|否| C3["L2 语义匹配(采样库)"] --> C4{"达阈值?"}
+        C4 -->|否| C5["L3 便宜模型"] --> C6{"达阈值?"}
+        C6 -->|否| C7["L4 主模型兜底"]
+        C2 -->|是| CLR
+        C4 -->|是| CLR
+        C6 -->|是| CLR
+        C7 --> CLR
+        CLR{"信息不足?"}
         CLR -->|是| ASK["Suspend(question/options) 澄清"]
         CLR -->|否| PLAN["Planner 产出 steps"]
         PLAN --> EXEC["Executor 逐 step 调度"]
@@ -1375,9 +1384,12 @@ flowchart TD
 ### R8.4 API 接口
 
 ```python
-class IntentStrategy(Protocol):
+class IntentStrategy(Protocol):                     # 整体意图策略；默认四级级联，注入即整包替换
     name: str
-    async def recognize(self, text, ctx) -> IntentResult: ...   # label/confidence/gaps
+    async def recognize(self, text, ctx) -> IntentResult: ...   # label/confidence/gaps[/trace]
+# 默认四级级联 CascadeIntentStrategy 的四个可注入部件（详见 R13 §4/§4.1）：
+#   KeywordMatcher(L1 关键词) / IntentSampleStore(L2 采样库) / CheapIntentModel(L3) / PrimaryIntentModel(L4)
+#   build() -> Program 逐级 yield Effect，命中阈值即停；经 intent_as_program 供 Router 单入口消费
 class ReflectStrategy(Protocol):
     name: str
     async def critique(self, draft, goal, ctx) -> Critique: ...  # passed/score/comments
@@ -1415,7 +1427,7 @@ seq(a,b); par([...]); branch(fn, arms); race([...]); retry(n,backoff); map_state
 
 | 字段 | 说明 |
 |------|------|
-| IntentResult | label / confidence(0~1) / gaps（信息缺口，触发澄清） |
+| IntentResult | label / confidence(0~1) / gaps（信息缺口，触发澄清）；可选 trace（命中级 + 逐级置信度，观察语义、非内核必填） |
 | Critique | passed / score / comments（修订意见） |
 | Step | 可执行步骤（明确动作 + 校验条件） |
 | ChildHandle | child_session_id / budget 分账 / trace 父 span |
@@ -1428,7 +1440,8 @@ seq(a,b); par([...]); branch(fn, arms); race([...]); retry(n,backoff); map_state
 
 | 注入点 | 协议 | 默认 | 校验 |
 |--------|------|------|------|
-| 意图/反思/规划 | IntentStrategy 等 | LLM 分类/critic/分解 | 返回结构完整；缺 name 拒绝 |
+| 意图 | `IntentStrategy`（整体替换）/ 四部件 `KeywordMatcher`·`IntentSampleStore`·`CheapIntentModel`·`PrimaryIntentModel`（仅默认级联内可注入） | 默认四级级联 `CascadeIntentStrategy`（关键词→语义→便宜模型→主模型，R13 §4.1） | 返回结构完整；缺 name 拒绝 |
+| 反思/规划 | ReflectStrategy/Planner 等 | LLM critic/分解 | 返回结构完整；缺 name 拒绝 |
 | 子 Agent | ChildSpec | ReAct 子 | 并发上限/预算分账 |
 | 架构 | Arch | 10 内置 | static_check 查悬空边/环/缺 port |
 
@@ -1773,7 +1786,7 @@ call = build_call(ports, decorators=[retry_call, timeout], guards=[MyGuard()])  
 | R5 | ToolSpec{danger,source} / ToolResultMeta / DisclosurePacket{L1,L2,L3,token_cost} |
 | R6 | Chunk / Hit / Query / RAGResult{empty,citations} / TokenBudget / RRF k=60 |
 | R7 | ContextSection / MemoryTier / MemoryKind(七类) / MemoryItem{item_id,kind,tier,importance,confidence,scope} / MemoryScope(tenant) / Reinjector / TokenCounter / offload 句柄 |
-| R8 | IntentResult / Critique / Step / ChildHandle / JoinStrategy / StaticCheckReport |
+| R8 | IntentResult{label,confidence,gaps,trace?} / Critique / Step / ChildHandle / JoinStrategy / StaticCheckReport |
 | R9 | DangerLevel / SafetyReport / AuditEvent / secret_refs / PII 字段 |
 | R10 | TraceSpan / topic / EvalCase / CheckpointSnapshot |
 | R11 | AgentSpec / profile / port 命名空间 / 触发入口 |
@@ -1785,7 +1798,7 @@ call = build_call(ports, decorators=[retry_call, timeout], guards=[MyGuard()])  
 | 组 | 协议 | 默认实现 | 用户接入 |
 |----|------|---------|---------|
 | 扩展/装配 | ①A 类算子（10）/ ②Guard（check/observe）/ ③call 装饰器（CallFn→CallFn）/ ④notify / `Verdict` / Capability（build→Program）/ Provider | 无（按需）/ 内置能力 | `seq/par/...` / `build_call(decorators,guards)` / `Runner(notify=...)` / `.capability()` |
-| 认知 | IntentStrategy / ReflectStrategy / Planner / RePlanner / Executor / Judge / ModelRouter / SchemaValidator | LLM 默认 / MinimalSchemaValidator | 构造参数 `strategy=` / `validator=` |
+| 认知 | IntentStrategy（+ 级联四部件 KeywordMatcher/IntentSampleStore/CheapIntentModel/PrimaryIntentModel）/ ReflectStrategy / Planner / RePlanner / Executor / Judge / ModelRouter / SchemaValidator | 意图默认四级级联 CascadeIntentStrategy（R13 §4.1）；其余 LLM 默认 / MinimalSchemaValidator | 构造参数 `strategy=`（整体替换）/ `CascadeIntentStrategy(keyword=,samples=,cheap=,primary=)`（部件级）/ `validator=` |
 | RAG | Splitter / Embedder / VectorStore / Retriever / Reranker / QueryRewriter / PostProcessor | 见 R6 | `RAGPipeline(...=)` |
 | 工具 | ToolPort/@tool / MCPTransport / SkillPort / DisclosureIndex | 见 R5 | `register()` / 构造参数 |
 | Port | LLMPort / MemoryPort / StorePort / SandboxPort / TelemetryPort / HumanPort / AuditPort / EvalPort | 见各模块 | `registry.register()` |
