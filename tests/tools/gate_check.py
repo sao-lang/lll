@@ -144,7 +144,7 @@ MODULES = {
         ],
         "behavior": [
             "test_types.py", "test_assembly.py", "test_compaction.py",
-            "test_optimization_chains.py", "test_context_policies.py",
+            "test_optimization_chains.py", "test_context_policies.py", "test_trap_fixes.py",
         ],
         "integration": [
             "test_offload.py", "test_memory.py", "test_wiring.py",

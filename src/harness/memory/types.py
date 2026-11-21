@@ -8,6 +8,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from harness.rag.types import TokenBudget
+
 __all__ = [
     "MMR_LAMBDA",
     "NEAR_DUP_SIM_THRESHOLD",
@@ -126,6 +131,7 @@ class MemoryQuery:
     tier: MemoryTier | None = None
     kind: MemoryKind | None = None
     scope: MemoryScope | None = None
+    budget: TokenBudget | None = None  # 召回链预算裁剪（§12.4）：给定则按 token 贪心装入，缺省仅 top_k
 
 
 # secret 键名特征（大小写不敏感子串匹配；键与值双向检测的第一道闸）。

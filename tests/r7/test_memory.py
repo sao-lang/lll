@@ -69,16 +69,20 @@ def test_injection_content_rejected() -> None:
 
 
 def test_tier_promotion_and_demotion() -> None:
-    """FR-9：分层晋升（hot→warm→cold）与降级/回温。"""
+    """FR-9：晋升=回温（cold→warm→hot）、降级=沉降（hot→warm→cold）。
+
+    指南 §7-8 陷阱修复：旧实现 promote 方向反了（实为沉降），本版按详设 §12.2
+    "高频/高分者晋升" 与词面直觉纠正。
+    """
     ms = MemoryStore()
     item = MemoryItem(MemoryKind.SEMANTIC, "事实", 0.9, 1, "test")
-    ms.put_item(item, MemoryTier.HOT)
-    assert ms.tier_of(item) is MemoryTier.HOT
-    ms.promote(item)  # hot → warm → cold（加深归档）
-    assert ms.tier_of(item) is MemoryTier.WARM
-    ms.promote(item)
+    ms.put_item(item, MemoryTier.COLD)
     assert ms.tier_of(item) is MemoryTier.COLD
-    ms.demote(item)  # cold → warm（回温）
+    ms.promote(item)  # cold → warm（回温）
+    assert ms.tier_of(item) is MemoryTier.WARM
+    ms.promote(item)  # warm → hot
+    assert ms.tier_of(item) is MemoryTier.HOT
+    ms.demote(item)  # hot → warm（沉降）
     assert ms.tier_of(item) is MemoryTier.WARM
 
 

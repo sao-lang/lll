@@ -10,12 +10,13 @@ from typing import Protocol, runtime_checkable
 from harness.rag.types import TokenBudget
 from runtime import Message
 
+# 摘要消息角色单一定义源在 compaction.py（指南 §7-11 双源修复）；
+# 此处重导出供调用方按同一语义引用，避免两处字面量漂移。
+from .compaction import SUMMARY_ROLE
 from .token_counter import DefaultTokenCounter, TokenCounter
 
-__all__ = ["DefaultReinjector", "Reinjector"]
+__all__ = ["DefaultReinjector", "Reinjector", "SUMMARY_ROLE"]
 
-# 摘要消息的角色标记（独立于 system，防止下轮 compact 按 role 永久钉住）。
-SUMMARY_ROLE = "summary"
 # 钉住消息的角色标记。
 PINNED_ROLE = "pinned"
 # 回注段配额占预算的比例上限（防止重注入挤占主任务）。

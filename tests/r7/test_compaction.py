@@ -74,6 +74,6 @@ def test_compact_does_not_mutate_messages() -> None:
 
 
 def test_count_tokens_named() -> None:
-    """token 计数为具名函数，近似字符/4。"""
+    """token 计数为具名函数，统一口径 len(text)（Unicode 码点，非字符/4）。"""
     assert count_tokens("") == 0
     assert count_tokens("abcd") >= 1

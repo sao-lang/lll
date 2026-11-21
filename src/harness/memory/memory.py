@@ -24,6 +24,7 @@ from runtime import DynamicValue
 from .types import (
     MMR_LAMBDA,
     NEAR_DUP_SIM_THRESHOLD,
+    PREFERENCE_REPEAT_THRESHOLD,
     PROFILE_CONFIDENCE_THRESHOLD,
     RERANK_W_CONFIDENCE,
     RERANK_W_IMPORTANCE,
@@ -174,11 +175,21 @@ class MemoryStore:
         ranked = sorted(scored, key=lambda pair: pair[1], reverse=True)
         selected = self._mmr(ranked)
         out: list[MemoryItem] = []
+        # §12.4 预算裁剪：给定 budget 时按 token 贪心装入（超出丢弃低分项，非整段丢弃），
+        # 否则退回 top_k 截断（指南 §7-9 陷阱修复）。两条路径都先过 top_k 上限。
+        budget_limit = query.budget.limit if query.budget is not None else None
+        used = 0
         for item, _ in selected[: query.top_k]:
             if self._scan_text(item.content):
                 continue  # 历史脏数据注入复检：命中即跳过（fail-closed）
+            cost = len(item.content)  # R7 统一口径（Unicode 码点，同 token_counter.estimate_tokens）
+            if budget_limit is not None and used + cost > budget_limit:
+                continue  # 贪心：当前项放不下就跳过，继续尝试更小项（非整段丢弃）
             fresh = self.record_access(item)
             out.append(fresh if fresh is not None else item)
+            used += cost
+            if budget_limit is not None and used >= budget_limit:
+                break
         return out
 
     # ---------- 分层与治理 ----------
@@ -225,7 +236,21 @@ class MemoryStore:
             落库的 MemoryItem；被判为近重复而合并时返回已存项。
         """
         scope = ScopeResolver.resolve(ctx)
-        chosen = kind if kind is not None else self.refine_kind(text, confidence)
+        # 同类约束历史累计（§12.2 "≥3 次"）：同 tenant 已存的 preference 约束项数。
+        # 显式 kind 时无需统计（调用方已裁定）。
+        pref_hits = 0
+        if kind is None:
+            pref_hits = sum(
+                1
+                for stored in self._items.values()
+                if stored.scope.tenant == scope.tenant
+                and stored.kind is MemoryKind.PREFERENCE
+            )
+        chosen = (
+            kind
+            if kind is not None
+            else self.refine_kind(text, confidence, preference_hits=pref_hits)
+        )
         normalized = " ".join(text.split())
         item_id = make_item_id(scope.tenant, chosen, normalized)
         timestamp = now if now is not None else time_ns()
@@ -253,31 +278,44 @@ class MemoryStore:
         return item
 
     @staticmethod
-    def refine_kind(text: str, confidence: float) -> MemoryKind:
+    def refine_kind(
+        text: str, confidence: float, *, preference_hits: int = 0
+    ) -> MemoryKind:
         """按 §12.2 互斥优先级判定内容类型（命中即停）。
+
+        优先级（详设 §12.2 权威序）：preference → profile → entity → procedural
+        → journal → episodic → semantic。此前代码把 journal 提到 entity 前、
+        procedural 又先于 entity，与详设冲突（指南 §7-3），本版已纠正。
 
         Args:
             text: 规范化正文。
             confidence: 来源置信度（profile 高置信推断阈值）。
+            preference_hits: 同类约束历史累计出现次数；达 PREFERENCE_REPEAT_THRESHOLD
+                即使无显式偏好词也判 preference（落实详设 §12.2 "≥3 次"，指南 §7-2）。
 
         Returns:
             判定的 MemoryKind；兜底 SEMANTIC。
         """
         folded = text.casefold()
-        if any(tok in folded for tok in ("要", "不要", "总是", "禁止", "prefer", "must")):
+        explicit_pref = any(
+            tok in folded for tok in ("要", "不要", "总是", "禁止", "prefer", "must")
+        )
+        # 显式偏好词，或同类约束累计命中达阈值（历史重复）→ preference。
+        if explicit_pref or preference_hits >= PREFERENCE_REPEAT_THRESHOLD:
             return MemoryKind.PREFERENCE
         if confidence >= PROFILE_CONFIDENCE_THRESHOLD and any(
             tok in folded for tok in ("我是", "角色", "职业", "领域", "工程师", "身份")
         ):
             return MemoryKind.PROFILE
-        if any(tok in folded for tok in ("决定了", "因为", "选择", "决策")):
-            return MemoryKind.JOURNAL
+        # entity 在 procedural/journal 之前（具名实体+属性优先于事件/步骤）。
+        if any(tok in folded for tok in ("项目", "工具", "实体", "实体卡", "Alpha", "Beta")):
+            return MemoryKind.ENTITY
         if any(tok in folded for tok in ("步骤", "流程", "先", "然后", "recipe")):
             return MemoryKind.PROCEDURAL
+        if any(tok in folded for tok in ("决定了", "因为", "选择", "决策")):
+            return MemoryKind.JOURNAL
         if any(tok in folded for tok in ("发生", "上次", "昨天", "参加了")):
             return MemoryKind.EPISODIC
-        if any(tok in folded for tok in ("项目", "工具", "实体", "实体卡")):
-            return MemoryKind.ENTITY
         return MemoryKind.SEMANTIC
 
     @staticmethod
@@ -344,12 +382,16 @@ class MemoryStore:
         return len(self._items)
 
     def promote(self, item: MemoryItem) -> None:
-        """加深归档一级：hot→warm→cold；已在 cold 不动。"""
-        self._shift(item, +1)
+        """晋升/回温一级：cold→warm→hot（高访问/高 importance 更易被召回）；已在 hot 不动。
+
+        对齐详设 §12.2 "高频/高分者晋升" 与词面直觉（promote=提升热度）。
+        旧实现的 promote 方向反了（实为沉降），指南 §7-8 曾记录此陷阱，本版纠正。
+        """
+        self._shift(item, -1)
 
     def demote(self, item: MemoryItem) -> None:
-        """回温一级：cold→warm→hot；已在 hot 不动。"""
-        self._shift(item, -1)
+        """降级/沉降一级：hot→warm→cold（低频/低分者归档）；已在 cold 不动。"""
+        self._shift(item, +1)
 
     def forget_expired(
         self, ttl: int | None = None, *, now: int | None = None
