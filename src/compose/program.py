@@ -29,8 +29,8 @@ from runtime import (
 )
 
 __all__ = [
-    "ProgramFn",
     "JoinMode",
+    "ProgramFn",
     "branch",
     "fallback",
     "gate",

@@ -1,52 +1,20 @@
-"""②③ 承载形态（规格 §2.4/§2.5）：有状态守卫 + call 装饰器 + build_call。
+"""③ call 装饰器（规格 §2.4）：CallFn → CallFn 纯函数组合 + build_call。
 
-③ call 装饰器：CallFn → CallFn，retry（调用级）/timeout/danger_route/injection_guard；
-  函数组合无固定角色链、不叫 AOP；只覆盖 Invoke（D-7）。
-② 有状态守卫：Guard.check(effect,ctx)→Verdict|None + observe(effect,result,ctx)；
-  由 with_guard 在调 base 前后驱动；跨调用策略状态在守卫实例，不持流程进度（D-8）。
+retry（调用级）/timeout/danger_route/injection_guard 均为函数组合，无固定角色链；
+只覆盖 Invoke（D-7）。R3 可靠性由 harness.resilience.ReliabilityExecutor 显式编排。
 """
 from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass
-from typing import Final, Protocol, runtime_checkable
+from typing import Final
 
 from runtime import CallFn, DynamicValue, Effect, Invoke, Result
 
 __all__ = [
-    "Guard", "Verdict", "CallFn", "with_guard", "build_call",
+    "CallFn", "build_call",
     "retry_call", "timeout", "danger_route", "injection_guard",
 ]
-
-
-@dataclass(frozen=True, slots=True)
-class Verdict:
-    """守卫准入判决：allowed=False 拦截（R9 安全四态用 SafetyVerdict）。
-
-    Attributes:
-        allowed: 是否放行。
-        reason: 拒绝原因（进 trace）。
-    """
-    allowed: bool = True
-    reason: str = ""
-
-
-@runtime_checkable
-class Guard(Protocol):
-    """②有状态守卫协议：check 准入、observe 后置记账。
-
-    状态在守卫实例（跨调用存活，如熔断三态机）；禁止持有单次流程进度（D-8）。
-    """
-    name: str
-
-    async def check(self, effect: Effect, ctx: object) -> Verdict | None:
-        """准入判定；None 表示放行。"""
-        ...
-
-    async def observe(self, effect: Effect, result: Result, ctx: object) -> None:
-        """拿到 Result 后的后置记账（熔断计数/降级选级等）。"""
-        ...
 
 
 class _Keys:
@@ -59,30 +27,6 @@ def _ctx_meta(ctx: object) -> dict[str, DynamicValue]:
     """从 R1 RuntimeCtx 取 meta 字典（缺省空），供装饰器记录具名协作数据。"""
     meta = getattr(ctx, "meta", None)
     return meta if isinstance(meta, dict) else {}
-
-
-def with_guard(base: CallFn, guard: Guard) -> CallFn:
-    """用②守卫包裹 base：调前 check，拿 Result 后 observe。
-
-    Args:
-        base: 被包裹的 CallFn（③装饰器链或 dispatch）。
-        guard: 有状态守卫。
-
-    Returns:
-        新 CallFn（check 拒绝时产出失败 Result，不调 base）。
-    """
-    # 守卫可选 reject_code：终止类守卫可声明专用拒绝码（如 INVOKE_REJECTED），
-    # 缺省 GUARD_REJECTED。不污染通用 Guard 协议。
-    reject_code = str(getattr(guard, "reject_code", "GUARD_REJECTED"))
-
-    async def call(effect: Effect, ctx: object) -> Result:
-        verdict = await guard.check(effect, ctx)
-        if verdict is not None and not verdict.allowed:
-            return Result.failure(reject_code, verdict.reason or guard.name)
-        result = await base(effect, ctx)
-        await guard.observe(effect, result, ctx)
-        return result
-    return call
 
 
 def retry_call(
@@ -123,7 +67,7 @@ def timeout(base: CallFn, *, seconds: float) -> CallFn:
     async def call(effect: Effect, ctx: object) -> Result:
         try:
             return await asyncio.wait_for(base(effect, ctx), timeout=seconds)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return Result.failure("TIMEOUT", f"call exceeded {seconds}s")
     return call
 
@@ -155,17 +99,15 @@ def build_call(
     base: CallFn,
     *,
     decorators: Sequence[Callable[[CallFn], CallFn]] = (),
-    guards: Sequence[Guard] = (),
 ) -> CallFn:
-    """构造注入 R1 的 call：③装饰器链（内层先注册）+ ②守卫包裹。
+    """构造注入 R1 的 call：③装饰器链（内层先注册）。
 
-    组合顺序：base → decorators[0] → ... → guards[0] → ...；
+    组合顺序：base → decorators[0] → ... → decorators[n]；
     Runner(call=build_call(...)) —— R1 一行不改。
 
     Args:
         base: 中心 dispatch（make_dispatch 产出）。
-        decorators: ③call 装饰器序列（如 retry_call/timeout）。
-        guards: ②守卫序列。
+        decorators: call 装饰器序列（如 retry_call/timeout）。
 
     Returns:
         符合 R1 CallFn 签名的 call。
@@ -173,6 +115,4 @@ def build_call(
     call = base
     for deco in decorators:
         call = deco(call)
-    for guard in guards:
-        call = with_guard(call, guard)
     return call

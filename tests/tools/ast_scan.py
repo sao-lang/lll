@@ -1,7 +1,7 @@
 """红线静态扫描（AST），按模块：python tests/tools/ast_scan.py --module r1|r2|r3|r4|r5
 
 R1：Program 内不得有时间/随机/网络调用（破坏确定性）；纯运行时不 import random/datetime。
-R2：Port/AOP/Lifecycle 三体系具名；AOP 五角色协议齐全；无旧 Hook/Host 注册 API 残留。
+R2：Port/组合层/Lifecycle 三体系具名；五角色符号零残留；无旧 Hook/Host 注册 API 残留。
 R3：降级阶梯装配期强校验（无环/末级拒答）+ 副作用重试幂等键检查；能力插件不 import IO SDK。
 R4：网关必须做结构化校验（未过 schema 不进业务）+ 成本闸（路由/重试不得绕过 Budgets）。
 R5：danger 四路路由齐全（CRITICAL 审批/HIGH 沙盒/LOW 审计缺席降级）+ L1 披露脱 schema
@@ -65,6 +65,31 @@ def parse(path: Path) -> ast.Module:
     return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
 
+# 去角色化硬红线：退役符号按片段拼接，避免扫描器源码自身形成字面命中。
+_RETIRED_PARTS: tuple[tuple[str, ...], ...] = (
+    ("AOP", "Container"), ("Composite", "Call"),
+    ("Pre", "lude"), ("War", "den"), ("En", "velope"),
+    ("Re", "finer"), ("Sal", "vage"), ("ROLE", "_NAMES"),
+    ("War", "den", "Guard", "Adapter"), ("envelope", "_decorator"),
+    ("add_", "war", "den"), ("add_", "pre", "lude"),
+    ("add_", "en", "velope"), ("add_", "re", "finer"), ("add_", "sal", "vage"),
+    # Guard 家族拦截抽象（2026-11-22 清掉：check/observe 协议换皮、零生产调用者）
+    ("with_", "guard"), ("Degradation", "Guard"), ("degrade", "_retry"),
+)
+_RETIRED_SYMBOLS = tuple("".join(parts) for parts in _RETIRED_PARTS)
+
+
+def scan_retired_symbols(files: list[Path]) -> list[str]:
+    """五角色容器/适配器/角色类名在测试里零残留（去角色化后不得复辟）。"""
+    violations: list[str] = []
+    for path in files:
+        text = path.read_text(encoding="utf-8")
+        for name in _RETIRED_SYMBOLS:
+            if re.search(rf"\b{re.escape(name)}\b", text):
+                violations.append(f"{path.relative_to(ROOT)} 残留退役符号 {name}")
+    return violations
+
+
 def scan_r1(files: list[Path]) -> list[str]:
     """R1 红线：Program 纯函数 + 纯运行时不 import 时间/随机。"""
     violations: list[str] = []
@@ -92,39 +117,15 @@ def scan_r1(files: list[Path]) -> list[str]:
     return violations
 
 
-def _declares_name(cls_node: ast.ClassDef) -> bool:
-    """类属性 name = ... 或 self.name = ... 均算留名。"""
-    for stmt in ast.walk(cls_node):
-        if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
-            if stmt.target.id == "name":
-                return True
-        if isinstance(stmt, ast.Assign):
-            for target in stmt.targets:
-                for part in ast.walk(target):
-                    if isinstance(part, ast.Name) and part.id == "name":
-                        return True
-                    if isinstance(part, ast.Attribute) and part.attr == "name":
-                        return True
-    return False
-
-
 def scan_r2(files: list[Path]) -> list[str]:
-    """R2 红线：算子核心就位 + 内部编排槽位协议具名契约（规格 P2/D-3）。
+    """R2 红线：算子核心就位 + 退役角色符号零残留 + 无旧 Hook/Host 注册 API。
 
-    算子核心架构后，call 链内部编排槽位（原五角色归位）定义为类型协议，须存在；
-    AOP 五角色框架概念已取消（src/aop/ 删除）。
+    去角色化后 call 链由领域执行器显式编排，不再有角色协议文件；
+    测试与 demo 中五角色符号一律不得复辟。
     """
     violations: list[str] = []
-    # call 链内部编排槽位协议必须在组合层真实存在（declared in compose/chain_roles.py）。
-    protocols = SRC / "compose" / "chain_roles.py"
-    if not protocols.exists():
-        violations.append("call 链编排槽位协议缺失（src/compose/chain_roles.py）")
-    else:
-        text = protocols.read_text(encoding="utf-8")
-        for role in ("class Prelude", "class Warden", "class Envelope", "class Refiner", "class Salvage"):
-            if role not in text:
-                violations.append(f"编排槽位协议缺失: {role}")
-    # AOP 包已删除（D-3/ D-10）：不得残留。
+    # 五角色容器/适配器/角色类名在测试里零残留（覆盖全部 tests/，含门禁工具自身）。
+    violations.extend(scan_retired_symbols(files_of([ROOT / "tests"])))
     if (SRC / "aop").exists():
         violations.append("残留 src/aop/（规格 D-10 要求删除，不留兼容层）")
     # 对外 API 里不应残留旧 Hook 工厂/Host 注册 API。
@@ -137,17 +138,6 @@ def scan_r2(files: list[Path]) -> list[str]:
     # hooks 包已整包删除（R2 取消，规格 P2）：不得复辟。
     if (SRC / "hooks").exists():
         violations.append("残留 src/hooks/（R2 取消，规格 P2 要求资产归位后删除）")
-    # 增强器/插件类须声明 name（具名留名纪律）。
-    for path in files:
-        if not (path.is_relative_to(ROOT / "tests")):
-            continue
-        tree = parse(path)
-        for node in ast.walk(tree):
-            if (isinstance(node, ast.ClassDef)
-                    and not node.name.startswith("Test")
-                    and node.name.endswith(("Warden", "Envelope", "Refiner", "Salvage", "Prelude"))):
-                if not _declares_name(node):
-                    violations.append(f"{path.relative_to(ROOT)} 增强器类 {node.name} 无 name 属性")
     return violations
 
 
@@ -214,7 +204,7 @@ def _scan_coding_rules(files: list[Path], pkg: Path) -> list[str]:
 
 
 def scan_r3(files: list[Path]) -> list[str]:
-    """R3 红线：降级装配期校验 + 幂等键检查 + hook 留名 + 不 import IO SDK。"""
+    """R3 红线：降级装配期校验 + 幂等键检查 + 退役角色符号零残留 + 不 import IO SDK。"""
     violations: list[str] = []
     pkg = SRC / "harness" / "resilience"
 
@@ -243,17 +233,8 @@ def scan_r3(files: list[Path]) -> list[str]:
                 if any(node.module.startswith(p) for p in IO_SDK_PREFIXES):
                     violations.append(f"{path.relative_to(ROOT)} import IO SDK {node.module}")
 
-    # AOP 增强器类必须留名（复用 R2 判定）。
-    for path in files:
-        if not (path.is_relative_to(ROOT / "tests")):
-            continue
-        tree = parse(path)
-        for node in ast.walk(tree):
-            if (isinstance(node, ast.ClassDef)
-                    and not node.name.startswith("Test")
-                    and node.name.endswith(("Warden", "Envelope", "Refiner", "Salvage", "Prelude"))):
-                if not _declares_name(node):
-                    violations.append(f"{path.relative_to(ROOT)} 增强器类 {node.name} 无 name 属性")
+    # 退役角色符号零残留（测试与 demo；生产源码的历史说明由文档侧负责去角色化）。
+    violations.extend(scan_retired_symbols([p for p in files if p.is_relative_to(ROOT / "tests")]))
 
     # 编码规则 5/6 红线（防回归）
     violations.extend(_scan_coding_rules(files, pkg))
@@ -441,7 +422,7 @@ def scan_r7(files: list[Path]) -> list[str]:
 
 
 def scan_r12(files: list[Path]) -> list[str]:
-    """R12 算子核心红线（规格 §2/D-4）：10 算子齐全 + AOP 无残留 + 算子纯度。
+    """R12 算子核心红线（规格 §2/D-4）：10 算子齐全 + 五角色符号零残留 + 算子纯度。
 
     检查：
         - src/compose/program.py 定义 10 个 A 类算子；
@@ -449,6 +430,7 @@ def scan_r12(files: list[Path]) -> list[str]:
         - 算子不持有实例流程状态（禁 self.<进度> 赋值，D-8）。
     """
     violations: list[str] = []
+    violations.extend(scan_retired_symbols([p for p in files if p.is_relative_to(ROOT / "tests")]))
     program = SRC / "compose" / "program.py"
     if not program.exists():
         violations.append("算子核心缺失：src/compose/program.py")

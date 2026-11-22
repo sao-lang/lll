@@ -1,7 +1,8 @@
 """R3 熔断器：三态机（closed/open/half_open）+ 滑窗失败率 + 维度隔离。
 
-AOP 角色：check_and_signal → Warden（OPEN/半开超额 → 写 fault + 放行重路由）；
-observe → Envelope 后置（从 Result 记数）。状态由插件实例 + 注入 store 持有。
+领域语义：permit(inv) 判定当前维度是否允许放行（OPEN/半开超额返回降级原因）；
+record(result, dim) 推进三态机。执行器在调用前后显式调用它们，无角色协议。
+状态由插件实例 + 注入 store 持有。
 """
 from __future__ import annotations
 
@@ -10,7 +11,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from typing import Protocol, runtime_checkable
 
-from compose.context import FaultRecord, Invocation, Verdict
+from compose.context import Invocation
 from runtime import Invoke, Result
 
 from .types import BreakerState, BreakerStatus
@@ -60,7 +61,7 @@ def _failed_target_of(inv: Invocation) -> str:
 
 
 class CircuitBreaker:
-    """熔断器插件：自身持有三态机状态，check 为 Warden、observe 为 Envelope 后置。
+    """熔断器：自身持有三态机状态，permit 判放行、record 推进状态。
 
     三态机：
         CLOSED：样本足够 + 失败率≥阈值 → OPEN。
@@ -195,7 +196,7 @@ class CircuitBreaker:
                 )
         await self._store.save(dim, new_state)
 
-    # ---- AOP 角色方法 ----
+    # ---- 执行器调用的领域入口 ----
     def _dimension(self, inv: Invocation) -> Dimension | None:
         """从 Invocation 派生熔断维度（自定义函数非二元组时回退空维度）。"""
         if self._dimension_of is None:
@@ -203,27 +204,13 @@ class CircuitBreaker:
         dim = self._dimension_of(inv)
         return dim if isinstance(dim, tuple) else None
 
-    async def guard(self, inv: Invocation) -> Verdict:
-        """Warden.guard：检查熔断状态，异常写 fault（含注册名，B2）并放行重路由。"""
-        reason = await self.check(self._dimension(inv))
-        if reason:
-            inv.write_fault(FaultRecord(
-                reason=reason, failed_target=self._failed_target_of(inv),
-            ))
-            return Verdict(allowed=True)  # 降级类放行，容器据此重路由
-        return Verdict(allowed=True)
+    async def permit(self, inv: Invocation) -> str | None:
+        """熔断许可判定（领域语义）：返回降级原因表示不放行，健康返回 None。
 
-    async def observe(self, inv: Invocation, result: Result) -> None:
-        """Envelope 后置：从 Result 记数（供容器在中心调用后调用）。"""
-        await self.record(result, self._dimension(inv))
+        执行器据返回值写 fault 并选级；写 fault 是执行器职责，本插件只判状态。
+        """
+        return await self.check(self._dimension(inv))
 
-    async def wrap(self, inv: Invocation, next: Callable[[Invocation], Awaitable[Result]]) -> Result:
-        """Envelope.wrap：前置无动作，中心调用后记数（异常按失败记、不吞异常）。"""
-        try:
-            result = await next(inv)
-        except Exception:
-            # 异常按一次失败记入熔断滑窗，随后原样抛回容器交 Salvage 处理。
-            await self.record(Result.failure("INVOKE_EXCEPTION", "invoke raised"), self._dimension(inv))
-            raise
+    async def observe_outcome(self, inv: Invocation, result: Result) -> None:
+        """把一次调用结果记入熔断三态机（领域语义）。"""
         await self.record(result, self._dimension(inv))
-        return result

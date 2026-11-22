@@ -197,12 +197,13 @@ class ModelGateway:
         """从 typed 降级目标读 target（唯一来源；reason 只进 trace，不作 target）。
 
         P4 双入口兼容：
-            - inv 给定：读 inv.routing_target()（CompositeCall 的 CallContext 路径）；
+            - inv 给定：读 inv.routing_target()（可靠性执行器的 CallContext 路径）；
             - inv 缺省：从 ctx.meta 读 RoutingTarget（§2.5 dispatch 路径，经 CallState）。
         """
         routing = inv.routing_target() if inv is not None else CallState(ctx).routing_target()
         target = routing.target if routing is not None else None
         if routing is not None:
+            # 规则 6 例外：meta 是 R1 RuntimeCtx 具名固定字段
             ctx_meta = getattr(ctx, "meta", None)
             if isinstance(ctx_meta, dict):
                 ctx_meta.setdefault("degrade_reason", []).append(routing.reason)
@@ -247,7 +248,7 @@ class ModelGateway:
                                extra={"error": error_text})
 
     def as_call(self) -> Callable[[Invocation], Awaitable[Result]]:
-        """兼容入口（CompositeCall core）：Invocation → _center。
+        """兼容入口（可靠性执行器 core）：Invocation → _center。
 
         降级目标从 inv.routing_target() 读（R3 typed，与 Registry 同源）。
         """

@@ -1,6 +1,6 @@
 <svg viewBox="0 0 680 580" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
-  <title>R3 可靠性插件按 7 承载形态归类 + 降级四坑</title>
-  <desc>十个可靠性插件归为②有状态守卫（熔断/限流/舱壁/幂等/降级/watchdog/killswitch）、③call 装饰器（RetryPolicy/Timeout 调用级）、①A 类算子（fallback/retry 流程级）；BudgetGuard 删除（软限用 map_effect 注入）。降级守卫 Degradation 唯一裁决，四坑 B1/B2/R3-6/R3-7 语义原样保留。</desc>
+  <title>R3 可靠性：9 领域策略 + ReliabilityExecutor 显式编排 + 降级四坑</title>
+  <desc>承载形态②已由 R3 的 ReliabilityExecutor + 9 领域策略显式编排：KillSwitch/Watchdog/Idempotency/RateLimit/Bulkhead/CircuitBreaker/RetryPolicy/Timeout/Degradation，各以领域方法参与、无统一 check/observe 协议；执行器 _preflight 前置放行 → _budgeted_call 预算内执行 → observe_outcome 熔断记数 → _apply_recovery 调 Degradation.select 写 typed target 并重路由。BudgetGuard 已删除（软限用 map_effect 注入）；原 Guard/with_guard/DegradationGuard/degrade_retry 拦截协议已删除。四坑 B1/B2/R3-6/R3-7 语义原样保留。</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
       <path d="M2 1L8 5L2 9" fill="none" stroke="#64748b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -18,22 +18,22 @@
     </style>
   </defs>
 
-  <text class="t h" x="340" y="26" text-anchor="middle">R3 可靠性 · 10 插件按承载形态归类（AOP 取消）</text>
+  <text class="t h" x="340" y="26" text-anchor="middle">R3 可靠性 · 9 领域策略由 ReliabilityExecutor 显式编排（AOP 取消）</text>
 
   <rect class="guard" x="24" y="44" width="300" height="132"/>
-  <text class="t h" x="36" y="64" fill="#b91c1c">② 有状态守卫（7，Guard.check/observe）</text>
-  <text class="t n" x="36" y="86">CircuitBreaker · RateLimit · Bulkhead</text>
-  <text class="t n" x="36" y="106">Idempotency · Watchdog · KillSwitch</text>
-  <text class="t n" x="36" y="126">Degradation（降级唯一裁决者）</text>
-  <text class="t s" x="36" y="150">状态在守卫实例（跨调用），按 session 隔离</text>
-  <text class="t s" x="36" y="166">只持策略状态，不持单次流程进度（D-8）</text>
+  <text class="t h" x="36" y="64" fill="#b91c1c">② 领域策略（9，执行器显式编排）</text>
+  <text class="t n" x="36" y="86">KillSwitch · Watchdog · Idempotency · RateLimit</text>
+  <text class="t n" x="36" y="106">Bulkhead · CircuitBreaker · RetryPolicy · Timeout</text>
+  <text class="t n" x="36" y="126">Degradation（_apply_recovery 调 select 唯一裁决）</text>
+  <text class="t s" x="36" y="150">各以领域方法参与，无统一 check/observe 协议</text>
+  <text class="t s" x="36" y="166">状态在策略实例（跨调用、按 session 隔离，D-8）</text>
 
   <rect class="deco" x="356" y="44" width="300" height="132"/>
-  <text class="t h" x="368" y="64" fill="#1d4ed8">③ call 装饰器（2，CallFn→CallFn）</text>
-  <text class="t n" x="368" y="86">RetryPolicy（调用级 retry）</text>
-  <text class="t n" x="368" y="106">Timeout（调用级 timeout）</text>
-  <text class="t s" x="368" y="132">内部驱动②守卫 check/observe</text>
-  <text class="t s" x="368" y="150">函数组合，无固定角色链</text>
+  <text class="t h" x="368" y="64" fill="#1d4ed8">③ call 装饰器（compose/call.py，函数式）</text>
+  <text class="t n" x="368" y="86">retry_call · timeout · danger_route</text>
+  <text class="t n" x="368" y="106">injection_guard（CallFn→CallFn）</text>
+  <text class="t s" x="368" y="132">build_call(base, *, decorators=())</text>
+  <text class="t s" x="368" y="150">函数组合，无固定角色链；不驱动 check/observe</text>
   <text class="t s" x="368" y="166">只覆盖 Invoke（D-7）</text>
 
   <rect class="op" x="24" y="196" width="632" height="66"/>
@@ -43,8 +43,8 @@
 
   <line class="e" x1="340" y1="262" x2="340" y2="284"/>
   <rect class="guard" x="150" y="284" width="380" height="52"/>
-  <text class="t n" x="340" y="304" text-anchor="middle">② 降级守卫 observe：读故障记录 → select 选级 → 写 typed target</text>
-  <text class="t s" x="340" y="322" text-anchor="middle">③装饰器驱动链外重跑（切 backup / REFUSE，断言不放水）</text>
+  <text class="t n" x="340" y="304" text-anchor="middle">_apply_recovery：读 fault → Degradation.select → 写 typed target</text>
+  <text class="t s" x="340" y="322" text-anchor="middle">执行器驱动链外重跑（切 backup / REFUSE，断言不放水）</text>
 
   <text class="t h" x="340" y="368" text-anchor="middle">降级四坑语义（原文保留、只换宿主）</text>
   <rect class="pit" x="24" y="382" width="308" height="58"/>
@@ -60,6 +60,6 @@
   <text class="t n" x="360" y="472">R3-7 · 故障记录携带 failed_target</text>
   <text class="t s" x="360" y="492">retry/timeout 耗尽必带，据此剔除</text>
 
-  <text class="t s" x="340" y="536" text-anchor="middle">四坑端到端用例（R3-E01/E02/E03 等）断言逐字不放水——只换宿主到组合层 call 链</text>
+  <text class="t s" x="340" y="536" text-anchor="middle">四坑端到端用例（R3-E01/E02/E03 等）断言逐字不放水——只换宿主到 ReliabilityExecutor + 领域策略</text>
   <text class="t s" x="340" y="556" text-anchor="middle">R1 零改动 · src/aop/ 已删除（不留兼容层）</text>
 </svg>

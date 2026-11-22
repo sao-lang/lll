@@ -57,7 +57,7 @@
 |------|------|-------------|
 | 四套扩展 API 并列 | middleware/filter/pipe/拦截器四种心智模型 | 收敛为**7 承载形态**，算子是其中①类（组合算子）——见 §1.2 铁律二 |
 | 内核被可选插件需求绑架 | 降级/重试/追踪等编排穿透内核契约（`扩展体系重构规格-20261120.md:15`） | 复杂度在**组合层（算子）吸收**，不下沉 R1；R1 零领域语义 |
-| AOP 把三类东西塞进固定链 | A 类前后插逻辑 / B 类跨调用状态机 / C 类广播（`src/aop/protocols.py:49-86`） | A 类→算子吸收、B 类→②有状态守卫、C 类→④notify；固定角色链取消 |
+| AOP 把三类东西塞进固定链 | A 类前后插逻辑 / B 类跨调用状态机 / C 类广播（`src/aop/protocols.py:49-86`） | A 类→算子吸收、B 类→②领域策略（R3 `ReliabilityExecutor` 显式编排）、C 类→④notify；固定角色链取消 |
 | 能力无统一层 | harness 能力散落 M4~M9，各自找挂载点 | 独立 **L1 工具层**（可挑选可组合） |
 | API 不分层 | 应用开发者/平台/插件作者用同一套低层 API | **四组 API 面**按使用者投影 |
 
@@ -125,28 +125,28 @@ flowchart TD
 ```
 
 > **层级纪律**：L0 内核 R1（机制，零领域语义、一行不改）← L1 工具层（可挑选可组合，各自 `build() -> Program`）← 组合层（算子核心：A 类算子装配 Program + B/C 类构造 call + 挑选期校验）← L2 内置架构（算子预设配方）← L3 四组 API。R10 观测评测与 R13 可插拔是横切关注点，不占独立层。依赖方向恒为 **工具层 → 组合层 → R1**，R1 零依赖上层（§2.6）。
-> **组合层（原 R2 位置，已重写）**：不再有 `AOPContainer`/五角色固定链/`LifecycleBus` 总线模块。取而代之——①A 类算子（`src/compose/program.py`）、②有状态守卫 + ③call 装饰器（`src/compose/call.py`）、`build_call` + `dispatch`（`src/compose/dispatch.py`）。R1 只认注入的 `call` 和 Program，不认识任何领域。7 承载形态与三类算子契约见 §2.4 / §5；16 notify 相位保留为 R1 回调见 §6。
+> **组合层（原 R2 位置，已重写）**：不再有 `AOPContainer`/五角色固定链/`LifecycleBus` 总线模块（历史：五角色语义已彻底删除，不得复辟）。取而代之——①A 类算子（`src/compose/program.py`）、③call 装饰器（`src/compose/call.py`：函数式 `retry_call`/`timeout`/`danger_route`/`injection_guard`，`build_call(base, *, decorators=())`）、`dispatch`/`make_dispatch`（`src/compose/dispatch.py`）+ 具名协作 DTO（`src/compose/guards.py`：`FaultRecord`/`RoutingTarget`/`CallState`）。原承载形态②（有状态守卫）的物理载体 `Guard`/`with_guard`/`Verdict`/`DegradationGuard`/`degrade_retry` 已删除；其职责在 R3 由 `ReliabilityExecutor` + 9 领域策略显式编排实现（见 §R3），不再走任何角色链或 check/observe 协议。R1 只认注入的 `call` 和 Program，不认识任何领域。7 承载形态与算子契约见 §2.4 / §5；16 notify 相位保留为 R1 回调见 §6。
 
 ### 2.2 一次 Effect 的完整执行流（全局主干）
 
-执行流由 Runner 驱动（R1，零改动）：唯一解释循环 + 纯函数 fold；`Invoke` 类 Effect 走注入的 `call`（由组合层 `build_call` 构造：call 装饰器链 + 守卫包裹 + dispatch 分派），其余 Effect（`Spawn`/`Suspend`/`Terminate`）走内核快路径，call 拦不到（D-7）；notify 在对应相位由 R1/能力层发出、返回值不被消费。
+执行流由 Runner 驱动（R1，零改动）：唯一解释循环 + 纯函数 fold；`Invoke` 类 Effect 走注入的 `call`（由组合层 `build_call(base, *, decorators=())` 构造：③call 装饰器链 + `dispatch` 分派；R3 可靠性链另由 `ReliabilityExecutor.as_call()` 显式编排注入），其余 Effect（`Spawn`/`Suspend`/`Terminate`）走内核快路径，call 拦不到（D-7）；notify 在对应相位由 R1/能力层发出、返回值不被消费。
 
 ```mermaid
 flowchart TD
     S["Program.yield Effect（A 类算子装配）"] --> B{"预算预检<br/>R1 内核强制"}
     B -->|超限| E["Terminate<br/>reason=BUDGET_EXCEEDED"]
     B -->|通过| K{"Effect 类型分派"}
-    K -->|Invoke| CALL["注入的 call = build_call(...)<br/>③装饰器链(retry/timeout/danger_route/injection_guard)"]
+    K -->|Invoke| CALL["注入的 call = build_call(...)<br/>③装饰器链(retry_call/timeout/danger_route/injection_guard)"]
     K -->|Spawn/Suspend/Terminate| CORE0["R1 内核快路径<br/>call 拦不到，仅 notify 观察（D-7）"]
-    CALL --> GD{"②守卫 check<br/>熔断/限流/幂等/降级…"}
-    GD -->|放行| DSP["dispatch：按 effect.port 分派<br/>构造 Result(含 Usage)"]
-    GD -->|拒绝| RJ["Verdict 拒绝 → Result.failure"]
-    DSP -.异常/失败.-> DG["②降级守卫 observe 写 typed target<br/>+ 链外重跑（四坑语义）"]
+    CALL --> DSP["dispatch：按 effect.port 分派<br/>构造 Result(含 Usage)"]
+    DSP -.可靠性链（R3）.-> EX["ReliabilityExecutor.as_call()<br/>_preflight 前置放行（领域策略显式编排）"]
+    EX -->|终止拒绝| RJ["_reject → INVOKE_REJECTED<br/>+ invoke_rejected → Result.failure"]
+    EX -->|放行/写 fault| DG["失败 _apply_recovery：<br/>Degradation.select 写 typed target + 链外重跑（四坑）"]
     DG --> TGT{"降级目标"}
     TGT -->|备用后端| SW["gateway 切后端<br/>typed 目标，与 Registry 同源"]
     TGT -->|REFUSE| RF["REFUSE 真拒答（不回退默认模型）"]
     TGT -->|无降级| KEEP["保持默认后端"]
-    DSP --> ENB["③装饰器后置 + 守卫 observe 记账"]
+    DSP --> ENB["③装饰器后置处理"]
     SW --> RES
     RF --> RES
     KEEP --> RES
@@ -163,7 +163,7 @@ flowchart TD
     NX -->|终态 / 挂起| T["终态 / 挂起"]
 ```
 
-> **降级接力（P3/P9，②降级守卫 + ③call 装饰器承接）**：原 AOP 降级重路由状态机（`src/aop/container.py:275-317`）移出，由**②降级守卫的 `observe`（统一裁决，保四坑语义）** + **③call 装饰器驱动的链外重跑**承接。③装饰器/守卫只负责"发现故障并报告失败上下文"，`check/observe` 统一裁决目标；失败上下文的 `failed_target` 是降级阶梯里的**后端注册名**（非 `("provider", name)` 维度二元组）。四个历史修复点的语义必须逐条复现（原文保留、只换宿主）：①按 `session_id` 隔离目标状态（守卫实例内 `dict[session_id, 状态]`，禁容器级单值）；②`failed_target` 用后端注册名，网关未注册目标 `TargetUnresolved` 不静默回退；③R3-6 故障目标**永久从守卫实例 `available` 剔除并写回**（非局部副本），否则 backup 故障后会重新选回 primary、永远到不了 REFUSE；④R3-7 retry 耗尽/timeout 的故障记录必须携带 `failed_target`（构造注入 `failed_target_of`）。网关侧 REFUSE 真拒答、未注册目标不回退全部保留（R4 红线）；降级目标走 typed 路径（与 Registry 同源，R4 `dispatch` 唯一读取来源），不再经裸降级桥接字段。端到端降级用例断言不许放水（规格 §3 P3 门禁红线）。
+> **降级接力（P3/P9，R3 `ReliabilityExecutor` 显式编排）**：原 AOP 降级重路由状态机（`src/aop/container.py:275-317`）移出，由执行器的 `_apply_recovery` 调 `Degradation.select` 统一裁决（保四坑语义）+ `ReliabilityExecutor.as_call()` 驱动的链外重跑承接。执行器/领域策略只负责"发现故障并报告失败上下文"，`Degradation.select` 裁决目标；失败上下文的 `failed_target` 是降级阶梯里的**后端注册名**（非 `("provider", name)` 维度二元组）。四个历史修复点的语义必须逐条复现（原文保留、只换宿主）：①按 `session_id` 隔离目标状态（`Degradation` 实例内 `dict[session_id, 状态]`，禁容器级单值）；②`failed_target` 用后端注册名，网关未注册目标 `TargetUnresolved` 不静默回退；③R3-6 故障目标**永久从 `available` 剔除并写回**（非局部副本），否则 backup 故障后会重新选回 primary、永远到不了 REFUSE；④R3-7 retry 耗尽/timeout 的故障记录必须携带 `failed_target`（由构造注入的失败目标提取函数产出）。网关侧 REFUSE 真拒答、未注册目标不回退全部保留（R4 红线）；降级目标经 `write_routing_target` 写 typed 路径（与 Registry 同源，R4 `dispatch` 唯一读取来源），不再经裸降级桥接字段。端到端降级用例断言不许放水（规格 §3 P3 门禁红线）。
 
 ---
 
@@ -174,7 +174,7 @@ flowchart TD
 | **A1 集成契约** | 平台/工具集成者 | Port 契约 + Event Stream + Projection 三类契约 |
 | **A2 架构组合** | 选型用户 | 10 内置架构 + 10 A 类组合算子（seq/par/branch/race/loop/map_state/map_effect/fallback/gate/retry 流程级）——用户无感其内部是算子 |
 | **A3 应用开发** | 普通开发者 | `Agent(arch=...).profile(...).capability(...).run()` |
-| **A4 组件开发** | 插件作者 | A 类算子（`Program→Program`）/ ②Guard 协议 / ③call 装饰器 / `State.scratch x-*` / Port / Program / fold 全部低层接口 |
+| **A4 组件开发** | 插件作者 | A 类算子（`Program→Program`）/ ②领域策略（R3 执行器显式编排）/ ③call 装饰器 / `State.scratch x-*` / Port / Program / fold 全部低层接口 |
 
 ---
 
@@ -187,7 +187,7 @@ flowchart TD
 | 模块 | 层 | 覆盖能力域 | 能力项数 |
 |------|----|-----------|---------|
 | R1 核心运行时 | L0（内核，零改动） | A 执行控制（内核部分）、O 持久化（内核部分） | 10 原语 |
-| R2 算子与装配（原插件总线） | 组合层 | 7 承载形态、A 类算子、②Guard、③call 装饰器、装配器 | 10 算子 + Guard + call 装饰器 + build_call/dispatch |
+| R2 算子与装配（原插件总线） | 组合层 | 7 承载形态、A 类算子、③call 装饰器、装配器（②领域策略归 R3） | 10 算子 + call 装饰器 + build_call/dispatch/make_dispatch + 协作 DTO |
 | R3 可靠性 | L1（工具层） | B 可靠性全域 | 11（按 7 承载形态重分类：7 守卫 + 2 装饰器 + 2 算子） |
 | R4 模型与推理 | L1（工具层） | C 模型推理全域 | 10 |
 | R5 工具·MCP·技能 | L1（工具层） | D 工具执行 + E 技能 | 20 |
@@ -213,7 +213,7 @@ R8(认知编排) ──→ R10(观测评测持久化，④notify) ──→ R11(
 ```
 
 - **依赖不变量**：R1 零依赖上层；组合层是唯一知道"有哪些工具层"的地方；工具层互不直连（§2.6 规格不变量）。R1 执行循环只认注入的 `call`（签名 `(effect,ctx)->Awaitable[Result]`，`src/runtime/types.py:724-725`）与 Program，不感知组合层内部编排。
-- 工具层能力可挑选可组合：挑选靠四要素 + provides/requires 装配期校验（不进运行时内核）；组合靠 A 类算子（`Program→Program`，可任意嵌套）；②有状态守卫实例持有跨调用策略状态、③无状态 call 装饰器在调用前后驱动守卫的 check/observe；协同经 guard 实例状态与 `State.scratch x-*`（流程进度），不经裸键容器。
+- 工具层能力可挑选可组合：挑选靠四要素 + provides/requires 装配期校验（不进运行时内核）；组合靠 A 类算子（`Program→Program`，可任意嵌套）；②领域策略实例持有跨调用策略状态（R3 执行器显式编排）、③无状态 call 装饰器为纯函数组合（不再驱动 check/observe）；协同经 `FaultRecord`/`RoutingTarget` 具名协作状态与 `State.scratch x-*`（流程进度），不经裸键容器。
 - R10/R11 消费全框架事件（④notify），不被 L1 依赖。
 
 ---
@@ -264,14 +264,14 @@ R8(认知编排) ──→ R10(观测评测持久化，④notify) ──→ R11(
 | # | 承载形态 | 签名/接口 | 运行期位置 | 代表能力 | 是不是算子 |
 |---|---------|----------|-----------|---------|-----------|
 | ① | **组合算子** | `Program → Program` | 装配期 | seq/par/branch/race/loop/fallback/gate/map_state/map_effect/retry(流程级) | ✅ **狭义算子就是这类，框架核心** |
-| ② | **有状态守卫** | `check(effect,ctx)→Verdict\|None` + `observe(effect,result,ctx)` | 实例（跨调用存活） | 熔断/限流/舱壁/幂等/降级阶梯/watchdog | ❌ 组件（由③驱动） |
+| ② | **领域策略（原"有状态守卫"）** | 执行器显式编排领域方法（`is_tripped`/`acquire`/`permit`/`select` 等），无统一协议 | 策略实例（跨调用存活） | 熔断/限流/舱壁/幂等/降级阶梯/watchdog/killswitch（R3） | ❌ 不是算子（由 R3 `ReliabilityExecutor` 编排） |
 | ③ | **call 装饰器** | `CallFn → CallFn` | 运行期 call 层 | 重试(调用级)/timeout(调用级)/危险路由/注入检测 | ❌ 装饰器；链式组合取代原 AOP 五角色 |
 | ④ | **通知观察** | `notify(phase, payload)` 只读 | 旁路 | 链路追踪/审计/指标/成本归因 | ❌ R1 既有 notify 回调 |
 | ⑤ | **Port 接入** | `Protocol` + Registry | 被 call 调用 | 工具系统/沙箱/LLM/记忆/RAG/Store | ❌ 能力契约 |
 | ⑥ | **组件** | 普通类/函数 | 装配或调用期 | 切分/嵌入/重排/改写/规划器/上下文四链 | ❌ 无横切无状态机的算法 |
 | ⑦ | **内核机制** | R1 内部 | R1 | 预算/终止/挂起/checkpoint/取消 | ❌ 不进算子层 |
 
-**关键定性**："算子"专指①；retry/timeout/熔断/降级/沙箱/工具/追踪**都是能力，不是算子**——"算子"字样只出现在描述承载形态时。②+③取代原 AOP：③是无状态 call 装饰器链，②是有状态守卫实例，③在调用前后驱动②的 check/observe。④就是 R1 现有 notify 回调，⑤⑥本就可插拔。
+**关键定性**："算子"专指①；retry/timeout/熔断/降级/沙箱/工具/追踪**都是能力，不是算子**——"算子"字样只出现在描述承载形态时。②+③取代原 AOP：③是无状态 call 装饰器链（函数式组合）；②的落地形态已演进——原 `Guard.check/observe` 拦截协议已删除，现由 R3 `ReliabilityExecutor` 显式编排 9 领域策略的领域方法实现，不再由③在调用前后驱动。④就是 R1 现有 notify 回调，⑤⑥本就可插拔。
 
 ### 5.2 A 类组合算子（10 个，框架核心）
 
@@ -292,44 +292,43 @@ R8(认知编排) ──→ R10(观测评测持久化，④notify) ──→ R11(
 
 **A 类统一约束**（R1 不变前提）：装配期 `Program→Program` 纯变换不改原对象（compile 幂等）；必须纯函数，运行期状态进 `State.scratch` 的 `x-*` 键，禁止实例持有流程进度（resume 靠 program_factory 重建，`src/runtime/types.py:521-531`）；轮次/跳数交 Budgets（`R12:55-56` 红线）；State 只读（`src/runtime/types.py:321-369` MappingProxyType，唯一写入点 `runner.py:535`）；gate 的 Suspend / race 的取消走 R1 设施，算子只编排不重实现。
 
-### 5.3 B/C 类：call 装饰器 + 有状态守卫
+### 5.3 B/C 类：call 装饰器 + 领域策略（②的落地演进）
 
 **③ call 装饰器**（签名是 R1 既有 `CallFn`，`src/runtime/types.py:724-725`）：
 
 ```python
-def retry(base: CallFn, *, attempts: int, backoff: BackoffSpec) -> CallFn: ...      # 调用级重试
+def retry_call(base: CallFn, *, attempts: int, backoff: float) -> CallFn: ...       # 调用级重试
 def timeout(base: CallFn, *, seconds: float) -> CallFn: ...                          # 调用级超时
 def danger_route(base: CallFn, registry) -> CallFn: ...                             # 按 danger 进沙箱
 def injection_guard(base: CallFn, detector) -> CallFn: ...                          # 注入检测
-# 组装：call = retry(timeout(danger_route(base_port_call)))
+# 组装：call = retry_call(timeout(danger_route(base_port_call)))
 ```
 
 用函数组合表达，无固定角色链、不叫 AOP；只覆盖 `Invoke`（§1.3 / D-7 边界）。
 
-**② 有状态守卫**（统一协议）：
+**② 领域策略（原"有状态守卫"，落地形态已演进）**：承载形态②在 R3 由 `ReliabilityExecutor` + 9 领域策略实现（`src/harness/resilience/`），以各自领域方法显式编排，不再是统一拦截协议：
 
 ```python
-class Guard(Protocol):
-    name: str
-    async def check(self, effect: Effect, ctx) -> Verdict | None: ...          # 准入；None=放行
-    async def observe(self, effect: Effect, result: Result, ctx) -> None: ...  # 后置记账
+# 9 领域策略，各自领域方法，无统一 check/observe 协议：
+# KillSwitch.is_tripped / Watchdog.detect / Idempotency.check_and_mark /
+# RateLimit.acquire→RatePermit / Bulkhead.run_in_slot /
+# CircuitBreaker.permit + observe_outcome / RetryPolicy.run_with_retries /
+# Timeout.run_with_deadline / Degradation.select
+executor = ReliabilityExecutor(core, ..., degradation=Degradation(...))  # 具名 opt-in 注入
+call = executor.as_call()                                                  # 产出符合 R1 的 CallFn
 ```
 
-承载：熔断（三态+滑窗+store）、限流（令牌桶）、舱壁（池计数）、幂等（去重表+TTL）、降级阶梯（available 永久剔除+session 隔离）、watchdog（滑窗）、killswitch（外部 flag）。由③call 装饰器驱动：调 base 前 `guard.check`、拿到 Result 后 `guard.observe`——不需要 AOP 容器。状态存在守卫实例上（沿用 `R3-可靠性.md:58-65` 语义），注册到组合层装配器；守卫只能持有跨调用策略状态（熔断计数等），不能持有单次流程进度。
+承载：熔断（三态+滑窗+store）、限流（令牌桶）、舱壁（池计数）、幂等（去重表+TTL）、降级阶梯（available 永久剔除+session 隔离）、watchdog（滑窗）、killswitch（外部 flag）。由执行器按可靠性工程语义显式编排：`_preflight` 前置放行 → `_budgeted_call` 预算内执行 → `observe_outcome` 熔断记数 → 失败 `_apply_recovery` 调 `Degradation.select` 裁决目标。状态存在领域策略实例上，跨调用存活、按 session 隔离；策略只持有跨调用策略状态（熔断计数等），不持有单次流程进度。原 `Guard`/`with_guard`/`Verdict`/`DegradationGuard`/`degrade_retry` 已删除。
 
 ### 5.4 call 注入链与依赖方向
 
 ```python
-def build_call(ports, decorators, guards) -> CallFn:
-    base = lambda effect, ctx: dispatch(ports, effect, ctx)   # 按 effect.port 分派，构造 Result(含 usage)
-    call = base
-    for deco in decorators: call = deco(call)                 # ③ 装饰器链
-    for guard in guards: call = with_guard(call, guard)       # ② check/observe 包裹
-    return call
-# Runner(call=build_call(...)) —— R1 一行不改
+base = make_dispatch(ports)                                    # 按 effect.port 分派，构造 Result(含 usage)
+call = build_call(base, decorators=(retry_call, timeout))      # ③函数式装饰器链（内层先注册）
+# Runner(call=call) —— R1 一行不改
 ```
 
-`dispatch` 按 `effect.port` 取 payload 参数（`src/ports/adapters/`、`gateway.py` 口径），构造 `Result.success/failure` 含 `Usage`/`PortError`（`src/runtime/types.py:211-243`）；不构造 Invocation（R1 明确不构造，`R1-核心运行时.md:172`）。typed target 消费仅降级场景需要，由②降级守卫 + ③装饰器协作完成。
+`dispatch`/`make_dispatch` 按 `effect.port` 取 payload 参数（`src/ports/adapters/`、`gateway.py` 口径），构造 `Result.success/failure` 含 `Usage`/`PortError`（`src/runtime/types.py:211-243`）；不构造 Invocation（R1 明确不构造，`R1-核心运行时.md:172`）。typed target 消费仅降级场景需要，由 R3 执行器 `_apply_recovery` 调 `Degradation.select` 写入 `RoutingTarget` 后交网关完成。
 
 **依赖方向不变量**：工具层（R3~R9 + 用户自定义，产出 Program）→ 装配期 → 组合层（算子编排 + 构造 call + 校验）→ 注入 call → R1（只解释 Program）。R1 零依赖上层，组合层是唯一知道"有哪些工具层"的地方，工具层互不直连。
 
@@ -364,7 +363,7 @@ def notify(phase: str, payload: Mapping[str, object]) -> None: ...   # 同步；
 | 能力调用（5） | `before_model` / `after_model` / `before_tool` / `after_tool` / `tool_error` | R4（model 系列）/ R5（tool 系列） |
 | 子 Agent（2） | `child_spawn` / `child_done` | Runner |
 | 控制流（3） | `cancelled` / `wait_human` / `resumed` | Runner |
-| 拒绝（1） | `invoke_rejected` | 组合层 call 装饰器（守卫 check 拒绝时发） |
+| 拒绝（1） | `invoke_rejected` | R3 执行器 `_reject`/`_emit_rejected`（终止类策略拒绝 / 降级拒答时发） |
 
 流式结算的多次 before/after_model 是预期行为（16 相位够用，不增删，P4）。compact 系列是 R7 内部步骤、原调用级扩展点由②③承接，均非 notify 相位。
 
@@ -520,7 +519,7 @@ NotifyFn = Callable[[str, Mapping[str, object]], None]   # R1 既有通知回调
 CallFn = Callable[[Effect, DynamicValue], Awaitable[Result]]            # 组合层 build_call 注入
 ```
 
-> **执行契约（命脉）**：R1 一行不改，主调用链只有 `call`（组合层 `build_call` 构造、`Runner(call=...)` 注入），会话/轮次/控制流及 tool 相位通知经 R1 既有 `notify` 回调发出。`Invoke` 类 Effect 走 call：③call 装饰器链（retry 调用级/timeout/danger_route/injection_guard）+ ②有状态守卫 check/observe + `dispatch` 按 port 分派；守卫 check 拒绝产 `Verdict` 并发 `invoke_rejected` 通知；降级由②降级守卫 observe 统一裁决（保四坑语义），失败上下文经守卫实例状态具名直传，R1 内核不解释装饰器与降级目标。`Spawn`/`Suspend`/`Terminate` 走内核快路径，**不进 call**——call 层算子拦不到这三类，只能经 notify 观察（D-7 代价）。
+> **执行契约（命脉）**：R1 一行不改，主调用链只有 `call`（组合层 `build_call(base, *, decorators=())` 或 R3 `ReliabilityExecutor.as_call()` 构造、`Runner(call=...)` 注入），会话/轮次/控制流及 tool 相位通知经 R1 既有 `notify` 回调发出。`Invoke` 类 Effect 走 call：③call 装饰器链（retry_call 调用级/timeout/danger_route/injection_guard）+ `dispatch` 按 port 分派；R3 可靠性链的终止类策略（KillSwitch/Watchdog/Idempotency/RateLimit REJECT）经执行器 `_reject` 发 `invoke_rejected` 并产出拒绝 Result；降级由执行器 `_apply_recovery` 调 `Degradation.select` 统一裁决（保四坑语义），失败上下文经 `FaultRecord` 具名直传，R1 内核不解释装饰器与降级目标。`Spawn`/`Suspend`/`Terminate` 走内核快路径，**不进 call**——call 层算子拦不到这三类，只能经 notify 观察（D-7 代价）。
 
 ### R1.5 元数据与核心字段
 
@@ -577,18 +576,18 @@ CallFn = Callable[[Effect, DynamicValue], Awaitable[Result]]            # 组合
 
 ### R2.1 职责与边界
 
-**做**：框架真正核心——①A 类组合算子（`Program→Program`）把工具层装配成 Program；②有状态守卫 + ③call 装饰器构造注入 R1 的 `call`；`build_call` + `dispatch`；provides/requires 挑选期校验；ToolLayer 装配器。
+**做**：框架真正核心——①A 类组合算子（`Program→Program`）把工具层装配成 Program；③call 装饰器构造注入 R1 的 `call`；`build_call` + `dispatch`/`make_dispatch`；provides/requires 挑选期校验；ToolLayer 装配器。②领域策略（原"有状态守卫"）落地在 R3 执行器，不在本层。
 **不做**：具体能力实现（R3~R9）；执行循环（R1，一行不改）；任何领域语义。
-**核心变化（规格 P2）**：R2 取消——AOP 五角色容器、`LifecycleBus`、Registry 不再作为独立模块/框架概念存在。能力按下表分流：AOP 五角色固定链 → ③call 装饰器链 + ②有状态守卫；降级重路由状态机（`src/aop/container.py:275-317`）→ ②降级守卫 + ①fallback 算子；LifecycleBus 16 相位 → 保留为 R1 的 notify 相位（④）；`PORT_PROTOCOLS`/Registry → 并入组合层装配器；`Invocation`/`FaultRecord`/`RoutingTarget` → 移入组合层做守卫/装饰器协作 DTO；DTO 领域字段 → 归位各能力模块；`aop/protocols.py FailureClass` 删除。依赖方向恒为 工具层 → 组合层 → R1。
+**核心变化（规格 P2）**：R2 取消——AOP 五角色容器、`LifecycleBus`、Registry 不再作为独立模块/框架概念存在。能力按下表分流：AOP 五角色固定链 → ③call 装饰器链 + ②领域策略（R3 `ReliabilityExecutor` 显式编排）；降级重路由状态机（`src/aop/container.py:275-317`）→ R3 执行器 `_apply_recovery` + ①fallback 算子；LifecycleBus 16 相位 → 保留为 R1 的 notify 相位（④）；`PORT_PROTOCOLS`/Registry → 并入组合层装配器；`Invocation`/`FaultRecord`/`RoutingTarget` → 移入组合层做协作 DTO；DTO 领域字段 → 归位各能力模块；`aop/protocols.py FailureClass` 删除。依赖方向恒为 工具层 → 组合层 → R1。
 
 ### R2.2 设计架构
 
 组合层是唯一注册与装配入口，由三类算子 + 装配器组成（7 承载形态见 §5）：
 
 - **①A 类组合算子（10 个，`src/compose/program.py`）**：seq/par/branch/race/loop/map_state/map_effect/fallback/gate/retry（流程级）；装配期 `Program→Program` 纯变换、compile 幂等；运行期状态进 `State.scratch` 的 `x-*`，禁止实例持有流程进度（resume 靠 program_factory 重建）。
-- **②有状态守卫（`src/compose/call.py`）**：`Guard.check(effect,ctx)→Verdict|None` + `observe(effect,result,ctx)`；承载熔断/限流/舱壁/幂等/降级阶梯/watchdog/killswitch；状态在守卫实例（跨调用存活、按 session 隔离），不持有单次流程进度。
-- **③call 装饰器（`src/compose/call.py`）**：`CallFn→CallFn`，retry（调用级）/timeout（调用级）/danger_route/injection_guard；函数组合无固定角色链、不叫 AOP；只覆盖 `Invoke`。装饰器在调 base 前驱动 guard.check、拿到 Result 后驱动 guard.observe。
-- **装配器与 dispatch（`src/compose/dispatch.py`）**：`build_call(ports, decorators, guards)` 构造 call 注入 `Runner(call=...)`；`dispatch` 按 `effect.port` 分派到 Port、构造 `Result`（含 Usage）；不构造 Invocation（R1 明确不构造）。
+- **②领域策略（原"有状态守卫"，已演进到 R3）**：拦截协议与 `DegradationGuard`/`degrade_retry` 已删除；现由 R3 `ReliabilityExecutor`（`src/harness/resilience/executor.py`）+ 9 领域策略显式编排，承载熔断/限流/舱壁/幂等/降级阶梯/watchdog/killswitch；状态在领域策略实例（跨调用存活、按 session 隔离），不持有单次流程进度。
+- **③call 装饰器（`src/compose/call.py`）**：`CallFn→CallFn`，`retry_call`（调用级）/timeout（调用级）/danger_route/injection_guard；函数组合无固定角色链、不叫 AOP；只覆盖 `Invoke`。装饰器是纯函数组合，不再驱动任何 check/observe 协议。
+- **装配器与 dispatch（`src/compose/dispatch.py`）**：`make_dispatch(ports)` 产出 base，`build_call(base, *, decorators=())` 构造 call 注入 `Runner(call=...)`；`dispatch` 按 `effect.port` 分派到 Port、构造 `Result`（含 Usage）；不构造 Invocation（R1 明确不构造）。
 - **④notify**：R1 既有回调，16 相位口径保留（见 §6），承载追踪/审计/指标；总线模块取消。
 
 ### R2.3 流程图
@@ -596,14 +595,15 @@ CallFn = Callable[[Effect, DynamicValue], Awaitable[Result]]            # 组合
 ```mermaid
 flowchart TD
     P["工具层 build()→Program"] --> OPS["①A 类算子装配 Program"]
-    OPS --> BC["build_call(ports, decorators, guards)"]
-    BC --> DEC["③装饰器链: retry/timeout/danger_route/injection_guard"]
-    DEC --> GD{"②守卫 check"}
-    GD -->|None 放行| DSP["dispatch 按 port 分派 → Port"]
-    GD -->|Verdict 拒绝| RJ["Result.failure + invoke_rejected 通知"]
+    OPS --> BC["make_dispatch(ports) → build_call(base, *, decorators=())"]
+    BC --> DEC["③装饰器链: retry_call/timeout/danger_route/injection_guard"]
+    DEC --> DSP["dispatch 按 port 分派 → Port"]
+    EX["R3 ReliabilityExecutor.as_call()（独立注入）"] -->|终止拒绝| RJ["_reject → INVOKE_REJECTED + invoke_rejected → Result.failure"]
+    EX -->|失败| DEG["_apply_recovery: Degradation.select 写 typed target + 链外重跑"]
     DSP --> RES["Result(含 Usage)"]
     RJ --> RES
-    RES --> OBS["②守卫 observe 记账 + ④notify 观察"]
+    DEG --> RES
+    RES --> OBS["④notify 观察"]
     OBS --> FL["fold 回填 State"]
     INJ["Runner(call=..., notify=...) R1 一行不改"] -.注入.-> BC
 ```
@@ -617,16 +617,12 @@ flowchart TD
 def gate(p: Program, policy) -> Program: ...              # 唯一可 yield Suspend 的 A 类算子
 def retry(p: Program, *, attempts, backoff) -> Program: ... # 流程级：失败按 program_factory 重建重跑
 
-# ---- ②有状态守卫（src/compose/call.py）----
-class Guard(Protocol):
-    name: str
-    async def check(self, effect: Effect, ctx) -> Verdict | None: ...   # None=放行
-    async def observe(self, effect: Effect, result: Result, ctx) -> None: ...
-
-@dataclass(frozen=True)
-class Verdict:               # 守卫裁决：放行/拒绝（R9 安全域四态用 SafetyVerdict）
-    allowed: bool
-    reason: str = ""
+# ---- ②领域策略（R3，src/harness/resilience/；原拦截协议已删除）----
+# ReliabilityExecutor + 9 领域策略显式编排，领域方法如：
+# KillSwitch.is_tripped / Watchdog.detect / Idempotency.check_and_mark /
+# RateLimit.acquire / Bulkhead.run_in_slot / CircuitBreaker.permit+observe_outcome /
+# RetryPolicy.run_with_retries / Timeout.run_with_deadline / Degradation.select
+# call = ResilienceCapability(...).install(core).as_call()
 
 # ---- ③call 装饰器（src/compose/call.py）----
 CallFn = Callable[[Effect, DynamicValue], Awaitable[Result]]   # R1 既有签名 types.py:724-725
@@ -636,8 +632,9 @@ def danger_route(base: CallFn, registry) -> CallFn: ...
 def injection_guard(base: CallFn, detector) -> CallFn: ...
 
 # ---- 装配器与 dispatch（src/compose/dispatch.py）----
-def build_call(ports, decorators, guards) -> CallFn: ...   # 构造注入 R1 的 call
-async def dispatch(ports, effect: Effect, ctx) -> Result: ...  # 按 effect.port 分派，构造 Result(含 Usage)
+def build_call(base: CallFn, *, decorators: Sequence[Callable[[CallFn], CallFn]] = ()) -> CallFn: ...
+def make_dispatch(ports: PortMap) -> CallFn: ...   # 按 effect.port 分派，构造 Result(含 Usage)
+async def dispatch(ports, effect: Effect, ctx) -> Result: ...  # 便捷形态
 
 # ---- 能力级/策略级/注册表（挑选期）----
 class Capability(Protocol):
@@ -652,18 +649,18 @@ class Registry:                                             # 装配期 provides
 
 ### R2.5 相位清单与元数据
 
-16 个 notify 相位（口径保留，不得增删；见 §6）：会话/轮次 5 + 能力调用 5 + 子 Agent 2 + 控制流 3 + 拒绝 1（`invoke_rejected` 由组合层 call 装饰器在守卫 check 拒绝时发）。相位枚举留在 `src/hooks/lifecycle.py`，不再是总线模块。
+16 个 notify 相位（口径保留，不得增删；见 §6）：会话/轮次 5 + 能力调用 5 + 子 Agent 2 + 控制流 3 + 拒绝 1（`invoke_rejected` 由 R3 可靠性执行器 `_reject`/`_emit_rejected` 在终止类策略拒绝或降级拒答时发）。相位枚举留在 `src/hooks/lifecycle.py`，不再是总线模块。
 
-**裁决返回**：`Guard.check` 返回 `Verdict|None`；R9 安全域用 `SafetyVerdict`（ask→Suspend + `wait_human`/`resumed`）；RETRY/TIMEOUT 调用级由③装饰器实现、流程级由①算子实现；降级由②降级守卫 observe 裁决（保四坑语义）。
+**裁决返回**：通用 `Guard.check → Verdict` 协议已删除；R3 终止类策略经执行器 `_reject` 产出 `INVOKE_REJECTED` 拒绝 Result，降级由 `_apply_recovery` 调 `Degradation.select` 写 typed `RoutingTarget`（保四坑语义）；R9 安全域仍用 `SafetyVerdict`（ask→Suspend + `wait_human`/`resumed`，与通用裁决不同物）；RETRY/TIMEOUT 调用级由③装饰器实现、流程级由①算子实现。
 
-**跨调用状态**：②守卫实例持有跨调用策略状态（熔断三态机、降级 ladder+available 按 session 隔离）；流程进度进 `State.scratch x-*`（A 类算子纯函数）；无容器级单槽目标、无信号层。
+**跨调用状态**：②领域策略实例持有跨调用策略状态（熔断三态机、降级 ladder+available 按 session 隔离，在 R3 执行器编排下）；流程进度进 `State.scratch x-*`（A 类算子纯函数）；无容器级单槽目标、无信号层。
 
 ### R2.6 可插拔契约
 
 | 注入点 | 协议 | 默认 | 入口 | 校验 |
 |--------|------|------|------|------|
 | ①算子 | `Program→Program` | 10 内置 | `seq/par/...` | compile 幂等 + 纯函数 AST |
-| ②守卫 | Guard（check/observe） | 无（按需） | 注册进 build_call | 缺 name/缺方法 → 拒绝 |
+| ②领域策略 | R3 领域策略实例（无统一协议） | 无（按需） | `ResilienceCapability(...)` 具名构造注入 | 方法缺失即不装配该领域能力 |
 | ③call 装饰器 | `CallFn→CallFn` | 无（按需） | 函数组合 | 只覆盖 Invoke（D-7） |
 | 能力组件 | Capability（build→Program） | 各内置工具层 | `.capability()` | provides/requires 装配期校验 |
 | 策略/端口 | Provider/Port | 内置默认 | `registry.register()` | 缺方法/缺 name → 拒绝；Port 种类不可新增 |
@@ -673,12 +670,12 @@ class Registry:                                             # 装配期 provides
 
 | 门禁 | 条目 | 达标标准 | 级别 |
 |------|------|---------|------|
-| R2-G1 | 覆盖 | 10 算子 + Guard + call 装饰器矩阵用例全过，≥90% | G1 |
+| R2-G1 | 覆盖 | 10 算子 + call 装饰器矩阵用例全过，≥90%（可靠性策略覆盖归 R3） | G1 |
 | R2-G2 | 算子纯度 | compile 幂等、不改原 Program；状态进 `State.scratch x-*`；gate 可 yield Suspend | G2 |
-| R2-G2 | 守卫语义 | check/observe 驱动顺序；熔断跨调用状态；拒绝发 `invoke_rejected` | G2 |
+| R2-G2 | 可靠性边界 | ②领域策略由 R3 `ReliabilityExecutor` 显式编排（演进项，R2 不再有 check/observe 协议）；终止拒绝由执行器发 `invoke_rejected`（在 R3 验证） | G2 |
 | R2-G2 | call 边界 | 装饰器链只覆盖 Invoke；build_call 注入 R1 后主流程跑通 | G2 |
 | R2-G3 | 留名 | 一次 invoke 后 trace 含全部算子/守卫/装饰器 name | G3 |
-| R2-红线 | 无残留 | 出现 `AOPContainer`/五角色/`LifecycleBus`/旧扩展体系原语 → 拒绝 | 红线 |
+| R2-红线 | 无残留 | **五角色/AOPContainer 不得复辟**（历史已取消；出现五角色/AOPContainer/`LifecycleBus`/旧扩展体系原语 → 拒绝） | 红线 |
 
 ## R3 可靠性
 
@@ -686,34 +683,38 @@ class Registry:                                             # 装配期 provides
 
 ### R3.1 职责与边界
 
-**做**：重试、熔断、降级、限流、舱壁、幂等、watchdog/killswitch——按 7 承载形态重新归类（规格 P3）：②有状态守卫实现 `Guard.check/observe`（状态留实例、四坑语义不动）；③call 装饰器实现 `CallFn→CallFn`（调用级 retry/timeout，内部驱动②守卫）；①A 类算子 fallback（降级选级骨架）+ retry（流程级重放）。
+**做**：重试、熔断、降级、限流、舱壁、幂等、watchdog/killswitch——以 **9 领域策略**实现，由 `ReliabilityExecutor` 按可靠性工程语义显式编排：**前置放行 → 预算内中心调用（超时/重试/舱位）→ 熔断记数 → 失败降级选级 + 重路由**。每个策略以自身领域方法参与（`is_tripped`/`detect`/`check_and_mark`/`acquire`/`run_in_slot`/`permit`+`observe_outcome`/`run_with_retries`/`run_with_deadline`/`select`），无统一角色协议、无 Role 枚举、无槽位列表。
 **不做**：不碰 R1 预算硬强制（⑦内核机制）；不做结构化输出修复（R4）。**BudgetGuard 删除**——软限是文本提示用 map_effect 注入、硬限在 R1（预算治理不是算子，D-4）。
 **共享设施**：失败分类表 `FailureClassifier` + 维度键 `DimensionKey`（按 provider/model/tool/tenant 隔离计数）。
 
 ### R3.2 设计架构
 
-可靠性是**五道防线叠加**，每道防不同故障，按承载形态分工（非原 AOP 固定角色链）：
+可靠性是**五道防线叠加**，每道防不同故障，由 `ReliabilityExecutor` 显式编排（领域语义，非角色链）：
 - 重试防瞬态错误（429/超时），熔断防持续宕机，降级给兜底出口，watchdog 防空转循环，killswitch 兜住成本失控。
-- **②有状态守卫**（7 个）：CircuitBreaker/RateLimit/Bulkhead/Idempotency/Watchdog/KillSwitch/Degradation —— 实现 `Guard.check/observe`，状态在守卫实例（熔断三态机、ladder+available 按 session 隔离），跨调用存活。
-- **③call 装饰器**（2 个）：RetryPolicy（调用级 retry）/Timeout（调用级 timeout）—— `CallFn→CallFn`，内部在调 base 前调 guard.check、拿 Result 后调 guard.observe。
-- **①A 类算子**（2 个）：fallback（降级选级骨架）/retry（流程级重放，`program_factory` 重建）。
-- **降级重路由**：从 `src/aop/container.py:275-317` 移出 → 由②降级守卫 observe 写 typed target + ③装饰器驱动的链外重跑承接；**四坑语义（B1 串味/B2 标识/R3-6 写回/R3-7 带目标）原文保留、只换宿主**（见 §2.2 降级接力段 / P3 门禁红线）。
+- **9 领域策略**（`src/harness/resilience/`）：KillSwitch `is_tripped` / Watchdog `detect` / Idempotency `check_and_mark` / RateLimit `acquire→RatePermit` / Bulkhead `run_in_slot` / CircuitBreaker `permit`+`observe_outcome` / RetryPolicy `run_with_retries` / Timeout `run_with_deadline` / Degradation `select`。状态在策略实例（熔断三态机、ladder+available 按 session 隔离），跨调用存活。
+- **装配**：`ResilienceCapability(...)` 具名构造注入 9 策略，`.install(core, *, registry, bus, notify)` 返回 `ReliabilityExecutor`，`.as_call()` 注入 R1；`extra_plugins` 只收函数式 `(CallFn)->CallFn` 变换器。
+- **降级重路由**：执行器 `_apply_recovery` 调 `Degradation.select` 写 typed target + 链外重跑；**四坑语义（B1 串味/B2 标识/R3-6 写回/R3-7 带目标）原文保留、断言不放水**（见 R3 §2.3 / 门禁红线）。
 
 ### R3.3 流程图
 
 ```mermaid
 flowchart TD
-    IN["Invoke 进入 call 装饰器链"] --> GD{"②守卫 check: KillSwitch/Watchdog/Idempotency/RateLimit/Bulkhead/CircuitBreaker"}
-    GD -->|Verdict 拒绝| RJ["Result.failure + invoke_rejected"]
-    GD -->|None 放行| CALL["③RetryPolicy/Timeout 包裹 → dispatch → Port.call"]
-    CALL --> R{"结果"}
-    R -->|失败| FC["FailureClassifier 分类"]
-    FC -->|retryable 且未超限| RETRY["③RetryPolicy: backoff+jitter+幂等校验<br/>重放 base"]
-    RETRY --> CALL
-    FC -->|count_toward_breaker| BC["②熔断器 observe 计失败<br/>可能 closed→open"]
-    R -->|成功| OK["②守卫 observe: 重置熔断/释放许可"]
-    RETRY -->|次数耗尽| SV["失败记录写守卫实例<br/>②降级守卫 observe 裁决目标"]
-    SV --> DEG["降级目标 → gateway 切后端 / REFUSE（四坑语义）"]
+    IN["ReliabilityExecutor.as_call() 收到 Invoke"] --> PRE{"前置放行 _preflight<br/>is_tripped/detect/check_and_mark/acquire/permit"}
+    PRE -->|终止拒绝| RJ["_reject: INVOKE_REJECTED + invoke_rejected"]
+    PRE -->|放行/写 fault| SEL{"已有降级 fault?"}
+    SEL -->|是| DEG0["_apply_recovery: Degradation.select<br/>写 typed target (B1/B2/R3-6/R3-7)"]
+    SEL -->|否| BUD["预算内调用 _budgeted_call<br/>Timeout.run_with_deadline → RetryPolicy.run_with_retries → Bulkhead.run_in_slot → core"]
+    DEG0 --> BUD
+    BUD --> OBS["CircuitBreaker.observe_outcome 记数<br/>异常记失败并原样抛回"]
+    OBS --> R{"result.ok?"}
+    R -->|是| OK["Result 回 Runner.fold"]
+    R -->|否| FAULT["写 fault: reason + failed_target_of（R3-7）"]
+    FAULT --> SEL2["_apply_recovery 选级 + 链外重跑（上限 _MAX_REROUTE）"]
+    SEL2 -->|refuse| REF["REFUSED 真拒答，绝不编造"]
+    SEL2 -->|切后端| BUD
+    SEL2 --> DEG["typed target → gateway 切后端 / REFUSE（四坑语义）"]
+    REF --> OK
+    DEG --> OK
 ```
 
 ### R3.4 API 接口
@@ -734,28 +735,30 @@ class RetrySpec:                          # 重试参数归 R3 自身
     respect_retry_after: bool = True
     idempotency_required: bool = True
 
-# ---- ②有状态守卫（实现 src/compose/call.py Guard 协议）----
-class CircuitBreaker:                     # check/observe；状态在实例（熔断三态机）
-    def __init__(self, failure_rate=0.5, minimum_samples=5, window_size=20,
-                 open_cooldown_s=30, half_open_max_probes=3, per_dimension=True): ...
-class Degradation:                        # ②降级守卫：统一裁决者，保四个历史修复点（P3）
-    def __init__(self, ladder: DegradeLadder, failed_target_of): ...
-    # 实例内状态：available（故障目标永久剔除并写回）+ dict[session_id, 目标状态]（跨 Effect 隔离）
-    async def check(self, effect, ctx) -> Verdict | None: ...
-    async def observe(self, effect, result, ctx) -> None: ...  # 裁决 typed target + 链外重跑
-class RateLimit: ...
-class Bulkhead: ...
-class Idempotency: ...
-class Watchdog: ...
-class KillSwitch: ...
+# ---- 9 领域策略（各自领域方法，无统一角色协议）----
+class KillSwitch:      def is_tripped(self, session_id) -> bool: ...
+class Watchdog:        def detect(self, inv) -> bool: ...; def inspect(self, kind) -> bool: ...
+class Idempotency:     def check_and_mark(self, key) -> bool: ...
+class RateLimit:       def acquire(self) -> RatePermit: ...   # ADMIT/REJECT/DEGRADE
+class Bulkhead:        async def run_in_slot(self, inv, next) -> Result: ...
+class CircuitBreaker:  async def permit(self, inv) -> str | None: ...; async def observe_outcome(self, inv, result) -> None: ...
+class RetryPolicy:     async def run_with_retries(self, inv, next) -> Result: ...
+class Timeout:         async def run_with_deadline(self, inv, next) -> Result: ...
+class Degradation:     def select(self, fault: FaultRecord, *, session_id: str) -> str: ...
+    # 实例内状态：available（故障目标永久剔除并写回）+ dict[session_id, 目标状态]（跨 Effect 隔离，B1）
 
-# ---- ③call 装饰器（CallFn→CallFn，内部驱动②守卫）----
-def retry_call(base: CallFn, *, spec: RetrySpec) -> CallFn: ...   # 调用级 retry
-def timeout(base: CallFn, *, seconds: float) -> CallFn: ...
-
-# ---- ①A 类算子（Program→Program）----
-def fallback(p: Program, *, ladders, refuse) -> Program: ...      # 降级选级骨架
-def retry(p: Program, *, attempts, backoff) -> Program: ...       # 流程级重放
+# ---- 显式编排 + 装配 ----
+class ReliabilityExecutor:
+    def __init__(self, core, *, registry=None, bus=None, notify=None,
+                 kill_switch=None, watchdog=None, idempotency=None, rate_limit=None,
+                 bulkhead=None, breaker=None, retry=None, timeout=None,
+                 degradation=None, transformers=()): ...
+    def as_call(self) -> CallFn: ...; async def run_invocation(self, inv) -> Result: ...
+class ResilienceCapability:
+    def __init__(self, *, breaker=None, retry=None, rate_limit=None, bulkhead=None,
+                 watchdog=None, killswitch=None, idempotency=None,
+                 degradation=None, timeout=None, extra_plugins=()): ...
+    def install(self, core, *, registry=None, bus=None, notify=None) -> ReliabilityExecutor: ...
 # BudgetGuard 已删除：软限用 map_effect 注入 payload['budget']，硬限在 R1
 ```
 
@@ -764,7 +767,8 @@ def retry(p: Program, *, attempts, backoff) -> Program: ...       # 流程级重
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | DimensionKey | tuple[str,str] | (维度类型, 目标名)，如 ("provider","openai") |
-| attempt | int | 当前重试次数，由 ③装饰器/②守卫实例具名携带 |
+| attempt | int | 当前重试次数，由 `RetryPolicy.run_with_retries` 内部携带 |
+| RatePermit | 领域枚举 | `ADMIT`/`REJECT`/`DEGRADE`，限流裁决（非通用 Verdict） |
 | BreakerState.status | closed/open/half_open | 熔断三态 |
 | failure_rate | float | 滑窗内失败率，达阈值触发 open |
 | DegradeStep.quality | float | 质量分（1.0 最优 → 0.0 拒答），进 trace |
@@ -776,6 +780,7 @@ def retry(p: Program, *, attempts, backoff) -> Program: ...       # 流程级重
 
 | 注入点 | 协议 | 默认 | 校验 |
 |--------|------|------|------|
+| 9 领域策略 | `ResilienceCapability` 具名构造参数 | 不装（opt-in） | 缺席即跳过；`extra_plugins` 仅函数变换器（非 callable → ValueError） |
 | 失败分类 | FailureClassifier | 默认分类表 | code 覆盖完整 |
 | 退避策略 | RetrySpec.jitter | full | base_delay=0 且 none 拒绝 |
 | 降级阶梯 | DegradeLadder | LLM 默认阶梯 | 无拒答兜底/成环 → 拒绝 |
@@ -789,9 +794,10 @@ def retry(p: Program, *, attempts, backoff) -> Program: ...       # 流程级重
 | R3-G2 | 重试 | 退避区间/上限/幂等拦截/预算拦截各有用例（调用级+流程级） | G2 |
 | R3-G2 | 熔断 | 三态迁移/半开探测/样本不足不 open/跨调用状态各有用例 | G2 |
 | R3-G2 | 降级 | 全不可用→明确拒答；降级链成环装配期报错 | G2 |
-| R3-G3 | 协同 | 五道防线按 call 装饰器+守卫链执行，trace 可见 | G3 |
+| R3-G3 | 协同 | `ReliabilityExecutor` 显式编排 9 领域策略（前置放行→预算执行→熔断记数→降级选级+重路由），trace 可见 | G3 |
 | R3-G2 | 降级四坑 | B1 会话隔离/B2 failed_target=后端注册名/R3-6 available 写回/R3-7 故障记录带 failed_target 各有单测；端到端断言不放水 | G2 |
 | R3-红线 | 幂等/预算 | 无幂等键的副作用重试 → 拒绝；出现 BudgetGuard → 拒绝 | 红线 |
+| R3-静态 | 无角色复辟 | 五角色符号与角色方法协议在 R3 零命中（仅"已删除/历史"语境可出现）；`observe_outcome` 是领域方法，允许 | 静态 |
 
 ## R4 模型与推理
 
@@ -804,7 +810,7 @@ def retry(p: Program, *, attempts, backoff) -> Program: ...       # 流程级重
 
 ### R4.2 设计架构
 
-LLM 调用（`Invoke(port="llm")`）走组合层构造的 call（③装饰器 + ②守卫 + dispatch），R1/能力层在调用前后发 `before_model`/`after_model` notify：缓存命中直接返回（省钱省延迟）→ 路由选模型 → 调用 → `after_model` 后结构化校验（不合法则由⑥组件产修复提示重试）→ 成本归因。`as_call()` 改为 dispatch 形态：直接吃 `(effect, ctx)`，不再构造 Invocation（P4）。模型降级矩阵复用 R3 的②降级守卫（统一裁决者，保四坑），降级 target 走与 Registry 同源的 typed 路径进网关，不再经裸降级桥接。
+LLM 调用（`Invoke(port="llm")`）走组合层构造的 call（③装饰器 + dispatch），R1/能力层在调用前后发 `before_model`/`after_model` notify：缓存命中直接返回（省钱省延迟）→ 路由选模型 → 调用 → `after_model` 后结构化校验（不合法则由⑥组件产修复提示重试）→ 成本归因。`as_call()` 改为 dispatch 形态：直接吃 `(effect, ctx)`，不再构造 Invocation（P4）。模型降级矩阵由 R3 执行器 `_apply_recovery` 调 `Degradation.select`（统一裁决者，保四坑），降级 target 走与 Registry 同源的 typed 路径进网关，不再经裸降级桥接。
 
 ### R4.3 流程图
 
@@ -1468,7 +1474,7 @@ seq(a,b); par([...]); branch(fn, arms); race([...]); retry(n,backoff); map_state
 
 ### R9.2 设计架构
 
-**纵深防御**：模型级安全是必要不充分条件，harness 提供独立执行期强制层。每层独立强制，一个守卫的 allow 不能覆盖另一个的 deny（取最严格；安全四态用 `SafetyVerdict`）。核心原则：**工具/检索/网页/技能正文一律不可信**，注入防御在进上下文前（②守卫 check / ③ `injection_guard` 装饰器）。审计覆盖全部事件且与事件日志同源可回放（④notify）。
+**纵深防御**：模型级安全是必要不充分条件，harness 提供独立执行期强制层。每层独立强制，一道防御的 allow 不能覆盖另一道的 deny（取最严格；安全四态用 `SafetyVerdict`）。核心原则：**工具/检索/网页/技能正文一律不可信**，注入防御在进上下文前（R9 安全域 / ③ `injection_guard` 装饰器）。审计覆盖全部事件且与事件日志同源可回放（④notify）。
 
 ### R9.3 流程图
 
@@ -1494,7 +1500,7 @@ flowchart TD
 ```python
 class Guardrail(Protocol):
     name: str; direction: Literal["input","output"]
-    def check(self, data: DynamicValue, ctx: object) -> SafetyVerdict: ...   # allow/redact/deny/ask；ask→Suspend（②守卫 check）
+    def check(self, data: DynamicValue, ctx: object) -> SafetyVerdict: ...   # allow/redact/deny/ask；ask→Suspend（R9 安全域，非通用拦截协议）
 
 class InjectionDetector(Protocol):
     name: str
@@ -1650,7 +1656,7 @@ def replay_events(events, initial: AgentState) -> AgentState: ...
 
 ### R11.2 设计架构
 
-四组 API 是**同一内核面向四类使用者的四个投影**，底层都归约到 ①A 类算子 / ②守卫 / ③call 装饰器 / ④notify / ⑤Port / Program。外部系统（可视化平台、存储工具、日志 SDK）只经三类契约（Port/Event Stream/Projection）接入，不得 import 内核内部对象或直接写事件日志。装配期统一 `static_check`（provides/requires 校验）把错误挡在运行前。
+四组 API 是**同一内核面向四类使用者的四个投影**，底层都归约到 ①A 类算子 / ②领域策略（R3）/ ③call 装饰器 / ④notify / ⑤Port / Program。外部系统（可视化平台、存储工具、日志 SDK）只经三类契约（Port/Event Stream/Projection）接入，不得 import 内核内部对象或直接写事件日志。装配期统一 `static_check`（provides/requires 校验）把错误挡在运行前。
 
 ### R11.3 流程图
 
@@ -1665,7 +1671,7 @@ flowchart TD
     A1 --> P["三类契约<br/>Port/EventStream/Projection"]
     A2 --> AG["Arch + 组合算子"]
     A3 --> AB["Agent 装配器 + profile"]
-    A4 --> LOW["A类算子/Guard/call装饰器/notify/Port/Program/fold"]
+    A4 --> LOW["A类算子/领域策略(R3)/call装饰器/notify/Port/Program/fold"]
     P --> EXT["外部系统: 可视化/存储/日志SDK/审批/LLM"]
     AG --> BUILD
     AB --> BUILD
@@ -1698,16 +1704,15 @@ class PortRegistry:
 # A2 架构组合
 agent2 = Agent(arch=budget(max_cost_usd=2)(branch(intent_fn, {"qa": rag, "act": ReAct(tools)})))
 
-# A4 组件开发（②守卫 + ③call 装饰器 + ④notify 观察 + ①算子）
-class MyGuard:                               # ②有状态守卫：check/observe
-    name = "my-guard"
-    async def check(self, effect, ctx) -> Verdict | None: ...        # None=放行；拒绝发 invoke_rejected
-    async def observe(self, effect, result, ctx) -> None: ...        # 后置记账
+# A4 组件开发（②领域策略 + ③call 装饰器 + ④notify 观察 + ①算子）
+cap = ResilienceCapability(rate_limit=my_rate_limit, ...)  # ②9 领域策略具名 opt-in 注入
+call = cap.install(core).as_call()                          # 执行器显式编排，无统一 check/observe 协议
 class MyAudit:                               # ④notify 观察方：订阅相位，返回值不消费
     name = "my-audit"
     def observe(self, phase: str, payload: Mapping[str, object]) -> None: ...  # 异常就地隔离
 def my_operator(p: Program) -> Program: ...  # ①A 类算子：Program→Program 纯变换
-call = build_call(ports, decorators=[retry_call, timeout], guards=[MyGuard()])  # ③函数组合，无固定角色链
+base = make_dispatch(ports)
+decorated = build_call(base, decorators=[retry_call, timeout])      # ③函数组合，无固定角色链
 ```
 
 > 用户无感差异：对外 API（`seq/par/branch/...` + 10 内置架构）不变，它们都是 A 类算子；AOP 五角色/总线不再作为插件作者的接口面。
@@ -1797,7 +1802,7 @@ call = build_call(ports, decorators=[retry_call, timeout], guards=[MyGuard()])  
 
 | 组 | 协议 | 默认实现 | 用户接入 |
 |----|------|---------|---------|
-| 扩展/装配 | ①A 类算子（10）/ ②Guard（check/observe）/ ③call 装饰器（CallFn→CallFn）/ ④notify / `Verdict` / Capability（build→Program）/ Provider | 无（按需）/ 内置能力 | `seq/par/...` / `build_call(decorators,guards)` / `Runner(notify=...)` / `.capability()` |
+| 扩展/装配 | ①A 类算子（10）/ ②领域策略（R3 9 策略，无统一协议）/ ③call 装饰器（CallFn→CallFn）/ ④notify / Capability（build→Program）/ Provider | 无（按需）/ 内置能力 | `seq/par/...` / `build_call(base, *, decorators=())` / `Runner(notify=...)` / `.capability()` |
 | 认知 | IntentStrategy（+ 级联四部件 KeywordMatcher/IntentSampleStore/CheapIntentModel/PrimaryIntentModel）/ ReflectStrategy / Planner / RePlanner / Executor / Judge / ModelRouter / SchemaValidator | 意图默认四级级联 CascadeIntentStrategy（R13 §4.1）；其余 LLM 默认 / MinimalSchemaValidator | 构造参数 `strategy=`（整体替换）/ `CascadeIntentStrategy(keyword=,samples=,cheap=,primary=)`（部件级）/ `validator=` |
 | RAG | Splitter / Embedder / VectorStore / Retriever / Reranker / QueryRewriter / PostProcessor | 见 R6 | `RAGPipeline(...=)` |
 | 工具 | ToolPort/@tool / MCPTransport / SkillPort / DisclosureIndex | 见 R5 | `register()` / 构造参数 |
@@ -1805,7 +1810,7 @@ call = build_call(ports, decorators=[retry_call, timeout], guards=[MyGuard()])  
 | 接入 | EventStream / Projection | 内存流 | `.event_stream()` / `.project()` |
 
 **可插拔四要素检查表**（每个协议都必须满足）：① 协议定义 ✓ ② 默认实现 ✓ ③ 替换入口 ✓ ④ 装配期履约校验 ✓。
-**注入三形态**：协议替换 / 算子组合或 call 装饰器（+ 守卫注册）/ 构造参数；L3 另有 Port/EventStream/Projection 三类接入契约。
+**注入三形态**：协议替换 / 算子组合或 call 装饰器（+ R3 领域策略具名构造注入）/ 构造参数；L3 另有 Port/EventStream/Projection 三类接入契约。
 
 ## 附录 B.1 默认实现状态与回头实现清单（2026-11-18）
 
@@ -1913,21 +1918,21 @@ call = build_call(ports, decorators=[retry_call, timeout], guards=[MyGuard()])  
 
 | 阶段 | 动作 | 纪律 |
 |------|------|------|
-| B1 | `src/compose/` 立算子核心（A 类 10 算子 + Guard + call 装饰器 + build_call/dispatch） | 先立核心；TDD 先写失败测试 |
+| B1 | `src/compose/` 立算子核心（A 类 10 算子 + call 装饰器 + build_call/dispatch/make_dispatch + 协作 DTO） | 先立核心；TDD 先写失败测试 |
 | B2 | R6 套 ToolLayer 外壳、试点端到端 | 跑不通先修算子契约，不动 R1 |
-| B3 | R3 拆分（7 守卫 + 2 装饰器 + 2 算子；删 BudgetGuard） | **最高风险**：四坑单测先绿再删旧链，断言不放水 |
+| B3 | R3 去角色化（9 领域策略 + `ReliabilityExecutor`；删 BudgetGuard 与旧拦截协议） | **最高风险**：四坑单测先绿再删旧链，断言不放水 |
 | B4 | 删 `src/aop/`、R4/R5/R7 领域字段归位、hooks 拆分 | 整体替换不留兼容层 |
 | B5 | R1 零改动核验 + gate_check 登记 + 链路图 | `git diff src/runtime/` 必须为空 |
 
-**风险**：① A 类算子纯度（实例不得持有流程进度，否则 resume 丢状态）；② ③装饰器 retry 重跑受预算与幂等约束；③ ②守卫持有跨调用策略状态（熔断/降级按 session 隔离），但不持有单次流程进度；④ R3 四坑语义换宿主后任何回归停下重审。
+**风险**：① A 类算子纯度（实例不得持有流程进度，否则 resume 丢状态）；② ③装饰器 retry_call 重跑受预算与幂等约束；③ ②领域策略实例持有跨调用策略状态（熔断/降级按 session 隔离），但不持有单次流程进度；④ R3 四坑语义换宿主后任何回归停下重审。
 
 ## 附录 E 全局验收总表
 
 | 模块 | G1 质量 | G2 语义/隔离 | G3 集成 | 红线 |
 |------|--------|-------------|---------|------|
 | R1 | ≥90% 覆盖 | 确定性/回放/6维预算 | 主流程+挂起恢复 | Program 纯函数 |
-| R2 | 10 算子+Guard+call 装饰器覆盖 | 算子纯函数/compile 幂等 + guard check/observe + call 只覆盖 Invoke + 16 相位 | 组件留名 | 无 AOP/总线残留 |
-| R3 | ≥90% | 重试/熔断/降级语义 + 降级四坑 | 五道防线按算子+守卫+装饰器协同 | 幂等键；无 BudgetGuard |
+| R2 | 10 算子 + call 装饰器覆盖 | 算子纯函数/compile 幂等 + call 只覆盖 Invoke + 16 相位（②领域策略归 R3 验证） | 组件留名 | 无 AOP/总线残留 |
+| R3 | ≥90% | 重试/熔断/降级语义 + 降级四坑 | 五道防线由 `ReliabilityExecutor` 显式编排 9 领域策略 | 幂等键；无 BudgetGuard |
 | R4 | ≥85% | 结构化/缓存 | 换 Port 零改动 | 预算不绕过 |
 | R5 | ≥95% | 合并/披露 | danger 四级路由 | 审批/披露红线 |
 | R6 | 五段替换 | 预算/降级 | 召回基线 | 引用/注入红线 |
@@ -1943,11 +1948,11 @@ call = build_call(ports, decorators=[retry_call, timeout], guards=[MyGuard()])  
 |------|------|
 | Harness | 围绕模型的控制与反馈系统 = R1 微内核 + 算子核心（组合层）+ 工具层 + 架构 + API |
 | Effect | `Invoke|Spawn|Suspend|Terminate` tagged union，Program 对外部世界的声明，只声明不执行；仅 `Invoke` 走注入的 call |
-| 承载形态（7 种） | 能力（169 项，做什么）≠ 承载形态（怎么实现）：①组合算子 ②有状态守卫 ③call 装饰器 ④notify ⑤Port ⑥组件 ⑦内核机制 |
+| 承载形态（7 种） | 能力（169 项，做什么）≠ 承载形态（怎么实现）：①组合算子 ②领域策略（原"有状态守卫"，落地于 R3 执行器）③call 装饰器 ④notify ⑤Port ⑥组件 ⑦内核机制 |
 | A 类组合算子 | `Program→Program` 装配期纯变换（10 个：seq/par/branch/race/loop/map_state/map_effect/fallback/gate/retry 流程级）；狭义"算子"只指此类，纯函数、状态进 `State.scratch x-*` |
-| ②有状态守卫 | `Guard.check(effect,ctx)→Verdict\|None` + `observe(effect,result,ctx)`；跨调用状态在守卫实例（熔断/限流/舱壁/幂等/降级阶梯/watchdog/killswitch） |
+| ②领域策略（原"有状态守卫"） | R3 `ReliabilityExecutor` + 9 领域策略显式编排领域方法（`is_tripped`/`acquire`/`permit`/`select` 等），无统一 check/observe 协议；跨调用状态在策略实例（熔断/限流/舱壁/幂等/降级/watchdog/killswitch） |
 | ③call 装饰器 | `CallFn→CallFn`（retry 调用级/timeout/danger_route/injection_guard）；函数组合替代原 AOP 五角色固定链，只覆盖 `Invoke` |
-| Verdict | 守卫 check 裁决返回（allowed/reason）；R9 安全域四态用 `SafetyVerdict` |
+| SafetyVerdict | R9 安全域四态裁决（allow/redact/deny/ask；ask→Suspend + `wait_human`/`resumed`），与已删除的通用 `Verdict` 不同物 |
 | notify 相位（④） | R1 既有回调的 16 个 when 相位；返回值不消费、异常就地隔离；追踪/审计/指标挂此口 |
 | Capability | 能力级开关（用不用） |
 | Provider | 策略级契约（用什么算法/模型） |

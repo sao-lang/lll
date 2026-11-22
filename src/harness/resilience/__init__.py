@@ -1,6 +1,7 @@
-"""R3 可靠性能力插件：失败分类 / 重试 / 熔断 / 降级 / 限流 / 舱壁 / 幂等 / watchdog / killswitch。
+"""R3 可靠性能力：失败分类 / 重试 / 熔断 / 降级 / 限流 / 舱壁 / 幂等 / watchdog / killswitch。
 
-全部基于 R1（runtime）+ AOP 五角色构建，以增强器形式挂载，内核零策略（R3 §1）。
+每个策略以自身领域方法参与，由 ReliabilityExecutor 显式编排（无编排角色、无角色协议）；
+全部基于 R1（runtime）构造注入，内核零策略（R3 §1）。
 公共 API 见 docs/02-模块详设/Agent/R3-可靠性.md §4。
 """
 from __future__ import annotations
@@ -9,8 +10,9 @@ from .breaker import BreakerStore, CircuitBreaker, InMemoryBreakerStore
 from .capability import ResilienceCapability
 from .defenses import (
     Bulkhead, Degradation, Idempotency,
-    KillSwitch, RateLimit, Watchdog,
+    KillSwitch, RatePermit, RateLimit, Watchdog,
 )
+from .executor import ReliabilityExecutor
 from .retry import RetryPolicy
 from .timeout import Timeout
 from .types import (
@@ -42,5 +44,5 @@ __all__ = [
     # 插件（RetryPolicy 是重试策略配置，非状态 Policy）
     "RetryPolicy", "CircuitBreaker", "Degradation", "RateLimit", "Bulkhead",
     "Idempotency", "Watchdog", "KillSwitch", "ResilienceCapability",
-    "Timeout",
+    "Timeout", "RatePermit", "ReliabilityExecutor",
 ]

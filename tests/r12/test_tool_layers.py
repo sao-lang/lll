@@ -164,7 +164,7 @@ def test_p4_as_dispatch_reads_typed_target_from_ctx_meta() -> None:
 
 
 def test_p4_capability_dispatch_injectable_to_runner() -> None:
-    """cap.dispatch() 可直接注入 R1 Runner（§2.5 主线，不经 CompositeCall）。"""
+    """cap.dispatch() 可直接注入 R1 Runner（§2.5 主线，不经额外包装层）。"""
     import asyncio
     from harness.model.capability import ModelCapability
     from runtime import Invoke, Result, Runner, Session, Terminate, Usage

@@ -1,4 +1,4 @@
-"""R4 端到端装配（新体系）：Runner → AOPContainer → ModelGateway → Result。
+"""R4 端到端装配（新体系）：Runner → ReliabilityExecutor → ModelGateway → Result。
 
 覆盖降级切 backup / REFUSE 真拒答 / 后端错误折叠 / 重试次数 / 熔断维度隔离 /
 幂等键 / 舱壁释放 / model 通知 / 缓存命中。全部在真实 Runner 链路上断言（不放水）。
@@ -7,16 +7,16 @@ from __future__ import annotations
 
 import asyncio
 
-from compose.context import FaultRecord, Invocation, Verdict
+from compose.context import Invocation
 
-from compose import AOPContainer, Warden
-from compose import LifecycleBus, LifecyclePhase, Notice
+from compose import LifecycleBus, LifecyclePhase
 from runtime import Invoke, Result, Runner, Session, Terminate
 
 from harness.model import ModelCapability
 from harness.resilience import (
     BreakerStatus, Bulkhead, CircuitBreaker, DegradeLadder,
-    DegradeMode, Degradation, DegradeStep, Idempotency, RetryPolicy,
+    DegradeMode, Degradation, DegradeStep, Idempotency, RateLimit,
+    ReliabilityExecutor, ResilienceCapability, RetryPolicy,
 )
 
 from tests.r4.conftest import pctx, req
@@ -52,13 +52,9 @@ def _ladder() -> DegradeLadder:
     ))
 
 
-class _FaultWarden(Warden):
-    name = "fault_warden"
-    def __init__(self, reason: str = "breaker_open") -> None:
-        self.reason = reason
-    async def guard(self, inv: Invocation) -> Verdict:
-        inv.write_fault(FaultRecord(reason=self.reason, failed_target="primary"))
-        return Verdict(allowed=True)
+def _limit() -> RateLimit:
+    """真实限流策略：令牌恒不足 → DEGRADE 许可（执行器写具名 fault）。"""
+    return RateLimit(rate=0.0, burst=0, on_exceed="degrade", clock=lambda: 0.0)
 
 
 def _program():
@@ -66,20 +62,22 @@ def _program():
     yield Terminate(output=resp.get("content", "?") if isinstance(resp, dict) else "?")
 
 
-def _run(container: AOPContainer, sid: str) -> object:
-    runner = Runner(call=container.as_call())
+def _run(executor: ReliabilityExecutor, sid: str) -> object:
+    runner = Runner(call=executor.as_call())
     return asyncio.run(runner.run(Session(session_id=sid, program_factory=_program)))
 
 
 class TestFullChainWiring:
     def test_degrade_switches_endpoint(self) -> None:
-        """Warden 故障 → Degradation 选 backup → 网关切备用，primary 零调用。"""
+        """限流降级 fault → Degradation 选 backup → 网关切备用，primary 零调用。"""
         primary, backup = FakeLLM("primary"), FakeLLM("backup")
         cap = ModelCapability(llm=primary)
         cap.add_backend("backup", backup)
         degradation = Degradation(_ladder(), available={"primary", "backup"})
-        c = AOPContainer(cap.gateway().as_call()).add_warden(_FaultWarden()).add_salvage(degradation)
-        result = _run(c, "e2e-degrade")
+        executor = ResilienceCapability(
+            rate_limit=_limit(), degradation=degradation,
+        ).install(cap.gateway().as_call())
+        result = _run(executor, "e2e-degrade")
         assert result.output == "backup"
         assert backup.calls == 1 and primary.calls == 0
 
@@ -89,15 +87,10 @@ class TestFullChainWiring:
         cap = ModelCapability(llm=primary)
         cap.add_backend("backup", FakeLLM("backup"))
         degradation = Degradation(_ladder(), available=set())  # 无可用 → REFUSE
-
-        class RefuseWarden(Warden):
-            name = "refuse_warden"
-            async def guard(self, inv):
-                inv.write_fault(FaultRecord("ladder_exhausted", "primary"))
-                return Verdict(allowed=True)
-
-        c = AOPContainer(cap.gateway().as_call()).add_warden(RefuseWarden()).add_salvage(degradation)
-        result = _run(c, "e2e-refuse")
+        executor = ResilienceCapability(
+            rate_limit=_limit(), degradation=degradation,
+        ).install(cap.gateway().as_call())
+        result = _run(executor, "e2e-refuse")
         assert primary.calls == 0
         # REFUSE 折叠为失败 Result（code=REFUSED），零后端调用、绝不编造答案。
         first = result.events[0].results[0]
@@ -106,8 +99,8 @@ class TestFullChainWiring:
     def test_backend_error_folds_into_failure_result(self) -> None:
         """后端 error 响应折叠为失败 Result（不伪装成功）。"""
         cap = ModelCapability(llm=FakeLLM("primary", fail="500:boom"))
-        c = AOPContainer(cap.gateway().as_call())
-        result = _run(c, "e3")
+        executor = ResilienceCapability().install(cap.gateway().as_call())
+        result = _run(executor, "e3")
         first = result.events[0].results[0]
         assert not first.ok and "500" in str(first.error)
 
@@ -116,8 +109,8 @@ class TestFullChainWiring:
         primary = FakeLLM("primary", fail="500:boom")
         cap = ModelCapability(llm=primary)
         retry = RetryPolicy(max_attempts=3, base_delay=0.001, jitter="none", idempotency_required=False)
-        c = AOPContainer(cap.gateway().as_call()).add_envelope(retry)
-        result = _run(c, "e1")
+        executor = ResilienceCapability(retry=retry).install(cap.gateway().as_call())
+        result = _run(executor, "e1")
         err = result.events[0].results[0].error
         assert err is None or "PORT_CRASHED" not in str(err)
         assert primary.calls == 3, f"应重试 3 次，实际 {primary.calls}"
@@ -143,14 +136,27 @@ class TestFullChainWiring:
         idem = Idempotency()
         from tests.r3.conftest import make_ctx
         eff = Invoke(port="tool", payload={}, idempotency_key="K")
-        assert asyncio.run(idem.guard(make_ctx(eff))).allowed is True
-        assert asyncio.run(idem.guard(make_ctx(eff))).allowed is False
+        calls: list[int] = []
 
-    def test_bulkhead_slot_released_after_wrap(self) -> None:
-        """舱壁：wrap 结束 try/finally 释放槽，无泄漏。"""
+        async def core(inv: Invocation) -> Result:
+            calls.append(1)
+            return Result.success({"ok": True})
+
+        executor = ResilienceCapability(idempotency=idem).install(core)
+        first = asyncio.run(executor.run_invocation(make_ctx(eff)))
+        second = asyncio.run(executor.run_invocation(make_ctx(eff)))
+        assert first.ok and len(calls) == 1
+        assert not second.ok and second.error is not None
+        assert second.error.code == "INVOKE_REJECTED"
+
+    def test_bulkhead_slot_released_after_run(self) -> None:
+        """舱壁：run_in_slot 结束 try/finally 释放槽，无泄漏。"""
         bh = Bulkhead(pools={"p": 1}, pool="p", on_full="reject")
-        async def core(inv): return Result.success("ok")
-        asyncio.run(bh.wrap(make_inv(), core))
+
+        async def core(inv: Invocation) -> Result:
+            return Result.success("ok")
+
+        asyncio.run(bh.run_in_slot(make_inv(), core))
         assert bh.acquire("p") is True
         bh.release("p")
 
@@ -161,18 +167,18 @@ class TestFullChainWiring:
         bus.on(LifecyclePhase.BEFORE_MODEL, lambda n: seen.append(n.phase.value))
         bus.on(LifecyclePhase.AFTER_MODEL, lambda n: seen.append(n.phase.value))
         cap = ModelCapability(llm=FakeLLM("primary"), bus=bus)
-        c = AOPContainer(cap.gateway().as_call())
-        _run(c, "e2e-notify")
+        executor = ResilienceCapability().install(cap.gateway().as_call())
+        _run(executor, "e2e-notify")
         assert "before_model" in seen and "after_model" in seen
 
     def test_exact_cache_hit_reuses_backend_once(self) -> None:
         """同一网关复用：第二次缓存命中，后端只调一次。"""
         primary = FakeLLM("primary")
         gw = ModelCapability(llm=primary).gateway()
-        c1 = AOPContainer(gw.as_call())
-        c2 = AOPContainer(gw.as_call())
-        r1 = _run(c1, "cache-1")
-        r2 = _run(c2, "cache-2")
+        executor1 = ResilienceCapability().install(gw.as_call())
+        executor2 = ResilienceCapability().install(gw.as_call())
+        r1 = _run(executor1, "cache-1")
+        r2 = _run(executor2, "cache-2")
         assert r1.output == "primary" and r2.output == "primary"
         assert primary.calls == 1, f"精确缓存未命中：后端被调用 {primary.calls} 次"
 

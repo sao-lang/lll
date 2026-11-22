@@ -40,7 +40,9 @@ build/
 tmp/
 .cache/
 .workbuddy
-# Local overview backup & session pointer
-.overview-archive/
-.conductor-session.json
-.commitment-ledger.json
+
+# conductor 产物（会话记录与契约跟踪入版本库，运行痕迹忽略）
+.conductor/session.json
+.conductor/ledgers/
+.conductor/baselines/
+.conductor/archive/

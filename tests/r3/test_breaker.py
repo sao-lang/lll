@@ -11,7 +11,7 @@ from dataclasses import replace
 from runtime import Effect, Invoke
 
 from harness.resilience import BreakerStatus, CircuitBreaker, InMemoryBreakerStore
-from tests.r3.conftest import err_result, ok_result
+from tests.r3.conftest import err_result, make_ctx, ok_result
 
 DIM = ("provider", "openai")
 EFFECT = Invoke(port="llm", payload={'messages': []})
@@ -225,3 +225,8 @@ class TestCircuitBreakerStateMachine:
             assert st.status == BreakerStatus.CLOSED.value
             assert st.failures == 4
         asyncio.run(run())
+
+    def test_dimension_of_non_tuple_falls_back(self) -> None:
+        """dimension_of 返回非二元组时回退空维度（不污染 store key）。"""
+        cb = CircuitBreaker(dimension_of=lambda inv: "not-a-tuple")  # type: ignore[arg-type,return-value]
+        assert cb._dimension(make_ctx()) is None

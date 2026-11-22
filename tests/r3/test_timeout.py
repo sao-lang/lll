@@ -1,4 +1,4 @@
-"""R3 超时插件测试（AOP Envelope）：wrap(inv, next) 超时写故障记录 + TIMEOUT 失败。
+"""R3 超时插件测试（领域语义）：run_with_deadline(inv, next) 超时写故障记录 + TIMEOUT 失败。
 
 领域逻辑：超时→TIMEOUT 失败 Result + fault（含 failed_target，R3-7）、未超时透传、
 超时时长可配、TIMEOUT 失败被分类为可重试。
@@ -42,7 +42,7 @@ def _call(
     effect: Invoke | None = None,
 ) -> tuple[Result, Invocation]:
     inv = make_ctx(effect)
-    return asyncio.run(timeout.wrap(inv, next_fn)), inv
+    return asyncio.run(timeout.run_with_deadline(inv, next_fn)), inv
 
 
 class TestTimeout:

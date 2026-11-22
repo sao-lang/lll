@@ -1,13 +1,13 @@
 """R3 降级链路领域逻辑：逐级收缩选级 → 末级 REFUSE。
 
-Warden/Envelope 把具名故障记录（FaultRecord，含 failed_target）写入 inv.meta，
+具名故障记录（FaultRecord，含 failed_target）由领域策略/执行器写入 inv.meta，
 Degradation.select(fault, session_id) 从本会话 available 剔除 failed_target 后按
 ladder 选下一级；全部目标失败则落 REFUSE。断言强度不降，只换 API 形态。
 """
 from __future__ import annotations
 
 from compose.context import FaultRecord, Invocation
-from runtime import Invoke
+from runtime import Invoke, Result
 
 from harness.resilience import DegradeLadder, DegradeMode, DegradeStep, Degradation
 from tests.r3.conftest import make_ctx
@@ -75,15 +75,27 @@ class TestProgressiveDegradation:
         assert plugin.select(FaultRecord("none", ""), session_id=SID) == DegradeMode.REFUSE.value
 
 
-class TestDegradationSalvage:
-    def test_recover_writes_typed_routing_target(self) -> None:
-        """Salvage.recover：读 fault → select → 写 typed routing_target 供网关消费。"""
+class TestDegradationRecovery:
+    def test_recovery_writes_typed_routing_target(self) -> None:
+        """执行器读 fault → select → 写 typed routing_target 供网关消费。"""
         import asyncio
+
+        from harness.resilience import ResilienceCapability
+
         plugin = Degradation(_ladder(), available={"primary", "backup", "cache"})
         inv = make_ctx(Invoke(port="llm", payload={"model": "primary"}))
         inv.write_fault(_fault("breaker_open", "primary"))
-        result = asyncio.run(plugin.recover(RuntimeError("boom"), inv))
+        calls: list[str] = []
+
+        async def core(i: Invocation) -> object:
+            rt = i.routing_target()
+            calls.append(rt.target if rt else "primary")
+            return Result.success("backup-answer")
+
+        executor = ResilienceCapability(degradation=plugin).install(core)
+        result = asyncio.run(executor.run_invocation(inv))
         assert result.ok
         rt = inv.routing_target()
         assert rt is not None and rt.target == "backup"  # primary 剔除后选 backup
         assert rt.reason == "breaker_open"
+        assert calls == ["backup"]

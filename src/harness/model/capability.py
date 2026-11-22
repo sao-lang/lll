@@ -5,7 +5,6 @@
 """
 from __future__ import annotations
 
-from compose import AOPContainer
 from compose.tool_layer import layer_program
 from compose import LifecycleBus, Registry
 from runtime import CallFn, Program
@@ -67,11 +66,11 @@ class ModelCapability:
         """
         return layer_program("llm", payload={"layer": "model"})()
 
-    def install(self, container: AOPContainer | None = None, reg: Registry | None = None) -> Registry:
+    def install(self, container: object | None = None, reg: Registry | None = None) -> Registry:
         """统一装配：把 llm/router/cache 注册进共用 Provider 注册表。
 
         参数：
-            container: 可选；若给定，其 registry 指向同一份注册表（两表统一）。
+            container: 可选；若给定且有 registry 属性，指向同一份注册表（两表统一）。
             reg: 注入的注册表；缺省用本能力持有的实例。
         返回：
             共用注册表（支持链式）。
@@ -82,8 +81,8 @@ class ModelCapability:
         registry.register("llm", self._llm)
         registry.register("model_router", self._router or RuleRouter())
         registry.register("model_cache", self._cache or ExactCache())
-        if container is not None:
-            container.registry = registry
+        if container is not None and hasattr(container, "registry"):
+            setattr(container, "registry", registry)
         return registry  # type: ignore[return-value]
 
     @property
@@ -109,18 +108,10 @@ class ModelCapability:
         """P4 dispatch 入口（§2.5 形态）：直接吃 (effect, ctx)，不构造 Invocation。
 
         模型能力只有 llm 一个 port，故 gateway.as_dispatch() 本身即为该 port 的
-        dispatch 实现；组合层可直接注入 R1 Runner（不经 CompositeCall），验证
+        dispatch 实现；组合层可直接注入 R1 Runner（不经可靠性执行器），验证
         "call 按 port 分派 + typed target 从 ctx.meta 读" 主线。
         """
         return self.gateway().as_dispatch()
-
-    def container(self) -> AOPContainer:
-        """构造与网关共用同一 Registry 的 AOP 容器（P6 两表统一的标准装配入口）。
-
-        返回：
-            已注入共用 registry 的容器；core 为网关 as_call。
-        """
-        return AOPContainer(self.gateway().as_call(), registry=self._model_registry, bus=self._bus)
 
     def add_backend(self, name: str, llm: LLMPortWithUsage) -> None:
         """注册降级目标后端（如 "backup"），供网关按 typed 目标切换。"""

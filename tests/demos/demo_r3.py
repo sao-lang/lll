@@ -1,4 +1,4 @@
-"""R3 独立 demo：可靠性插件迁入 AOP 五角色 + 降级四坑（B1/B2/R3-6/R3-7）。
+"""R3 独立 demo：可靠性领域策略 + 降级四坑（B1/B2/R3-6/R3-7）。
 
 不依赖外部服务：时钟/随机源/存储显式注入，全程确定性可回放。
 演示 CircuitBreaker 三态机、Degradation 按会话隔离选级（四坑语义）、
@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from compose.context import FaultRecord, Invocation, Verdict
+from compose.context import FaultRecord, Invocation
 from runtime import Invoke, Result  # noqa: E402
 
 from harness.resilience import (  # noqa: E402
@@ -64,8 +64,8 @@ async def main() -> None:
 
     # 3) 幂等去重（TTL 真淘汰）
     idem = Idempotency(ttl=60, clock=lambda: 1000.0)
-    assert (await idem.guard(_inv(idem="K"))).allowed is True
-    assert (await idem.guard(_inv(idem="K"))).allowed is False
+    assert idem.check_and_mark("K") is False
+    assert idem.check_and_mark("K") is True
 
     # 4) 重试退避（注入 sleeper，无真实等待）
     delays: list[float] = []
@@ -74,9 +74,9 @@ async def main() -> None:
     retry = RetryPolicy(max_attempts=3, base_delay=0.1, jitter="none", sleeper=sleep)
     async def always_fail(inv: Invocation) -> Result:
         return Result.failure("500", "boom")
-    result = await retry.wrap(_inv(), always_fail)
+    result = await retry.run_with_retries(_inv(), always_fail)
     assert not result.ok and delays == [0.1, 0.2]
-    print("PASS demo_r3: AOP 角色插件 + 降级四坑 + 熔断三态 + 幂等 + 退避")
+    print("PASS demo_r3: 领域策略 + 降级四坑 + 熔断三态 + 幂等 + 退避")
 
 
 if __name__ == "__main__":

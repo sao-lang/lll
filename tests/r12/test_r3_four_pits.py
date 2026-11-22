@@ -3,7 +3,7 @@
 四坑（P9）：B1 按 session_id 隔离；B2 failed_target 是后端注册名；R3-6 available
 永久剔除写回；R3-7 retry/timeout 故障记录带 failed_target。**断言不放水**——
 与 tests/r3/test_degrade.py::TestDegradationSelection 的断言逐字相同，只把
-宿主从 AOP Invocation.meta 换成组合层 CallState(ctx.meta)。
+宿主换成可靠性执行器显式编排的领域策略（CallState/FaultRecord/RoutingTarget 为 D-3 通用原语）。
 """
 from __future__ import annotations
 
@@ -19,11 +19,12 @@ from harness.resilience import (
     DegradeMode,
     DegradeStep,
     Degradation,
+    RateLimit,
+    ResilienceCapability,
 )
 from compose.context import CallContext
 from compose.guards import (
     CallState,
-    DegradationGuard,
     FaultRecord,
     RoutingTarget,
 )
@@ -52,8 +53,8 @@ def _fault(reason: str, target: str) -> FaultRecord:
     return FaultRecord(reason=reason, failed_target=target)
 
 
-class TestFourPitsOnGuardHost:
-    """四坑语义在②降级守卫宿主上逐条复现（断言不放水）。"""
+class TestFourPitsOnExecutorHost:
+    """四坑语义在领域执行器宿主上逐条复现（断言不放水）。"""
 
     def test_select_shrinks_available_step_by_step(self) -> None:
         """B2/R3-6：按失败目标逐级永久剔除，全剔除落 REFUSE。"""
@@ -78,64 +79,103 @@ class TestFourPitsOnGuardHost:
         assert "session-A" in plugin._session_state and "session-B" in plugin._session_state
 
     def test_b2_failed_target_is_registration_name(self) -> None:
-        """B2：failed_target 由真实 RateLimit.guard 产出，是阶梯后端注册名（非手工自证）。"""
+        """B2：failed_target 由真实 RateLimit 许可产出，是阶梯后端注册名（非手工自证）。"""
         import asyncio
-        from harness.resilience import RateLimit
+        from runtime import Result
+        from harness.resilience import RateLimit, RatePermit, ResilienceCapability
 
-        # 真实限流插件在 on_exceed="degrade" 时写 fault，failed_target 从 effect 派生
+        # 真实限流插件在 on_exceed="degrade" 时返回 DEGRADE，执行器写带注册名的 fault
         rl = RateLimit(rate=60, burst=1, on_exceed="degrade", clock=lambda: 0.0)
         eff = Invoke(port="llm", payload={"model": "primary"})
         ctx = CallContext(effect=eff, ctx=object(),
                           session=type("S", (), {"session_id": SID})(), meta={})
-        asyncio.run(rl.guard(ctx))  # 耗尽令牌
-        verdict = asyncio.run(rl.guard(ctx))  # 超限 → 写 fault + 降级放行
-        assert verdict.allowed is True  # 降级类放行（与 tests/r3/test_degrade.py:123 一致）
+        assert rl.acquire() is RatePermit.ADMIT  # 耗尽令牌
+        assert rl.acquire() is RatePermit.DEGRADE  # 超限 → 降级
+
+        async def ok_core(inv: CallContext) -> Result:
+            return Result.success("ok")
+
+        executor = ResilienceCapability(rate_limit=rl).install(ok_core)
+        result = asyncio.run(executor.run_invocation(ctx))
+        assert result.ok  # 降级类放行（与 tests/r3/test_degrade.py 一致）
         fault = ctx.fault()
         assert fault is not None and fault.reason == "rate_limited"
-        assert fault.failed_target == "primary"  # B2：注册名（与 tests/r3:126 逐字一致）
+        assert fault.failed_target == "primary"  # B2：注册名（与 tests/r3 逐字一致）
 
 
 class TestCallStateTypedTarget:
-    """typed 目标载体：守卫裁决写入、网关消费（替代旧 Invocation.meta 裸键）。"""
+    """typed 目标载体：执行器选级写入 ctx.meta、网关消费（替代旧 Invocation.meta 裸键）。"""
 
     def test_write_read_routing_target(self) -> None:
-        """DegradationGuard.observe 把 typed target 写入 ctx.meta，供 R4 消费。"""
-        guard = DegradationGuard(Degradation(_ladder(), available={"primary", "backup"}))
-        ctx = _Ctx()
-        state = CallState(ctx)
-        state.write_fault(_fault("rate_limited", "primary"))
-        # observe 触发选级并写 typed target
+        """限流写 fault → select 选 backup → typed target 写 ctx.meta 供网关消费。"""
         import asyncio
-        asyncio.run(guard.observe(None, None, ctx))  # type: ignore[arg-type]
-        target = state.routing_target()
+        from runtime import Result
+
+        limit = RateLimit(rate=0.0, burst=0, on_exceed="degrade", clock=lambda: 0.0)
+        degradation = Degradation(_ladder(), available={"primary", "backup"})
+        calls: list[str] = []
+
+        async def core(inv: CallContext) -> Result:
+            rt = inv.routing_target()
+            target = rt.target if rt else "primary"
+            calls.append(target)
+            return Result.success(target)
+
+        executor = ResilienceCapability(rate_limit=limit, degradation=degradation).install(core)
+        meta: dict = {}
+        ctx = _Ctx(meta=meta)
+        inv = CallContext(
+            effect=Invoke(port="llm", payload={"model": "primary"}),
+            ctx=ctx, session=type("S", (), {"session_id": SID})(), meta=meta,
+        )
+        result = asyncio.run(executor.run_invocation(inv))
+        # CallState 从 ctx.meta 读回：与网关消费同一份 meta（同源）
+        target = CallState(ctx).routing_target()
+        assert result.ok
         assert target is not None and target.target == "backup"
         assert target.reason == "rate_limited"
+        assert calls == ["backup"]  # 网关按 typed target 切 backup，primary 零调用
 
     def test_refuse_is_typed_not_fabricated(self) -> None:
-        """全失败 → refuse typed 目标，reason 只进 trace 不作 target。"""
-        guard = DegradationGuard(Degradation(_ladder(), available={"backup"}))
-        ctx = _Ctx()
-        state = CallState(ctx)
-        state.write_fault(_fault("backup_down", "backup"))
+        """全剔除 → refuse typed 目标，reason 只进 trace 不作 target（不编造答案）。"""
         import asyncio
-        asyncio.run(guard.observe(None, None, ctx))  # type: ignore[arg-type]
-        target = state.routing_target()
+        from runtime import Result
+
+        limit = RateLimit(rate=0.0, burst=0, on_exceed="degrade", clock=lambda: 0.0)
+        degradation = Degradation(_ladder(), available={"backup"})  # 仅 backup 可用
+        called: list[str] = []
+
+        async def core(inv: CallContext) -> Result:
+            called.append("core")
+            return Result.success("fabricated")
+
+        executor = ResilienceCapability(rate_limit=limit, degradation=degradation).install(core)
+        # failed_target 由真实 RateLimit 许可派生为注册名 "backup"（B2，非手工自证）
+        meta: dict = {}
+        inv = CallContext(
+            effect=Invoke(port="llm", payload={"model": "backup"}),
+            ctx=_Ctx(meta=meta), session=type("S", (), {"session_id": SID})(), meta=meta,
+        )
+        result = asyncio.run(executor.run_invocation(inv))
+        assert not result.ok and result.error is not None and result.error.code == "REFUSED"
+        assert called == []  # 全剔除后真拒答，零后端调用、不编造答案
+        target = CallState(inv).routing_target()
         assert target is not None and target.target == DegradeMode.REFUSE.value
+        assert target.reason == "rate_limited" and target.reason != target.target  # reason 只进 trace
 
 
 class TestR37RealRetrySource:
     """R3-7 真实故障源：RetryPolicy 耗尽写带 failed_target 的 fault → 降级 → 切 backup。
 
     断言逐字复用 tests/r3/test_e2e_degrade.py:133-138（primary.calls==2 / backup.calls==1），
-    只把宿主换成组合层 call 链（AOPContainer 现为 CompositeCall 别名）。
+    只把宿主换成领域执行器 + ResilienceCapability.install。
     """
 
     def test_real_retry_exhaustion_switches_to_backup(self) -> None:
         """重试真的耗尽 → fault 带 failed_target → 选 backup → 切备用，断言不放水。"""
         import asyncio
-        from compose import AOPContainer
         from runtime import Result
-        from harness.resilience import RetryPolicy
+        from harness.resilience import RetryPolicy, ResilienceCapability
 
         class _LLM:
             def __init__(self, name: str, fail: bool = False) -> None:
@@ -163,14 +203,12 @@ class TestR37RealRetrySource:
 
         retry = RetryPolicy(max_attempts=2, base_delay=0.001, jitter="none")
         degradation = Degradation(_ladder(), available={"primary", "backup"})
-        container = (AOPContainer(core)
-                     .add_envelope(retry)
-                     .add_salvage(degradation))
+        executor = ResilienceCapability(retry=retry, degradation=degradation).install(core)
         inv = CallContext(
             effect=Invoke(port="llm", payload={"model": "primary"}),
             ctx=object(), session=type("S", (), {"session_id": "r37"})(), meta={},
         )
-        result = asyncio.run(container.run_invocation(inv))
+        result = asyncio.run(executor.run_invocation(inv))
         # 以下断言逐字复用 test_e2e_degrade.py:136-138（不放水）
         assert result.data == "backup"
         assert primary.calls == 2, f"primary 应被重试 2 次，实际 {primary.calls}"

@@ -7,36 +7,25 @@ R1 一行不改，只解释 Program；本包构造 call 注入 Runner(call=...)�
 """
 from __future__ import annotations
 
-from .call_chain import CompositeCall
-from .adapters import WardenGuardAdapter, envelope_decorator
 from .context import (
-    CallContext, FaultRecord, RoutingTarget, Verdict, Invocation, Next,
+    CallContext, FaultRecord, RoutingTarget, Invocation, Next,
     FAULT_KEY, ROUTING_TARGET_KEY,
 )
-from .chain_roles import (
-    Prelude, Warden, Envelope, Refiner, Salvage, FailureClass, Role, ROLE_NAMES,
-)
-# AOPContainer 是组合层 CompositeCall 的迁移别名（aop 取消，规格 D-3/P2）
-AOPContainer = CompositeCall
+from .failure import FailureClass
 from .call import (
     CallFn,
-    Guard,
-    Verdict,
     build_call,
     danger_route,
     injection_guard,
     retry_call,
     timeout,
-    with_guard,
 )
 from .dispatch import dispatch, make_dispatch
 from .tool_layer import layer_program
 from .guards import (
     CallState,
-    DegradationGuard,
     FaultRecord,
     RoutingTarget,
-    degrade_retry,
 )
 from .program import (
     branch,
@@ -68,26 +57,20 @@ from .notify import (
 )
 
 __all__ = [
-    # 插件 → 组合层原语适配器
-    "WardenGuardAdapter", "envelope_decorator",
     # ①A 类算子（Program → Program）
     "seq", "par", "branch", "race", "loop", "map_state", "map_effect",
     "fallback", "gate", "retry",
-    # ②守卫 / ③call 装饰器 / 装配
-    "Guard", "Verdict", "CallFn", "with_guard", "build_call",
+    # call 装饰器 / 装配
+    "CallFn", "build_call",
     "retry_call", "timeout", "danger_route", "injection_guard",
     # dispatch
     "dispatch", "make_dispatch",
     # ToolLayer 外壳（P4-P8）
     "layer_program",
-    # call 装配器（承接 AOPContainer 编排能力）
-    "CompositeCall", "AOPContainer",
-    # 协作 DTO + 内部编排槽位协议（原 aop 归位）
-    "CallContext", "FaultRecord", "RoutingTarget", "Verdict", "Invocation", "Next",
+    # 协作 DTO（领域语义，无编排角色）
+    "CallContext", "FaultRecord", "RoutingTarget", "Invocation", "Next",
     "FAULT_KEY", "ROUTING_TARGET_KEY",
-    "Prelude", "Warden", "Envelope", "Refiner", "Salvage", "FailureClass", "Role", "ROLE_NAMES",
-    # R3 拆分：②降级守卫 + 具名 DTO
-    "FaultRecord", "RoutingTarget", "CallState", "DegradationGuard", "degrade_retry",
+    "FailureClass", "CallState",
     # 原 R2 hooks 资产归位（规格 P2）
     "DangerLevel", "DisclosurePacket", "LLMRequest", "LLMResponse", "PortCtx",
     "SkillManifest", "StreamEvent", "StreamEventKind", "ToolCall", "ToolResult",

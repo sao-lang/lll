@@ -7,14 +7,14 @@ with_ 不可变替换时保留 trace 观测历史。通知点纯通知，副作�
 """
 from __future__ import annotations
 
-from harness.memory import MemoryStore
-from harness.rag.types import TokenBudget
 from compose import PortCtx
 from compose.tool_layer import layer_program
+from harness.memory import MemoryStore
+from harness.rag.types import TokenBudget
 from runtime import AgentState, Message, Program
 
 from .assembler import ContextAssembler, DefaultContextAssembler
-from .compaction import CompactionPolicy, DefaultCompactionPolicy, SUMMARY_ROLE
+from .compaction import SUMMARY_ROLE, CompactionPolicy, DefaultCompactionPolicy
 from .observability import CacheTelemetry
 from .offloader import BlobPort, DefaultOffloader, InMemoryBlobStore, Offloader
 from .reinjector import DefaultReinjector, Reinjector

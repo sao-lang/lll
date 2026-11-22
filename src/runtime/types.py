@@ -506,7 +506,7 @@ class Invoke:
         object.__setattr__(self, "payload", cast(EffectPayload, _freeze(self.payload)))
 
     def with_payload(self, **extra: DynamicValue) -> Invoke:
-        """在副本上增量更新 payload，返回新 Invoke（Refiner 消费）。
+        """在副本上增量更新 payload，返回新 Invoke（供组合层改写消费）。
 
         参数：
             **extra: 要合并进 payload 的键值对（已知键 + x-* 扩展键）。

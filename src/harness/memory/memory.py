@@ -7,18 +7,19 @@
 """
 from __future__ import annotations
 
-from asyncio import get_running_loop, run as asyncio_run
+from asyncio import get_running_loop
+from asyncio import run as asyncio_run
 from collections.abc import Coroutine
 from concurrent.futures import ThreadPoolExecutor
 from math import exp, log
 from time import time_ns
 from typing import TypeVar
 
+from compose import PortCtx
 from harness.rag.embedder import Embedder
 from harness.rag.store import VectorStore
 from harness.rag.types import Chunk, Vector
 from harness.skills import InjectionDetector, InjectionVerdict, KeywordInjectionDetector
-from compose import PortCtx
 from runtime import DynamicValue
 
 from .types import (

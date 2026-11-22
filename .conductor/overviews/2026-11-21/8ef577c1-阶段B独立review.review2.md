@@ -2,7 +2,7 @@
 
 > 审查性质：全新上下文独立审查子代理；只读审查 + 本报告为唯一写动作。
 > 项目根：`E:/vsc-workspace/lania-zip/lll`
-> 依据：`docs/01-总览与设计/组合式工具层重构规格-20261121.md`（§2 / §3 P1~P9 / §6 / §8 D-1~D-10）、`overviews/2026-11-21/8ef577c1-源码证据台账.md`
+> 依据：`docs/01-总览与设计/组合式工具层重构规格-20261121.md`（§2 / §3 P1~P9 / §6 / §8 D-1~D-10）、`overviews/2026-11-21/8ef577c1-源码证据台账.details.md`
 > 实测命令：`git status --short src/runtime/`、`pytest tests/ -q`、`mypy --strict src`、`gate_check.py --module r1|r2|r3|r12`
 
 ## 结论

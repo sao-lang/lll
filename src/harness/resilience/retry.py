@@ -1,6 +1,6 @@
-"""R3 重试插件（Envelope）：包裹 next 调用，失败按退避算法重试。
+"""R3 重试策略：按退避算法重放下一跳（领域语义）。
 
-耗尽时把具名故障记录写入 inv.meta（含 failed_target，R3-7），交 Degradation 选级。
+耗尽时把具名故障记录写入 inv.meta（含 failed_target，R3-7），交降级选级。
 幂等红线：无幂等键的 TOOL 副作用禁止重试。
 """
 from __future__ import annotations
@@ -12,6 +12,7 @@ from random import Random
 from compose.context import FaultRecord, Invocation
 from runtime import Invoke, PortName, Result
 
+from .defenses import failed_target_of
 from .types import Jitter, RetrySpec, backoff_delay, classify_failure, validate_retry_spec
 
 __all__ = ["RetryPolicy"]
@@ -19,16 +20,8 @@ __all__ = ["RetryPolicy"]
 type NextFn = Callable[[Invocation], Awaitable[Result]]
 
 
-def _failed_target_of(inv: Invocation) -> str:
-    """失败目标注册名（R3-7）：Invoke.payload.model 优先，缺省 "primary"。"""
-    effect = inv.effect
-    if isinstance(effect, Invoke):
-        return str(effect.payload.get("model") or "primary")
-    return "primary"
-
-
 class RetryPolicy:
-    """重试插件（Envelope）：包裹 Port 调用，幂等红线保护。"""
+    """重试策略：按退避预算重放下一跳，幂等红线保护。"""
     name = "r3_retry"
 
     def __init__(
@@ -43,14 +36,15 @@ class RetryPolicy:
         idempotency_required: bool = True,
         rng: Random | None = None,
         sleeper: Callable[[float], Awaitable[None]] | None = None,
-        failed_target_of: Callable[[Invocation], str] | None = None,
+        target_of: Callable[[Invocation], str] | None = None,
     ) -> None:
         """构造重试策略。
 
         参数：
-            failed_target_of: 从 Invocation 派生失败目标注册名（R3-7）。
+            target_of: 从 Invocation 派生失败目标注册名的纯函数（R3-7），
+                缺省用领域默认 failed_target_of。
         """
-        self._failed_target_of = failed_target_of or _failed_target_of
+        self._target_of = target_of or failed_target_of
         self._spec = RetrySpec(
             max_attempts=max_attempts, base_delay=base_delay, multiplier=multiplier,
             max_delay=max_delay, jitter=Jitter.coerce(jitter).value,
@@ -61,8 +55,8 @@ class RetryPolicy:
         self._rng = rng if rng is not None else Random()
         self._sleep = sleeper
 
-    async def wrap(self, inv: Invocation, next: NextFn) -> Result:
-        """Envelope.wrap：循环调 next，失败退避重试；耗尽写 fault。"""
+    async def run_with_retries(self, inv: Invocation, next: NextFn) -> Result:
+        """重试执行（领域语义）：失败退避重放；耗尽写 fault。"""
         sleeper = self._sleep or asyncio.sleep
         prev_delay = 0.0
         last = Result.failure("RETRY_EXHAUSTED", "no attempts")
@@ -76,7 +70,7 @@ class RetryPolicy:
             if attempt >= self._spec.max_attempts:
                 # 耗尽：写具名故障记录（含 failed_target，R3-7）。
                 inv.write_fault(FaultRecord(
-                    reason="retry_exhausted", failed_target=self._failed_target_of(inv),
+                    reason="retry_exhausted", failed_target=self._target_of(inv),
                 ))
                 return result
             if self._is_retryable_side_effect(inv):

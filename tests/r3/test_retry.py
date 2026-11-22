@@ -1,4 +1,4 @@
-"""R3 重试插件测试（AOP Envelope）：wrap(inv, next) 包裹中心调用，失败退避重试。
+"""R3 重试插件测试（领域语义）：run_with_retries(inv, next) 包裹中心调用，失败退避重试。
 
 领域逻辑：退避算法（指数/上限/抖动/注入 RNG）、不可重试错误立即返回、重试耗尽写 fault、
 幂等红线、Retry-After 延长退避。R3-7：耗尽故障记录带 failed_target。
@@ -38,7 +38,7 @@ def _drive(
 
     if sleeper is not None:
         policy._sleep = sleeper
-    result = asyncio.run(policy.wrap(inv, nxt))
+    result = asyncio.run(policy.run_with_retries(inv, nxt))
     return result, calls, inv
 
 

@@ -1,6 +1,6 @@
 """R4 装配：ModelCapability.install(container, reg) 统一注册表 —— 容器与网关同源。
 
-P6：Registry 从旧 Host 迁出，由 AOPContainer / LifecycleBus / 装配层共用同一实例。
+P6：Registry 从旧 Host 迁出，由可靠性执行器 / LifecycleBus / 装配层共用同一实例。
 三项具名 provider 注册齐全、同名同实例幂等 / 同名异实例拒绝。
 """
 from __future__ import annotations
@@ -8,10 +8,10 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from compose import AOPContainer
 from compose import HookBusError, LLMPort, LLMRequest, LLMResponse, PortCtx, Registry, Usage
 
 from harness.model import InMemoryModelRegistry, ModelCapability, RuleRouter
+from harness.resilience import ReliabilityExecutor, ResilienceCapability
 from tests.r4.conftest import pctx
 
 
@@ -31,15 +31,21 @@ class FakeLLM:
         return gen()
 
 
-def _container() -> AOPContainer:
-    return AOPContainer(lambda inv: __import__("runtime").Result.success("x"))
+def _executor() -> ReliabilityExecutor:
+    """最小可靠性执行器：无领域策略，仅作为共用注册表的装配载体。"""
+    from runtime import Result
+
+    async def core(inv: object) -> Result:
+        return Result.success("x")
+
+    return ResilienceCapability().install(core)
 
 
 class TestRegistryAssembly:
     def test_install_sets_container_registry_same_instance_as_gateway(self) -> None:
         """install(container) 后 container.registry 与 gateway 解析用注册表同一实例。"""
         cap = ModelCapability(llm=FakeLLM("primary"))
-        container = _container()
+        container = _executor()
         returned = cap.install(container)
         assert returned is cap.registry
         assert container.registry is cap.registry
@@ -49,7 +55,7 @@ class TestRegistryAssembly:
         """三项具名 provider 注册齐全。"""
         cap = ModelCapability(llm=FakeLLM("primary"), router=RuleRouter())
         reg = InMemoryModelRegistry()
-        cap.install(_container(), reg)
+        cap.install(_executor(), reg)
         assert reg.has("llm") and reg.has("model_router") and reg.has("model_cache")
         assert reg.resolve("llm") is cap.llm
 
@@ -57,13 +63,13 @@ class TestRegistryAssembly:
         """注入 reg 时 gateway 复用注入实例，而非内部新建。"""
         cap = ModelCapability(llm=FakeLLM("primary"))
         reg = InMemoryModelRegistry()
-        cap.install(_container(), reg)
+        cap.install(_executor(), reg)
         assert cap.gateway().registry is reg
 
     def test_gateway_degrades_via_shared_registry(self) -> None:
         """端到端：往共用注册表注册备用后端，gateway 按 typed target 切过去。"""
         cap = ModelCapability(llm=FakeLLM("primary"))
-        container = _container()
+        container = _executor()
         cap.install(container)
         backup = FakeLLM("backup")
         cap.add_backend("backup", backup)

@@ -59,11 +59,11 @@ MODULES = {
         "title": "R2 算子与装配（Port + 组合层 call + notify）", "pkg": "compose", "path": "compose",
         "doc": "docs/02-模块详设/Agent/R2-算子与装配.md", "demo": "tests/demos/demo_r2.py", "coverage": 60,
         # 旧符号 HookKind/Host/RequestScope/Signal/HookCtx/Decision/DecisionAction 已删除（P13）。
-        # 算子核心（10 算子 + Guard + call 装饰器）在 compose 包，由 r12 门禁 + ast_scan 核对。
+        # 算子核心（10 算子 + call 装饰器）在 compose 包，由 r12 门禁 + ast_scan 核对。
         "symbols": ["LifecycleBus", "LifecyclePhase", "Notice", "PHASE_COUNT",
                     "Registry", "Capability", "PORT_PROTOCOLS",
                     "LLMRequest", "ToolSpec", "make_call"],
-        "behavior": ["test_aop.py", "test_lifecycle.py"],
+        "behavior": ["test_lifecycle.py"],
         "integration": ["test_ports.py", "test_registry.py", "test_errors.py",
                         "test_lifecycle_wiring.py"],
     },
@@ -72,12 +72,15 @@ MODULES = {
         "doc": "docs/02-模块详设/Agent/R3-可靠性.md", "demo": "tests/demos/demo_r3.py", "coverage": 90,
         "symbols": ["FailureClass", "FailureClassifier", "DimensionKey", "DEFAULT_FAILURE_TABLE",
                     "backoff_delay", "classify_failure", "normalize_code", "validate_ladder",
-                    "RetryPolicy", "CircuitBreaker", "Degradation", "RateLimit", "Bulkhead",
-                    "Idempotency", "Watchdog", "KillSwitch", "ResilienceCapability",
-                    "Timeout", "BreakerStore", "InMemoryBreakerStore"],
-        "behavior": ["test_types.py", "test_breaker.py", "test_retry.py"],
+                    "RetryPolicy", "CircuitBreaker", "Degradation", "RateLimit", "RatePermit",
+                    "Bulkhead", "Idempotency", "Watchdog", "KillSwitch",
+                    "ResilienceCapability", "ReliabilityExecutor", "Timeout",
+                    "DegradeLadder", "DegradeStep", "DegradeMode",
+                    "BreakerStatus", "BreakerState", "BreakerStore", "InMemoryBreakerStore"],
+        "behavior": ["test_types.py", "test_breaker.py", "test_retry.py",
+                     "test_classify_signature.py", "test_breaker_store.py"],
         "integration": ["test_degrade.py", "test_degrade_pipeline.py", "test_capability.py",
-                        "test_e2e_degrade.py", "test_aop_roles.py"],
+                        "test_e2e_degrade.py", "test_timeout.py"],
     },
     "r4": {
         "title": "R4 模型与推理", "pkg": "harness.model", "path": "harness/model",
@@ -156,17 +159,17 @@ MODULES = {
         },
     },
     "r12": {
-        "title": "R12 算子核心（compose：10 算子 + Guard + call 装饰器 + build_call/dispatch）",
+        "title": "R12 算子核心（compose：10 算子 + call 装饰器 + build_call/dispatch）",
         "pkg": "compose", "path": "compose",
         "doc": "docs/02-模块详设/Agent/R2-算子与装配.md",
         "demo": "tests/demos/demo_r12.py", "coverage": 60,
-        # 规格 P9：登记 10 算子 + Guard + call 装饰器 + build_call/dispatch + DTO。
+        # 规格 P9：登记 10 算子 + call 装饰器 + build_call/dispatch + DTO。
         "symbols": [
             "seq", "par", "branch", "race", "loop", "map_state", "map_effect",
-            "fallback", "gate", "retry", "Guard", "Verdict", "with_guard",
-            "build_call", "CompositeCall", "dispatch", "make_dispatch",
+            "fallback", "gate", "retry",
+            "build_call", "dispatch", "make_dispatch",
             "FaultRecord", "RoutingTarget", "CallState", "CallContext",
-            "degrade_retry", "retry_call", "timeout", "danger_route", "injection_guard",
+            "retry_call", "timeout", "danger_route", "injection_guard",
             # P4-P8 新登记：ToolLayer 外壳（DTO 归位/内置架构由 ast_scan r12 覆盖）
             "layer_program",
         ],

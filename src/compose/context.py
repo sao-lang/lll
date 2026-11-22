@@ -1,7 +1,6 @@
-"""协作 DTO 归位（规格 P2）：Invocation/FaultRecord/RoutingTarget/Verdict/Next 移入组合层。
+"""调用协作 DTO：CallContext/Invocation/FaultRecord/RoutingTarget/Next。
 
-这些是守卫/装饰器协作 DTO，不进 R1（R1 明确不构造 Invocation）。原在 src/aop/invocation.py，
-本次归位到组合层——这不是兼容层，是规格 P2 的正式迁移。
+这些是领域调用上下文与故障数据，不进 R1（R1 明确不构造 Invocation）。
 """
 from __future__ import annotations
 
@@ -12,11 +11,10 @@ from typing import Any, Final
 
 from runtime import Effect, Result
 
-from .call import Verdict
 from .guards import FaultRecord, RoutingTarget
 
 __all__ = [
-    "CallContext", "Invocation", "Next", "Verdict",
+    "CallContext", "Invocation", "Next",
     "FaultRecord", "RoutingTarget", "FAULT_KEY", "ROUTING_TARGET_KEY",
 ]
 
@@ -72,4 +70,4 @@ class CallContext:
 Invocation = CallContext
 
 type Next = Callable[[CallContext], Awaitable[Result]]
-"""增强链下一跳签名（Envelope/Refiner 等包裹中心调用时用）。"""
+"""领域调用下一跳签名（装饰/包裹中心调用时传递）。"""

@@ -17,7 +17,7 @@
 
 ## 2. 设计架构
 
-纵深防御：模型级安全是必要不充分条件，harness 提供独立执行期强制层。每层独立强制，一道护栏（Warden 增强器）的 allow 不能覆盖 deny（取最严格）。核心原则：**工具/检索/网页/技能正文一律不可信**，注入防御在进上下文前由 Warden 强制（`before_model` 为 Lifecycle 通知点，只通知不拦截；真正的拦截在 AOP Warden 完成）。审计覆盖全部事件且与事件日志同源可回放。
+纵深防御：模型级安全是必要不充分条件，harness 提供独立执行期强制层。每层独立强制，一道护栏（`③ injection_guard` call 装饰器 / ⑥安全组件）的 allow 不能覆盖 deny（取最严格）。核心原则：**工具/检索/网页/技能正文一律不可信**，注入防御在进上下文前由注入检测护栏强制（`before_model` 为 Lifecycle 通知点，只通知不拦截；真正的拦截由 `③ injection_guard` 装饰器 / ⑥安全组件在调用层完成）。审计覆盖全部事件且与事件日志同源可回放。
 
 ## 3. 流程图
 
@@ -43,7 +43,7 @@ flowchart TD
 # ---- 安全域 DTO（本次补齐：此前 SecurityCtx/SafetyVerdict/SafetyReport 只有名字无结构）----
 @dataclass(frozen=True, slots=True)
 class SecurityCtx:
-    """安全检查上下文：Invocation（AOP）/ Notice（Lifecycle 只读投影）面向安全域的具名投影，避免检测器直接依赖 R2 全量上下文。
+    """安全检查上下文：Invocation（组合层）/ Notice（Lifecycle 只读投影）面向安全域的具名投影，避免检测器直接依赖 R2 全量上下文。
 
     字段：
         session_id / run_id: 会话与 run 标识（审计关联）。
@@ -52,7 +52,7 @@ class SecurityCtx:
         danger: DangerLevel——当前操作的危险级别。
         trust: bool——内容是否来自可信内核（False 则必须过注入检测）。
         meta: dict[str, DynamicValue]——扩展元数据（规则 3 动态边界）。
-    构造：由 R9 护栏增强器从 Invocation 投影生成（from_invocation 类方法）；Lifecycle 侧可从 Notice（Invocation 只读投影）经 from_notice 生成，不改 Invocation/Notice 本身。
+    构造：由 R9 护栏组件从 Invocation 投影生成（from_invocation 类方法）；Lifecycle 侧可从 Notice（Invocation 只读投影）经 from_notice 生成，不改 Invocation/Notice 本身。
     """
     session_id: str
     run_id: str
@@ -64,13 +64,13 @@ class SecurityCtx:
 
 @dataclass(frozen=True, slots=True)
 class SafetyVerdict:
-    """安全域护栏判定结果：allow/redact/deny/ask 四态（D-1：与 AOP 通用 Verdict(allowed, reason) 区分，改用本名）。
+    """安全域护栏判定结果：allow/redact/deny/ask 四态（D-1：与组合层通用 Verdict(allowed, reason) 区分，改用本名）。
 
     字段：
         action: 四态之一。redacted: redact 时的替换文本（掩码/脱敏产物）。
         reason: 判定原因（进 trace）。rule: 命中的规则 id（无则空）。
     ask 语义：返回 ask 不直接拦截，由框架产 Suspend(question, options) 并挂 wait_human/resumed 两个通知点；
-    redact 语义：经本类 redacted 字段返回脱敏内容，不复用 AOP Verdict。
+    redact 语义：经本类 redacted 字段返回脱敏内容，不复用组合层通用 Verdict。
     """
     action: Literal["allow","redact","deny","ask"]
     redacted: DynamicValue = None
@@ -100,9 +100,9 @@ class AuditEvent:
     data_touched: tuple[str, ...]; rationale: str
     prev_hash: str = ""; hash: str = ""
 
-class Guardrail(Protocol):                        # 作为 Warden 增强器接入 AOP 链
+class Guardrail(Protocol):                        # 作为 ③call 装饰器 / ⑥安全组件接入调用链
     name: str; direction: Literal["input","output"]
-    # 参数为 Invocation（AOP 主路径）或 SecurityCtx（安全域投影）；返回 SafetyVerdict
+    # 参数为 Invocation（组合层主路径）或 SecurityCtx（安全域投影）；返回 SafetyVerdict
     def check(self, data: DynamicValue, ctx: Invocation | SecurityCtx) -> SafetyVerdict: ...   # allow/redact/deny/ask; ask→Suspend
 class InjectionDetector(Protocol):
     name: str
