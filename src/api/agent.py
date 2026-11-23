@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+from collections.abc import Awaitable
 from typing import Callable, Protocol, cast
 
 from compose import (
@@ -22,7 +23,7 @@ from compose import (
 )
 from runtime import AgentState, Budgets, CallFn, DynamicValue, Effect, Invoke, Program, Result, Session
 
-from .runtime import _tool_call_handler, assemble_runtime
+from .runtime import assemble_runtime
 
 __all__ = ["Agent"]
 
@@ -78,43 +79,69 @@ def _extract_answer(out: DynamicValue) -> str:
 
 
 def _signature_conforms(obj: Provider, proto: type) -> bool:
-    """纯签名履约校验（Round2 Blk-1 根因修复）。
+    """结构 + 签名可绑定性履约校验（Round3 Blk-1 根因修复）。
 
     - 不调 isinstance（非 runtime_checkable 协议会抛 TypeError；合法实现被误拒）。
-    - 用未绑定方法 getattr(type(obj), name) 对齐协议未绑定方法，避免绑定方法少 self 的错位。
-    - 校验：协议的每个必需参数（无默认值、非 self）必须在实现签名中存在且同位置可用。
-    - 属性型成员（name 等）：只验存在。
+    - 每个协议方法：实现必须 call able，且用 `Signature.bind` 验证"按协议签名调用能否绑定"
+      ——捕获参数名齐但顺序反/多必填/全 keyword-only 的伪实现；空实现（方法体 pass）也拒。
+    - 属性型成员（name 等）：只验存在且类型合理（name 为 str）。
     """
-    # 协议成员 = 注解属性 + 类字典中的方法（Protocol 方法不在 __annotations__）
     ann = tuple(getattr(proto, "__annotations__", {}).keys())
     methods = tuple(n for n, v in vars(proto).items() if callable(v) and not n.startswith("_"))
     attrs = tuple(dict.fromkeys(ann + methods))
+    if not attrs:
+        return False
     for name in attrs:
         expected = getattr(proto, name, None)
+        actual = getattr(type(obj), name, None)  # 未绑定（含 self）
         if not callable(expected):
+            # 属性型：name 须为 str（拒 WrongNameType）
             if not hasattr(obj, name):
                 return False
+            if name == "name" and not isinstance(getattr(obj, name), str):
+                return False
             continue
-        actual = getattr(type(obj), name, None)  # 未绑定（含 self）
         if not callable(actual):
             return False
         try:
             sig_e = inspect.signature(expected)
             sig_a = inspect.signature(actual)
         except (TypeError, ValueError):
-            continue
+            return False
+        # 协议签名（去 self）用 bind 检查实现是否可被调用方按协议形态传参
         ep = [p for p in sig_e.parameters.values() if p.name not in ("self", "cls")]
-        ap = list(sig_a.parameters.values())
-        # 实现参数按名字索引（跳过 self/cls）
-        a_by_name = {p.name: p for p in ap if p.name not in ("self", "cls")}
-        for p in ep:
-            if p.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
-                continue
-            got = a_by_name.get(p.name)
-            if got is None:
-                return False  # 协议参数名在实现中缺失（Sneaky 反例：register() 无参数）
-        # 返回类型多为泛型/前向引用，运行时不做严格类型比对
-    return bool(attrs)
+        try:
+            # 用占位值按参数名 bind（跳过 *args/**kwargs 的协议参数）
+            dummy = {}
+            for p in ep:
+                if p.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+                    continue
+                dummy[p.name] = object()
+            sig_a.bind(None, **dummy)  # None = self 占位
+        except TypeError:
+            return False
+        # 空实现拒：方法体只有 ... / pass（去掉 docstring 后无实质语句）
+        try:
+            src_fn = inspect.getsourcefile(actual)
+            if src_fn and src_fn != "<string>":
+                import ast
+                src = inspect.getsource(actual)
+                tree = ast.parse("".join(line.lstrip() for line in src.splitlines()))
+                fn_node = next((n for n in ast.walk(tree)
+                                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))), None)
+                if fn_node is not None:
+                    body = [s for s in fn_node.body
+                            if not (isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant)
+                                    and isinstance(s.value.value, str))]
+                    if not body or all(
+                        (isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant)
+                         and s.value.value is Ellipsis) or isinstance(s, ast.Pass)
+                        for s in body
+                    ):
+                        return False
+        except (OSError, TypeError, SyntaxError):
+            pass  # 无法取源码（如 C 扩展/动态类）：跳过空实现检查
+    return True
 
 
 class Agent:
@@ -133,8 +160,9 @@ class Agent:
         self._session_id = session_id
         self._caps: dict[str, Provider] = {}
         self._tools: list[tuple[ToolSpec, Callable[..., DynamicValue]]] = []
-        self._port_handlers: dict[str, Callable[..., Result]] = {}
-        self._registry = Registry()  # 持久注册表：注入的能力 install 到这里，运行期可解析
+        self._port_handlers: dict[str, Callable[[Effect, DynamicValue], Awaitable[Result]]] = {}
+        self._registry = Registry()  # 持久注册表：注入的能力 install 到这里
+        self._installed: set[str] = set()  # 幂等：同一能力只 install 一次（Round3 新 Blocker）
 
     def capability(self, cap: Provider) -> "Agent":
         """注入能力（按 name 登记）；装配期真 install 进持久 Registry。"""
@@ -153,31 +181,67 @@ class Agent:
         ))
         return self
 
-    def register_port(self, port: str, handler: Callable[..., Result]) -> "Agent":
+    def register_port(self, port: str, handler: Callable[[Effect, DynamicValue], Awaitable[Result]]) -> "Agent":
         """注入自定义 port handler（Blk-2：非 llm/tool port 不再断链）。"""
         self._port_handlers[port] = handler
         return self
 
     def inject_strategy(self, strategy: Provider) -> "Agent":
-        """注入策略：纯签名履约校验（R13 第四要素，Round2 Blk-1）。"""
+        """注入策略：纯签名履约校验 + 真接进决策点（R13 第四要素，Round3 Blk-1）。"""
         from compose.ports import PORT_PROTOCOLS
         matched = [pname for pname, proto in PORT_PROTOCOLS.items()
                    if _signature_conforms(strategy, proto)]
         if not matched:
             raise TypeError(
                 f"strategy {type(strategy).__name__} 不满足任何框架协议签名（履约校验失败）")
+        # 真接入：策略按其履约的 port 注册为 handler（运行期 call 会消费），不再是死对象。
+        port = matched[0]
+        self._port_handlers.setdefault(port, self._as_handler(strategy))
         self._caps["strategy"] = strategy
         return self
 
+    @staticmethod
+    def _as_handler(provider: Provider) -> Callable[[Effect, DynamicValue], Awaitable[Result]]:
+        """把注入的 Provider 适配成 port handler（策略/能力统一消费路径）。
+
+        返回一个协程函数（provider 方法多为 async）：call 层 await 后取 Result。
+        """
+        async def handler(effect: Effect, ctx: DynamicValue) -> Result:
+            # ctx = R1 调用上下文，预留给 provider 扩展；当前按 payload 分派，不透传。
+            del ctx
+            port = str(getattr(effect, "port", ""))
+            payload = dict(getattr(effect, "payload", {}) or {})
+            op = str(payload.get("op") or "call")
+            fn = getattr(provider, op, None)
+            if not callable(fn):
+                return Result.failure("PORT_OP_MISSING", f"{port}.{op} provider op absent")
+            try:
+                kwargs = {k: v for k, v in payload.items() if k not in ("op", "args")}
+                out = fn(*payload.get("args", ()), **kwargs)
+                return Result.success(await out if inspect.isawaitable(out) else out)
+            except Exception as exc:  # noqa: BLE001
+                return Result.failure("PORT_ERROR", str(exc))
+        return handler
+
     def _install_caps(self) -> None:
-        """装配期真 install 注入的 capability 进持久 Registry（Blk-2）。"""
+        """装配期幂等 install 注入的 capability（Round3：重复 say 不再崩）。"""
         for name, cap in self._caps.items():
-            if name == "strategy":
+            if name == "strategy" or name in self._installed:
                 continue
             install = getattr(cap, "install", None)
             if not callable(install):
                 raise TypeError(f"capability {name} 无 install()，不满足 Capability 协议")
             install(self, self._registry)
+            self._installed.add(name)
+            # capability 暴露的 port provider 也接进 handler（Blk-2：写进 Registry 不再是死对象）
+            for pname in self._registry.names():
+                if pname in self._port_handlers or pname in ("llm", "tool"):
+                    continue
+                try:
+                    provider = self._registry.resolve(pname)
+                    self._port_handlers[pname] = self._as_handler(provider)
+                except Exception:  # noqa: BLE001
+                    pass
 
     def _derive_call(self, tool_handler: CallFn) -> CallFn:
         """构造统一 call：llm→dispatch，tool→四级路由，其余→注入的 port handler。"""
@@ -199,7 +263,8 @@ class Agent:
             if handler is not None:
                 try:
                     result = handler(effect, ctx)
-                    return await result if inspect.isawaitable(result) else result
+                    resolved = await result if inspect.isawaitable(result) else result
+                    return resolved if isinstance(resolved, Result) else Result.success(resolved)
                 except Exception as exc:  # noqa: BLE001
                     return Result.failure("PORT_ERROR", str(exc))
             return Result.failure("PORT_MISSING", f"no handler for port: {port}")
@@ -239,22 +304,25 @@ class Agent:
         return Result(result.ok, data, result.usage, result.error)
 
     async def _arun(self) -> DynamicValue:
-        """内部执行：单次装配 → Runner.run → 取 output（全程语义级）。"""
-        self._install_caps()
-        # 单次装配（Round2 S2）：自建带安全默认的 ToolRegistry，一次 assemble 拿齐 call/store。
-        from harness.security import SecurityCapability
-        from harness.tools import ToolRegistry
-        from .wiring import ApprovingHumanPort, R1AuditEventSink, VerifyingAuditPort
+        """内部执行：单次装配 → Runner.run → 取 output（全程语义级）。
 
-        sec = SecurityCapability()
-        registry = ToolRegistry(sandbox=sec.sandbox,
-                                human=ApprovingHumanPort(sec.human),
-                                audit=VerifyingAuditPort())
-        for spec, fn in self._tools:
-            registry.register(spec, fn)
-        tool_handler = _tool_call_handler(registry)
-        call = self._derive_call(tool_handler)
-        rt = assemble_runtime(call, stream=None, tools=registry)
+        用 assemble_runtime 的 tool_setup/call_factory 钩子，让工具注册与 llm call
+        都在**同一次装配**中完成——tools/audit/sandbox/store/bus 全同源（Round3 审计断裂修复）。
+        """
+        self._install_caps()
+        from harness.tools import ToolRegistry
+        tools_snapshot = list(self._tools)
+        facade = self
+
+        def tool_setup(registry: ToolRegistry) -> None:
+            for spec, fn in tools_snapshot:
+                registry.register(spec, fn)
+
+        def call_factory(tool_handler: CallFn) -> CallFn:
+            return facade._derive_call(tool_handler)
+
+        rt = assemble_runtime(None, stream=None,
+                              tool_setup=tool_setup, call_factory=call_factory)
         session = Session(
             session_id=self._session_id,
             program_factory=self._arch.compile,

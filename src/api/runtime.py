@@ -140,6 +140,8 @@ def assemble_runtime(
     store: EventStore | None = None,
     sink: R1AuditEventSink | None = None,
     checkpoint_every: int = 1,
+    call_factory: Callable[[CallFn], CallFn] | None = None,
+    tool_setup: Callable[[ToolRegistry], None] | None = None,
 ) -> AgentRuntime:
     """真实装配：构造 Runner/Registry/三 Port 接线的运行期。
 
@@ -175,6 +177,9 @@ def assemble_runtime(
     wired_tools = tools or ToolRegistry(
         sandbox=sec.sandbox, human=approving, audit=auditing,
     )
+    # tool_setup：装配期对已接线的 ToolRegistry 补注册门面工具（仍带 R1 sink/沙盒/审批，同源不破）。
+    if tool_setup is not None:
+        tool_setup(wired_tools)
 
     # B-3 修复：未注入 call 时用已接线的 ToolRegistry 构造默认 CallFn——真实
     # Agent 跑 Invoke(port=tool) 会经此进审批+沙盒+审计链，而非悬空死代码。
@@ -188,7 +193,13 @@ def assemble_runtime(
         # 非 tool port 无默认实现：显式失败而非静默放行（fail-closed）。
         return Result.failure("PORT_MISSING", f"no default handler for port: {effect.port}")
 
-    active_call = call if call is not None else default_call
+    # call_factory：让调用方用已接线的 tool_handler 构造带 llm/自定义 port 的 call，
+    # 仍由本函数一次性装配（tools/audit/store/bus 全同源，门面不再自建/二次装配）。
+    active_call = call
+    if active_call is None and call_factory is not None:
+        active_call = call_factory(tool_handler)
+    if active_call is None:
+        active_call = default_call
     runner = Runner(active_call, store=checkpoint_store, notify=runner_notifier(active_bus),
                     checkpoint_every=checkpoint_every)
     return AgentRuntime(runner, active_bus, wired_tools, approving, auditing, checkpoint_store,

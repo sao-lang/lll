@@ -141,3 +141,57 @@ def test_failure_envelope_not_leaked() -> None:
         return program()
     agent = Agent(dsl.custom_arch(factory, name="f"))
     assert agent.say("x") == "ok"
+
+
+# ---- Round3 新 Blocker：重复调用、审计同源、签名反例 ----
+def test_repeated_say_and_concurrent_no_duplicate_install() -> None:
+    """Round3 新 Blocker：注入 capability 后第2次 say / 并发不再因重复 install 崩。"""
+    class L(_SimpleLLM):
+        def __init__(self) -> None:
+            self.n = 0
+        async def complete(self, req: object, ctx: object) -> LLMResponse:
+            self.n += 1
+            return LLMResponse(content=f"R{self.n}", tool_calls=[], usage=Usage(), model="fake")
+
+    agent = Agent(ReAct([ToolSpec(name="t", description="t")], llm="fake", max_turns=2))
+    agent.capability(ModelCapability(llm=L()))
+    assert agent.say("a") == "R1"
+    assert agent.say("b") == "R2"  # 第2次不崩
+
+    res: dict[int, str] = {}
+    def worker(i: int) -> None:
+        res[i] = agent.say(f"I{i}")
+    ts = [threading.Thread(target=worker, args=(i,)) for i in range(4)]
+    for t in ts: t.start()
+    for t in ts: t.join()
+    assert len(res) == 4, f"并发不应崩：{res}"
+
+
+def test_signature_conforms_rejects_empty_and_wrong_shape() -> None:
+    """Round3 Blk-1：参数名齐但顺序反/空实现/keyword-only 的伪实现被拒。"""
+    from api.agent import _signature_conforms
+    from compose.ports import PORT_PROTOCOLS
+    from harness.memory import MemoryStore
+
+    class SneakySmart:
+        name = "s"
+        def read(self, namespace, key, ctx): ...   # 空实现
+        async def write(self, namespace, key, value, ctx): ...
+
+    assert _signature_conforms(MemoryStore(), PORT_PROTOCOLS["memory"]) is True
+    assert _signature_conforms(SneakySmart(), PORT_PROTOCOLS["memory"]) is False
+
+
+def test_tool_audit_same_r1_store() -> None:
+    """Round3 新 Blocker：门面的 tool 审计走 R1AuditEventSink（同源）。"""
+    from api.runtime import assemble_runtime
+    def setup(registry: object) -> None:
+        return None
+    def factory(tool_handler: object) -> object:
+        async def call(effect: object, ctx: object) -> Result:
+            return Result.success({"content": "x"})
+        return call
+    rt = assemble_runtime(None, tool_setup=setup, call_factory=factory)  # type: ignore[arg-type]
+    inner = getattr(rt.audit, "_inner", None)
+    sink = getattr(inner, "_sink", None) if inner else None
+    assert type(sink).__name__ == "R1AuditEventSink", f"审计应同源，实际 {type(sink).__name__ if sink else None}"
