@@ -122,27 +122,27 @@ def _signature_conforms(obj: Provider, proto: type) -> bool:
                           for p in sig_a.parameters.values())
         has_var_kw = any(p.kind is inspect.Parameter.VAR_KEYWORD
                          for p in sig_a.parameters.values())
-        # 实现有 *args/**kwargs 时可承接任意参数形态（合法通配实现，Round4 S2）→ 直接通过
-        if has_var_pos or has_var_kw:
-            continue  # 下一个协议成员
-        if len(ep) > len(ap):
-            return False
-        for idx, p in enumerate(ep):
-            if idx >= len(ap):
+        # 实现有 *args/**kwargs 时可承接任意参数形态（合法通配实现，Round4 S2）：
+        # 跳过参数名/kind 比对，但**不跳过**下方空实现检查（Round5 红队披露的边缘回归）。
+        if not (has_var_pos or has_var_kw):
+            if len(ep) > len(ap):
                 return False
-            got = ap[idx]
-            if got.name != p.name:
-                return False  # 顺序反（SneakySwap）→ 拒
-            if (p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                           inspect.Parameter.POSITIONAL_ONLY)
-                    and got.kind is inspect.Parameter.KEYWORD_ONLY):
-                return False  # 协议可位置调用，实现却 kw-only（SneakyKW）→ 拒
-            if p.kind is inspect.Parameter.KEYWORD_ONLY and got.kind is not inspect.Parameter.KEYWORD_ONLY:
-                return False
-            if (p.kind is inspect.Parameter.POSITIONAL_ONLY
-                    and got.kind not in (inspect.Parameter.POSITIONAL_ONLY,
-                                         inspect.Parameter.POSITIONAL_OR_KEYWORD)):
-                return False
+            for idx, p in enumerate(ep):
+                if idx >= len(ap):
+                    return False
+                got = ap[idx]
+                if got.name != p.name:
+                    return False  # 顺序反（SneakySwap）→ 拒
+                if (p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                               inspect.Parameter.POSITIONAL_ONLY)
+                        and got.kind is inspect.Parameter.KEYWORD_ONLY):
+                    return False  # 协议可位置调用，实现却 kw-only（SneakyKW）→ 拒
+                if p.kind is inspect.Parameter.KEYWORD_ONLY and got.kind is not inspect.Parameter.KEYWORD_ONLY:
+                    return False
+                if (p.kind is inspect.Parameter.POSITIONAL_ONLY
+                        and got.kind not in (inspect.Parameter.POSITIONAL_ONLY,
+                                             inspect.Parameter.POSITIONAL_OR_KEYWORD)):
+                    return False
         # 空实现拒：方法体只有 ... / pass（去掉 docstring 后无实质语句）
         try:
             src_fn = inspect.getsourcefile(actual)

@@ -205,3 +205,24 @@ def test_hooks_fail_closed_and_explicit_call_priority() -> None:
         return g()
     out = __import__("asyncio").run(rt.runner.run(Session(session_id="x", program_factory=prog)))
     assert out.output == {"content": "EXPLICIT"}, f"显式 call 应优先，实际 {out.output}"
+
+
+# ---- Round5 红队披露：*args 通配实现的空实现检查（静态类）----
+def test_varargs_empty_impl_rejected_when_source_available() -> None:
+    from api.agent import _signature_conforms
+    from compose.ports import PORT_PROTOCOLS
+
+    class EmptyArgs:  # 有源码的静态类：*args 通配但方法体只有 ... → 应拒
+        name = "e"
+        def read(self, *args, **kwargs): ...
+        def write(self, *args, **kwargs): ...
+        def forget(self, *args, **kwargs): ...
+
+    class RealArgs:
+        name = "r"
+        def read(self, *args, **kwargs): return "x"
+        def write(self, *args, **kwargs): return None
+        def forget(self, *args, **kwargs): return None
+
+    assert _signature_conforms(EmptyArgs(), PORT_PROTOCOLS["memory"]) is False
+    assert _signature_conforms(RealArgs(), PORT_PROTOCOLS["memory"]) is True
