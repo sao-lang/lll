@@ -100,7 +100,14 @@ def _tool_call_handler(registry: ToolRegistry) -> CallFn:
         if not isinstance(effect, Invoke):
             return Result.failure("INVALID_EFFECT", "tool dispatch only handles Invoke")
         payload = effect.payload
-        ctx_obj = ctx if isinstance(ctx, PortCtx) else PortCtx()
+        # Round4 S5：R1 RuntimeCtx 非 PortCtx，须继承其 session_id/run_id/meta，
+        # 否则审计写进 __audit__: 空键，按业务 session 回放 0 条。
+        ctx_obj = (ctx if isinstance(ctx, PortCtx) else
+                   PortCtx(
+                       session_id=str(getattr(ctx, "session_id", "") or ""),
+                       run_id=str(getattr(ctx, "run_id", "") or ""),
+                       meta=dict(getattr(ctx, "meta", {}) or {}),
+                   ))
         # ReAct/archs 批量工具调用：R1 展开后调用信息在 payload["call"]（见 interpreter.py:89）；
         # 直接 Invoke 则在 payload 顶层。两种形态都支持，避免 ReAct 工具名解析为空。
         nested = payload.get("call")
@@ -152,6 +159,12 @@ def assemble_runtime(
       可注入 bus 以复用 builder.project_events() 建的总线（消除 S1 双 bus）；
     - ⑤ CheckpointEventStore 作为 Runner(store=...) 注入，与 audit sink 共享同一 R1 store；
     - ⑥ CI gate 由 CLI.eval 消费（不在此重复）。
+
+    扩展钩子契约（N1）：
+    - tool_setup(registry)：装配期对同源 ToolRegistry 补注册工具；钩子自身抛异常时
+      **fail-closed** 直接冒泡、不吞（用户钩子是显式注入的扩展点，异常即装配失败）。
+    - call_factory(tool_handler)：用已接线的 tool_handler 构造带 llm/自定义 port 的 call；
+      与显式 call 同时注入时**显式 call 优先**（factory 被忽略）。抛异常同样冒泡 fail-closed。
     """
     sec = security or SecurityCapability()
     # 单底座：manager 自带 store 时复用它，否则新建；audit sink/checkpoint 共用同一实例。

@@ -108,18 +108,41 @@ def _signature_conforms(obj: Provider, proto: type) -> bool:
             sig_a = inspect.signature(actual)
         except (TypeError, ValueError):
             return False
-        # 协议签名（去 self）用 bind 检查实现是否可被调用方按协议形态传参
-        ep = [p for p in sig_e.parameters.values() if p.name not in ("self", "cls")]
-        try:
-            # 用占位值按参数名 bind（跳过 *args/**kwargs 的协议参数）
-            dummy = {}
-            for p in ep:
-                if p.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
-                    continue
-                dummy[p.name] = object()
-            sig_a.bind(None, **dummy)  # None = self 占位
-        except TypeError:
+        # 签名顺序 + kind 严格匹配（Round4 S1/S2 根因修复）：
+        # 协议参数序列（去 self）必须按**同顺序**出现在实现参数序列（去 self）中；
+        # 允许实现末尾有额外可选参数 / *args / **kwargs（更宽松），但协议参数的
+        # kind 必须兼容（keyword-only 协议参数不能由位置参数兑现，反之亦然）。
+        ep = [p for p in sig_e.parameters.values()
+              if p.name not in ("self", "cls")
+              and p.kind not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)]
+        ap = [p for p in sig_a.parameters.values()
+              if p.name not in ("self", "cls")
+              and p.kind not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)]
+        has_var_pos = any(p.kind is inspect.Parameter.VAR_POSITIONAL
+                          for p in sig_a.parameters.values())
+        has_var_kw = any(p.kind is inspect.Parameter.VAR_KEYWORD
+                         for p in sig_a.parameters.values())
+        # 实现有 *args/**kwargs 时可承接任意参数形态（合法通配实现，Round4 S2）→ 直接通过
+        if has_var_pos or has_var_kw:
+            continue  # 下一个协议成员
+        if len(ep) > len(ap):
             return False
+        for idx, p in enumerate(ep):
+            if idx >= len(ap):
+                return False
+            got = ap[idx]
+            if got.name != p.name:
+                return False  # 顺序反（SneakySwap）→ 拒
+            if (p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                           inspect.Parameter.POSITIONAL_ONLY)
+                    and got.kind is inspect.Parameter.KEYWORD_ONLY):
+                return False  # 协议可位置调用，实现却 kw-only（SneakyKW）→ 拒
+            if p.kind is inspect.Parameter.KEYWORD_ONLY and got.kind is not inspect.Parameter.KEYWORD_ONLY:
+                return False
+            if (p.kind is inspect.Parameter.POSITIONAL_ONLY
+                    and got.kind not in (inspect.Parameter.POSITIONAL_ONLY,
+                                         inspect.Parameter.POSITIONAL_OR_KEYWORD)):
+                return False
         # 空实现拒：方法体只有 ... / pass（去掉 docstring 后无实质语句）
         try:
             src_fn = inspect.getsourcefile(actual)
@@ -161,8 +184,7 @@ class Agent:
         self._caps: dict[str, Provider] = {}
         self._tools: list[tuple[ToolSpec, Callable[..., DynamicValue]]] = []
         self._port_handlers: dict[str, Callable[[Effect, DynamicValue], Awaitable[Result]]] = {}
-        self._registry = Registry()  # 持久注册表：注入的能力 install 到这里
-        self._installed: set[str] = set()  # 幂等：同一能力只 install 一次（Round3 新 Blocker）
+        self._installed: dict[str, Provider] = {}  # 幂等按对象身份：同名但换对象要重装（Round4 S3）
 
     def capability(self, cap: Provider) -> "Agent":
         """注入能力（按 name 登记）；装配期真 install 进持久 Registry。"""
@@ -202,13 +224,13 @@ class Agent:
 
     @staticmethod
     def _as_handler(provider: Provider) -> Callable[[Effect, DynamicValue], Awaitable[Result]]:
-        """把注入的 Provider 适配成 port handler（策略/能力统一消费路径）。
+        """把注入的 Provider 适配成 port handler（Round4 S4 根因修复）。
 
-        返回一个协程函数（provider 方法多为 async）：call 层 await 后取 Result。
+        - 按 provider 方法签名自动取参：payload 里有同名键 → 取之；缺的必填参数
+          由 `ctx` 注入（参数名叫 ctx/context）或留空，不再要求 payload 显式 args/ctx。
+        - 注册名≠port 名的映射在 _install_caps 完成（provider 注册名 → 推断 port）。
         """
         async def handler(effect: Effect, ctx: DynamicValue) -> Result:
-            # ctx = R1 调用上下文，预留给 provider 扩展；当前按 payload 分派，不透传。
-            del ctx
             port = str(getattr(effect, "port", ""))
             payload = dict(getattr(effect, "payload", {}) or {})
             op = str(payload.get("op") or "call")
@@ -216,30 +238,63 @@ class Agent:
             if not callable(fn):
                 return Result.failure("PORT_OP_MISSING", f"{port}.{op} provider op absent")
             try:
-                kwargs = {k: v for k, v in payload.items() if k not in ("op", "args")}
-                out = fn(*payload.get("args", ()), **kwargs)
+                sig = inspect.signature(fn)
+                kwargs: dict[str, DynamicValue] = {}
+                for p in sig.parameters.values():
+                    if p.name in ("self", "cls"):
+                        continue
+                    if p.name in payload:
+                        kwargs[p.name] = payload[p.name]
+                    elif p.name in ("ctx", "context"):
+                        kwargs[p.name] = ctx
+                    elif p.default is inspect.Parameter.empty and p.kind in (
+                        inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY):
+                        kwargs[p.name] = None  # 缺参以 None 兜底（S4：不再 TypeError）
+                out = fn(**kwargs)
                 return Result.success(await out if inspect.isawaitable(out) else out)
             except Exception as exc:  # noqa: BLE001
                 return Result.failure("PORT_ERROR", str(exc))
         return handler
 
+    @staticmethod
+    def _provider_port(reg_name: str, provider: Provider) -> str:
+        """从 provider 注册名推断 port 名（S4：注册名≠port名也能消费）。
+
+        优先 provider 自带的 `port`/`name` 声明；否则注册名去掉 _provider/_store 后缀
+        作为 port（memory_provider→memory、audit_store→audit）。
+        """
+        declared = getattr(provider, "port", None)
+        if isinstance(declared, str) and declared:
+            return declared
+        for suffix in ("_provider", "_store", "_port", "_adapter"):
+            if reg_name.endswith(suffix) and len(reg_name) > len(suffix):
+                return reg_name[:-len(suffix)]
+        return reg_name
+
     def _install_caps(self) -> None:
-        """装配期幂等 install 注入的 capability（Round3：重复 say 不再崩）。"""
+        """装配期幂等 install 注入的 capability（Round3 幂等 + Round4 S3 同名替换重装）。
+
+        每个 cap 用**独立 Registry** install（同名替换不触发重名异常），provider 统一
+        适配进 _port_handlers（注册名→port 推断，消费路径不再死对象）。
+        """
         for name, cap in self._caps.items():
-            if name == "strategy" or name in self._installed:
+            if name == "strategy":
+                continue
+            if name in self._installed and self._installed[name] is cap:
                 continue
             install = getattr(cap, "install", None)
             if not callable(install):
                 raise TypeError(f"capability {name} 无 install()，不满足 Capability 协议")
-            install(self, self._registry)
-            self._installed.add(name)
-            # capability 暴露的 port provider 也接进 handler（Blk-2：写进 Registry 不再是死对象）
-            for pname in self._registry.names():
-                if pname in self._port_handlers or pname in ("llm", "tool"):
+            cap_registry = Registry()  # 每次独立：同名 cap 替换不撞 registry 重名
+            install(self, cap_registry)
+            self._installed[name] = cap
+            for reg_name in cap_registry.names():
+                if reg_name in ("llm", "tool"):
                     continue
                 try:
-                    provider = self._registry.resolve(pname)
-                    self._port_handlers[pname] = self._as_handler(provider)
+                    provider = cap_registry.resolve(reg_name)
+                    port = self._provider_port(reg_name, provider)
+                    self._port_handlers[port] = self._as_handler(provider)
                 except Exception:  # noqa: BLE001
                     pass
 
