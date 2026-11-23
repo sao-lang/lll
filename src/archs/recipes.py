@@ -16,13 +16,13 @@ R1 Budgets 兜底；static_check 把预算记入 budgets_resolved 供装配期�
 """
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Callable, Generator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final
 
 from compose import ToolSpec
 from compose.program import ProgramFn
+from harness.cognition import intent_as_program
 from runtime import AgentState, DynamicValue, Effect, Invoke, Program, Spawn, Terminate
 
 from .base import (
@@ -334,7 +334,16 @@ class Router:
 
     def compile(self) -> Program:
         def program() -> Program:
-            intent = self._recognize()
+            # 裂缝修复（D-级联-1）：统一经 intent_as_program 单入口消费意图，
+            # 级联/单级/整体替换三种策略对 Router 一致；不再内联 recognize 解析。
+            # _run_child 拦截桥接器的 Terminate，取 output dict 归一为 IntentResult。
+            raw = yield from _run_child(intent_as_program(self.classifier, text="")())
+            if isinstance(raw, IntentResult):
+                intent = raw
+            else:
+                data = _dict(raw)
+                intent = IntentResult(label=str(_get(data, "label", "")),
+                                      confidence=float(_get(data, "confidence", 0.0)))
             label, conf = intent.label, intent.confidence
             target = label if conf >= self.min_confidence and label in self.arms else self.default
             if target is None:
@@ -347,26 +356,6 @@ class Router:
             yield _end(out)
             return None
         return program()
-
-    def _recognize(self) -> IntentResult:
-        """调 classifier 得 IntentResult。
-
-        注入 IntentStrategy 时以默认文本走 recognize()（异步协议，此处取协程结果）；
-        注入 Callable 时直接调用；未注入时按 label 为空走兜底。
-        """
-        cls = self.classifier
-        if cls is None:
-            return IntentResult(label="", confidence=0.0)
-        if isinstance(cls, IntentStrategy):
-            result: DynamicValue = asyncio.run(cls.recognize("", None))  # type: ignore[arg-type]
-        else:
-            raw: DynamicValue = cls("")  # Callable[[str], ...]
-            result = raw if not hasattr(raw, "__await__") else asyncio.run(raw)
-        if isinstance(result, IntentResult):
-            return result
-        data = _dict(result)
-        return IntentResult(label=str(_get(data, "label", "")),
-                            confidence=float(_get(data, "confidence", 0.0)))
 
 
 class RouterSkill(Router):
@@ -381,7 +370,14 @@ class RouterSkill(Router):
 
     def compile(self) -> Program:
         def program() -> Program:
-            intent = self._recognize()
+            # 裂缝修复（D-级联-1）：与 Router 同，统一经 intent_as_program 单入口。
+            raw = yield from _run_child(intent_as_program(self.classifier, text="")())
+            if isinstance(raw, IntentResult):
+                intent = raw
+            else:
+                data = _dict(raw)
+                intent = IntentResult(label=str(_get(data, "label", "")),
+                                      confidence=float(_get(data, "confidence", 0.0)))
             route = self.arms.get(intent.label) or self.arms.get(self.default or "")
             if route is None:
                 yield _end(None, "no_route")

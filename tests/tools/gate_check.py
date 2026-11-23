@@ -41,6 +41,13 @@ DEFAULT_IMPL_CONTRACTS: dict[str, tuple[str, str]] = {
     "rag": ("RAGPipeline", "harness/rag/pipeline.py"),
     "memory": ("MemoryStore", "harness/memory/memory.py"),
     "store": ("InMemoryStorePort", "harness/memory/store.py"),
+    # R9/R10 回头清单（B.1.2 → B.1.1）：六个默认实现必须真实存在。
+    "sandbox": ("LocalSandbox", "harness/security/ports.py"),
+    "audit": ("AuditLogger", "harness/security/ports.py"),
+    "human": ("ConsoleHumanPort", "harness/security/ports.py"),
+    "eval": ("RuleEval", "harness/eval/rules.py"),
+    "telemetry": ("NoopTelemetry", "harness/observability/telemetry.py"),
+    "event_stream": ("InMemoryEventStream", "harness/observability/stream.py"),
 }
 
 
@@ -175,6 +182,60 @@ MODULES = {
         ],
         "behavior": ["test_compose.py", "test_call.py", "test_r3_four_pits.py"],
         "integration": ["test_r6_pilot.py"],
+    },
+    "r8": {
+        "title": "R8 认知与多 Agent 编排",
+        "pkg": "harness.cognition", "path": "harness/cognition",
+        "doc": "docs/02-模块详设/Agent/R8-认知与多Agent编排.md",
+        "demo": "tests/demos/demo_r8.py", "coverage": 85,
+        "symbols": [
+            "IntentResult", "IntentSample", "Critique", "Step", "StepResult",
+            "IntentStrategy", "KeywordMatcher", "IntentSampleStore",
+            "CheapIntentModel", "PrimaryIntentModel",
+            "CascadeIntentStrategy", "InMemoryIntentSampleStore", "RegexKeywordMatcher",
+            "intent_as_program",
+            "RulePlanner", "RuleExecutor", "RuleRePlanner", "ThresholdReflector",
+        ],
+        "behavior": ["test_intent.py", "test_plan.py", "test_reflect.py",
+                     "test_cascade_service.py"],
+        "integration": [],
+    },
+    "r9": {
+        "title": "R9 安全与 HITL",
+        "pkg": "harness.security", "path": "harness/security",
+        "doc": "docs/02-模块详设/Agent/R9-安全与HITL.md",
+        "demo": "tests/demos/demo_r9.py", "coverage": 85,
+        "symbols": [
+            "SecurityCtx", "SafetyVerdict", "SafetyReport", "AuditEvent", "verify_hash_chain",
+            "Guardrail", "RuleGuardrail", "inspect_untrusted", "redact_secret",
+            "LocalSandbox", "AuditLogger", "ConsoleHumanPort",
+            "ApprovalFlow", "SecurityCapability",
+        ],
+        "behavior": ["test_guardrail.py", "test_audit.py", "test_sandbox.py", "test_approval.py"],
+        "integration": ["test_wiring.py"],
+        "required_defaults": {
+            "sandbox": DEFAULT_IMPL_CONTRACTS["sandbox"],
+            "audit": DEFAULT_IMPL_CONTRACTS["audit"],
+            "human": DEFAULT_IMPL_CONTRACTS["human"],
+        },
+    },
+    "r10": {
+        "title": "R10 可观测·评测·持久化",
+        "pkg": "harness.observability", "path": "harness/observability",
+        "doc": "docs/02-模块详设/Agent/R10-可观测评测与持久化.md",
+        "demo": "tests/demos/demo_r10.py", "coverage": 85,
+        "symbols": [
+            "TraceSpan", "EventEnvelope", "ReadModel", "NoopTelemetry", "Trace",
+            "InMemoryEventStream", "Projection", "TimelineProjection",
+        ],
+        "behavior": ["test_trace.py", "test_stream.py"],
+        "integration": ["test_replay.py", "test_eval.py", "test_eval_suite.py"],
+        "extra_cov": ["harness.eval", "harness.durability"],
+        "required_defaults": {
+            "eval": DEFAULT_IMPL_CONTRACTS["eval"],
+            "telemetry": DEFAULT_IMPL_CONTRACTS["telemetry"],
+            "event_stream": DEFAULT_IMPL_CONTRACTS["event_stream"],
+        },
     },
 
 }

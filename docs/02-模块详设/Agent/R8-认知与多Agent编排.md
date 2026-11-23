@@ -1,10 +1,10 @@
 # R8：认知与多 Agent 编排（cognition + archs）
 
-> **实现状态**：设计定稿，代码待实现（当前仓库已实现 R1~R4：runtime/hooks/resilience/model；本模块为设计态）。验证矩阵中的 tests/rN/ 为预留路径。
+> **实现状态**：已实现（src/harness/cognition/ + archs/；tests/r8/ + tests/demos/demo_r8.py；门禁 r8 13/13）。
 
 
 > **权威来源**：[《AGENT 总设计》](../../01-总览与设计/AGENT-总设计.md) §R8。本文为模块级拆分详设。
-> 层：L1/L2 · 依赖：R1+R2 · 源码包：`src/harness/cognition/` + archs/（原 M6+M10）· 门禁 key：无（设计态）
+> 层：L1/L2 · 依赖：R1 + compose（算子核心）+ R13 契约 · 源码包：`src/harness/cognition/` + `src/archs/` · 门禁 key：r8
 
 ---
 
@@ -15,7 +15,7 @@
 
 ## 2. 设计架构
 
-认知模块是可独立调用的服务（内部走 Effect + AOP 增强器/Lifecycle 通知），内置架构只是装配品。多 Agent 与单 Agent 共用同一解释器：`Spawn(program_factory, state)` → Runner 递归创建子 Session，子 trace 挂父 span，预算从父切分。铁律：**架构即 Program，可任意嵌套**。
+认知模块是可独立调用的服务（内部走 Effect + compose call/notify 通知（AOP 已删除）），内置架构只是装配品。多 Agent 与单 Agent 共用同一解释器：`Spawn(program_factory, state)` → Runner 递归创建子 Session，子 trace 挂父 span，预算从父切分。铁律：**架构即 Program，可任意嵌套**。
 
 ## 3. 流程图
 
@@ -80,7 +80,7 @@ class Arch(Protocol):
 ReAct / ToolUse / PlanExecute / Reflection / Router / RouterSkill /
 Supervisor / Handoff / Blackboard / Graph /（+ 组合算子支撑嵌套）
 # 组合算子
-seq / par / branch / race / retry / map_state / budget
+seq / par / branch / race / loop / map_state / map_effect / fallback / gate / retry（10 个 A 类算子，详见 R12）
 ```
 
 ## 5. 元数据与关键字段（核心字段）
@@ -109,9 +109,9 @@ seq / par / branch / race / retry / map_state / budget
 
 | 条件 | 实现 | 证据 |
 |------|------|------|
-| CL-1 契约自足 | 依赖 R1 types + R2 AOP 增强器/Lifecycle 通知 + 认知协议 | import 扫描 |
+| CL-1 契约自足 | 依赖 R1 types + compose 算子/call + notify + 认知协议 | import 扫描 |
 | CL-2 自带 fake | FakeLLMPort + fake classifier | fake 用例 |
-| CL-3 自带测试 | tests/r8、tests/r12 | 覆盖率报告 |
+| CL-3 自带测试 | tests/r8（已落地 22 用例）+ tests/r12 | 覆盖率报告 |
 | CL-4 独立 demo | `make demo-arch` | demo 冒烟 |
 | CL-5 文档自足 | 本文 + AGENT-总设计对应章节 | 文档评审 |
 
@@ -136,6 +136,8 @@ seq / par / branch / race / retry / map_state / budget
 | 装配检查 | R8-T07 | `pytest tests/r12/test_static.py -q` | 悬空边/环装配期报错 |
 | 独立闭环 | R8-D01 | `make demo-arch` | demo 冒烟 |
 
+> **实现注**：R8-T01 / T02 / T03 / T08 已在 `tests/r8/` 落地（test_intent.py / test_plan.py / test_reflect.py / test_cascade_service.py）；T04~T07 属 R12 组合算子与架构，见 `tests/r12/`。
+
 ## 10. 门禁清单
 
 | 门禁 | 条目 | 达标标准 | 级别 |
@@ -146,4 +148,21 @@ seq / par / branch / race / retry / map_state / budget
 | R8-红线 | 纪律 | 架构内直接 IO/自数轮次→拒绝 | 红线 |
 
 ---
-*R8 模块详设 v2.0 · 派生自 AGENT-总设计 · 设计态*
+
+## 11. 实现落点（2026-11-23）
+
+**源码**：
+- `src/harness/cognition/contracts.py`：IntentResult / IntentStrategy / Planner / Executor / RePlanner / ReflectStrategy / IntentSample / Critique / Step / StepResult（契约单一来源，由 `src/archs/base.py` re-export）。
+- `src/harness/cognition/cascade.py`：CascadeIntentStrategy（L1 `RegexKeywordMatcher` → L2 `InMemoryIntentSampleStore` → L3 cheap / L4 primary，经 `yield Invoke(port="llm")`；阈值、trace、generator 内短路）。
+- `src/harness/cognition/services.py`：`intent_as_program` 桥接 + 确定性服务 RulePlanner / RuleExecutor / RuleRePlanner / ThresholdReflector。
+- `src/archs/recipes.py`：Router / RouterSkill 统一经 `intent_as_program` 单入口消费（原 `_recognize` 内联 `asyncio.run` 已移除）。
+- 测试与 demo：`tests/r8/`（22 用例）、`tests/demos/demo_r8.py`；门禁 r8 13/13。
+
+**四项既定决策（实现已遵循）**：
+1. **确定性默认**：认知服务默认走规则/阈值实现，不依赖真实 LLM；可整体注入 strategy 或逐部件注入。
+2. **单检测器复用**：注入检测复用 `harness.skills.KeywordInjectionDetector`，认知侧不另立检测器（与 R9 共享同一实现）。
+3. **R1 EventStore 复用**：进度/快照类持久化复用 R1 EventStore，R8 不重复声明，也不自建事件日志。
+4. **全量落地**：四级级联、四部件、桥接与确定性服务一次性交付，不留设计态占位。
+
+---
+*R8 模块详设 v2.1 · 已实现（src/harness/cognition/，11-23）*

@@ -2,12 +2,12 @@
 PYTHON ?= .venv/Scripts/python
 PYTEST := $(PYTHON) -m pytest
 
-.PHONY: install test demo demo-r1 demo-r2 demo-r3 demo-r4 demo-r5 demo-r6 demo-r7 gate gate-r1 gate-r2 gate-r3 gate-r4 gate-r5 gate-r6 gate-r7 gate-r12
+.PHONY: install test demo demo-r1 demo-r2 demo-r3 demo-r4 demo-r5 demo-r6 demo-r7 demo-r8 demo-r9 demo-r10 gate gate-r1 gate-r2 gate-r3 gate-r4 gate-r5 gate-r6 gate-r7 gate-r8 gate-r9 gate-r10 gate-r12
 
 install:
 	$(PYTHON) -m pip install -e ".[dev]"
 
-demo: demo-r1 demo-r2 demo-r3 demo-r4 demo-r5 demo-r6 demo-r7
+demo: demo-r1 demo-r2 demo-r3 demo-r4 demo-r5 demo-r6 demo-r7 demo-r8 demo-r9 demo-r10
 
 demo-r1:
 	$(PYTHON) tests/demos/demo_r1.py
@@ -30,10 +30,19 @@ demo-r6:
 demo-r7:
 	$(PYTHON) tests/demos/demo_r7.py
 
-test:
-	$(PYTEST) tests/r1 tests/r2 tests/r3 tests/r4 tests/r5 tests/r6 tests/r7 tests/ports -q
+demo-r8:
+	$(PYTHON) tests/demos/demo_r8.py
 
-gate: gate-r1 gate-r2 gate-r3 gate-r4 gate-r5 gate-r6 gate-r7 gate-r12
+demo-r9:
+	$(PYTHON) tests/demos/demo_r9.py
+
+demo-r10:
+	$(PYTHON) tests/demos/demo_r10.py
+
+test:
+	$(PYTEST) tests/r1 tests/r2 tests/r3 tests/r4 tests/r5 tests/r6 tests/r7 tests/r8 tests/r9 tests/r10 tests/ports -q
+
+gate: gate-r1 gate-r2 gate-r3 gate-r4 gate-r5 gate-r6 gate-r7 gate-r8 gate-r9 gate-r10 gate-r12
 
 gate-r1:
 	$(PYTHON) tests/tools/gate_check.py --module r1
@@ -56,5 +65,18 @@ gate-r6:
 gate-r7:
 	$(PYTHON) tests/tools/gate_check.py --module r7
 
+gate-r8:
+	$(PYTHON) tests/tools/gate_check.py --module r8
+
+gate-r9:
+	$(PYTHON) tests/tools/gate_check.py --module r9
+
+gate-r10:
+	$(PYTHON) tests/tools/gate_check.py --module r10
+
 gate-r12:
 	$(PYTHON) tests/tools/gate_check.py --module r12
+
+# 源码纯净门禁：调用 conductor 器官脚本（唯一真相源），基线锁 2026-11-21 HEAD 存量。
+purity:
+	$(PYTHON) "C:/Users/30895/.workbuddy/skills/conductor/organs/conductor-review/scripts/source_purity.py" check --baseline tests/tools/baselines/purity-HEAD-20261121.json --strict

@@ -34,6 +34,13 @@ TARGETS = {
     "r7": [SRC / "harness" / "context", SRC / "harness" / "memory",
            ROOT / "tests" / "demos" / "demo_r7.py", ROOT / "tests" / "r7"],
     "r12": [SRC / "compose", ROOT / "tests" / "demos" / "demo_r12.py", ROOT / "tests" / "r12"],
+    "r8": [SRC / "harness" / "cognition", SRC / "archs",
+           ROOT / "tests" / "demos" / "demo_r8.py", ROOT / "tests" / "r8"],
+    "r9": [SRC / "harness" / "security",
+           ROOT / "tests" / "demos" / "demo_r9.py", ROOT / "tests" / "r9"],
+    "r10": [SRC / "harness" / "observability", SRC / "harness" / "eval",
+            SRC / "harness" / "durability",
+            ROOT / "tests" / "demos" / "demo_r10.py", ROOT / "tests" / "r10"],
 }
 
 FORBIDDEN_IN_PROGRAM = (
@@ -473,10 +480,82 @@ def scan_r12(files: list[Path]) -> list[str]:
     return violations
 
 
+def scan_r8(files: list[Path]) -> list[str]:
+    """R8 红线：级联短路在 generator 层 + Router 单入口（无内联 recognize 裂缝）。"""
+    violations: list[str] = []
+    cascade = SRC / "harness" / "cognition" / "cascade.py"
+    if not cascade.exists():
+        violations.append("意图级联缺失：src/harness/cognition/cascade.py")
+    else:
+        text = cascade.read_text(encoding="utf-8")
+        if "yield Invoke(port=\"llm\")" not in text:
+            violations.append("L3/L4 未以 Invoke Effect 表达（策略层直接 IO?）")
+        if "def intent_as_program" not in text:
+            violations.append("intent_as_program 桥梁缺失（Router 裂缝未修）")
+    recipes = SRC / "archs" / "recipes.py"
+    if recipes.exists():
+        text = recipes.read_text(encoding="utf-8")
+        # 裂缝修复：Router/RouterSkill 不得再有自造 _recognize 内联解析。
+        if "_recognize(" in text:
+            violations.append("Router 仍内联 _recognize（应统一走 intent_as_program 单入口）")
+        if "intent_as_program(" not in text:
+            violations.append("Router 未接线 intent_as_program")
+    return violations
+
+
+def scan_r9(files: list[Path]) -> list[str]:
+    """R9 红线：复用单检测器（不造第二套）+ fail-closed + 审计哈希链真实存在。"""
+    violations: list[str] = []
+    guard = SRC / "harness" / "security" / "guard.py"
+    if not guard.exists() or "KeywordInjectionDetector" not in guard.read_text(encoding="utf-8"):
+        violations.append("注入检测未复用 skills 单检测器（疑似造第二套）")
+    ports = SRC / "harness" / "security" / "ports.py"
+    if ports.exists():
+        text = ports.read_text(encoding="utf-8")
+        for cls in ("LocalSandbox", "AuditLogger", "ConsoleHumanPort"):
+            if f"class {cls}" not in text:
+                violations.append(f"R9 默认实现缺失: {cls}（B.1.2）")
+    types = SRC / "harness" / "security" / "types.py"
+    if types.exists() and "verify_hash_chain" not in types.read_text(encoding="utf-8"):
+        violations.append("审计哈希链校验缺失")
+    # 生产源码禁止假实现桩（fake/stub/pass 占位）
+    for path in (SRC / "harness" / "security").rglob("*.py"):
+        if "class Fake" in path.read_text(encoding="utf-8") or "TODO stub" in path.read_text(encoding="utf-8"):
+            violations.append(f"安全模块含测试桩: {path.name}")
+    return violations
+
+
+def scan_r10(files: list[Path]) -> list[str]:
+    """R10 红线：复用 R1 EventStore（不重复声明）+ EventEnvelope 独立命名 + 默认实现真实。"""
+    violations: list[str] = []
+    # R10 源码不得自定义名为 EventStore 的协议（单一来源在 R1 runtime/types.py）。
+    for pkg in ("observability", "eval", "durability"):
+        d = SRC / "harness" / pkg
+        for path in d.rglob("*.py"):
+            text = path.read_text(encoding="utf-8")
+            if "class EventStore" in text:
+                violations.append(f"R10 重复声明 EventStore: {path.name}（应复用 R1）")
+    stream = SRC / "harness" / "observability" / "stream.py"
+    if not stream.exists() or "class EventEnvelope" not in (
+            SRC / "harness" / "observability" / "types.py").read_text(encoding="utf-8"):
+        violations.append("EventEnvelope 独立信封缺失（不得与 R4 StreamEvent 混用）")
+    durability = SRC / "harness" / "durability" / "checkpoint.py"
+    if not durability.exists() or "replay_events" not in durability.read_text(encoding="utf-8"):
+        violations.append("回放未复用 R1 replay_events")
+    # 默认实现存在性
+    defaults = (("NoopTelemetry", SRC / "harness" / "observability" / "telemetry.py"),
+                ("InMemoryEventStream", SRC / "harness" / "observability" / "stream.py"),
+                ("RuleEval", SRC / "harness" / "eval" / "rules.py"))
+    for cls, path in defaults:
+        if not path.exists() or f"class {cls}" not in path.read_text(encoding="utf-8"):
+            violations.append(f"R10 默认实现缺失: {cls}（B.1.2）")
+    return violations
+
+
 SCANNERS = {
     "r1": scan_r1, "r2": scan_r2, "r3": scan_r3,
     "r4": scan_r4, "r5": scan_r5, "r6": scan_r6, "r7": scan_r7,
-    "r12": scan_r12,
+    "r12": scan_r12, "r8": scan_r8, "r9": scan_r9, "r10": scan_r10,
 }
 
 

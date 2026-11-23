@@ -1,0 +1,3093 @@
+{
+  "version": 1,
+  "project": "C:\\Users\\30895\\AppData\\Local\\Temp\\lll-head-src\\src",
+  "entries": {
+    "2159186c1669": {
+      "file": "archs/base.py",
+      "line": 10,
+      "rule_id": "py.any-annotation",
+      "rule": "注解用 Any",
+      "text": "from typing import Any, Protocol, runtime_checkable"
+    },
+    "f578ecc1014d": {
+      "file": "archs/base.py",
+      "line": 10,
+      "rule_id": "py.any-import",
+      "rule": "typing.Any 导入",
+      "text": "from typing import Any, Protocol, runtime_checkable"
+    },
+    "5618cc1d8d8b": {
+      "file": "archs/base.py",
+      "line": 26,
+      "rule_id": "py.any-annotation",
+      "rule": "注解用 Any",
+      "text": "def join(self, results: list[Any]) -> Any: ..."
+    },
+    "94bf7d35f227": {
+      "file": "archs/base.py",
+      "line": 26,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "def join(self, results: list[Any]) -> Any: ..."
+    },
+    "7bb304dc4893": {
+      "file": "archs/base.py",
+      "line": 34,
+      "rule_id": "py.any-annotation",
+      "rule": "注解用 Any",
+      "text": "def join(self, results: list[Any]) -> Any:"
+    },
+    "2d37b3b3f74e": {
+      "file": "archs/base.py",
+      "line": 34,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "def join(self, results: list[Any]) -> Any:"
+    },
+    "6c561cd80060": {
+      "file": "archs/base.py",
+      "line": 37,
+      "rule_id": "py.any-annotation",
+      "rule": "注解用 Any",
+      "text": "counts: dict[Any, int] = {}"
+    },
+    "dec7b0cfd338": {
+      "file": "archs/base.py",
+      "line": 37,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "counts: dict[Any, int] = {}"
+    },
+    "ddafcdaa3aef": {
+      "file": "archs/recipes.py",
+      "line": 321,
+      "rule_id": "py.callable-ellipsis",
+      "rule": "Callable[..., ...] 省略参数类型",
+      "text": "def __init__(self, classifier: IntentStrategy | Callable[..., IntentResult] | None,"
+    },
+    "73a8bd14a0bd": {
+      "file": "archs/recipes.py",
+      "line": 376,
+      "rule_id": "py.callable-ellipsis",
+      "rule": "Callable[..., ...] 省略参数类型",
+      "text": "def __init__(self, classifier: IntentStrategy | Callable[..., IntentResult] | None,"
+    },
+    "81dab15a4805": {
+      "file": "archs/recipes.py",
+      "line": 639,
+      "rule_id": "dual.compat-comment",
+      "rule": "兼容/过渡意图注释（双轨信号）",
+      "text": "\"\"\"入口 = 第一个声明的 node（保持向后兼容）；无边时即该节点。\"\"\""
+    },
+    "da1bacae8cac": {
+      "file": "compose/call.py",
+      "line": 26,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def _ctx_meta(ctx: object) -> dict[str, DynamicValue]:"
+    },
+    "b79df2749b32": {
+      "file": "compose/call.py",
+      "line": 52,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "async def call(effect: Effect, ctx: object) -> Result:"
+    },
+    "69a2f623457d": {
+      "file": "compose/call.py",
+      "line": 67,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "async def call(effect: Effect, ctx: object) -> Result:"
+    },
+    "6a7ad1042163": {
+      "file": "compose/call.py",
+      "line": 75,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def danger_route(base: CallFn, registry: object) -> CallFn:"
+    },
+    "97c5c613bfc6": {
+      "file": "compose/call.py",
+      "line": 77,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "async def call(effect: Effect, ctx: object) -> Result:"
+    },
+    "d24d7e6d6eb2": {
+      "file": "compose/call.py",
+      "line": 85,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def injection_guard(base: CallFn, detector: object) -> CallFn:"
+    },
+    "532f0a5bcffb": {
+      "file": "compose/call.py",
+      "line": 87,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "async def call(effect: Effect, ctx: object) -> Result:"
+    },
+    "50f031765eb1": {
+      "file": "compose/context.py",
+      "line": 10,
+      "rule_id": "py.any-annotation",
+      "rule": "注解用 Any",
+      "text": "from typing import Any, Final"
+    },
+    "3ed987468c57": {
+      "file": "compose/context.py",
+      "line": 10,
+      "rule_id": "py.any-import",
+      "rule": "typing.Any 导入",
+      "text": "from typing import Any, Final"
+    },
+    "92bea3cab89b": {
+      "file": "compose/context.py",
+      "line": 37,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "ctx: object"
+    },
+    "5caf60b89dbd": {
+      "file": "compose/context.py",
+      "line": 38,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "session: object"
+    },
+    "98db40ec7caf": {
+      "file": "compose/context.py",
+      "line": 39,
+      "rule_id": "py.any-annotation",
+      "rule": "注解用 Any",
+      "text": "meta: dict[str, Any] = field(default_factory=dict)"
+    },
+    "d6de7bc9231a": {
+      "file": "compose/context.py",
+      "line": 39,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "meta: dict[str, Any] = field(default_factory=dict)"
+    },
+    "c4282ddd294b": {
+      "file": "compose/context.py",
+      "line": 64,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def meta_view(self) -> Mapping[str, object]:"
+    },
+    "a2bf15ba4e47": {
+      "file": "compose/context.py",
+      "line": 64,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "def meta_view(self) -> Mapping[str, object]:"
+    },
+    "accda6d18c57": {
+      "file": "compose/context.py",
+      "line": 69,
+      "rule_id": "dual.compat-comment",
+      "rule": "兼容/过渡意图注释（双轨信号）",
+      "text": "# Invocation 是 CallContext 的归位别名（源码/测试迁移期统一命名；非兼容层，是同一 DTO）"
+    },
+    "4dc8baea3bc2": {
+      "file": "compose/dispatch.py",
+      "line": 16,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "PortMap = Mapping[str, Callable[[Invoke, object], Result]]"
+    },
+    "64625f9712ec": {
+      "file": "compose/dispatch.py",
+      "line": 16,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "PortMap = Mapping[str, Callable[[Invoke, object], Result]]"
+    },
+    "6e3e7b2475d6": {
+      "file": "compose/dispatch.py",
+      "line": 28,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "async def call(effect: Effect, ctx: object) -> Result:"
+    },
+    "ed6430398080": {
+      "file": "compose/dispatch.py",
+      "line": 43,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "async def dispatch(ports: PortMap, effect: Effect, ctx: object) -> Result:"
+    },
+    "e00a9c66e966": {
+      "file": "compose/dto.py",
+      "line": 175,
+      "rule_id": "dual.compat-comment",
+      "rule": "兼容/过渡意图注释（双轨信号）",
+      "text": "danger: 风险级别（R9 高危路由据此决定是否走沙盒+审批；缺省 SAFE 兼容旧构造）。"
+    },
+    "e74973b90052": {
+      "file": "compose/guards.py",
+      "line": 50,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def __init__(self, ctx: object) -> None:"
+    },
+    "0e66f02aa7d5": {
+      "file": "compose/guards.py",
+      "line": 58,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def _meta(self) -> dict[str, object]:"
+    },
+    "3c792ac579bd": {
+      "file": "compose/guards.py",
+      "line": 58,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "def _meta(self) -> dict[str, object]:"
+    },
+    "d734a5ec140c": {
+      "file": "compose/notify.py",
+      "line": 16,
+      "rule_id": "py.any-import",
+      "rule": "typing.Any 导入",
+      "text": "from typing import TYPE_CHECKING, Any"
+    },
+    "9af951ab96c8": {
+      "file": "compose/notify.py",
+      "line": 77,
+      "rule_id": "py.any-annotation",
+      "rule": "注解用 Any",
+      "text": "payload: Mapping[str, Any] = field(default_factory=dict)"
+    },
+    "5c4341b68308": {
+      "file": "compose/notify.py",
+      "line": 77,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "payload: Mapping[str, Any] = field(default_factory=dict)"
+    },
+    "f1945689f4de": {
+      "file": "compose/notify.py",
+      "line": 78,
+      "rule_id": "py.any-annotation",
+      "rule": "注解用 Any",
+      "text": "meta: Mapping[str, Any] = field(default_factory=dict)"
+    },
+    "9a3e6cb6e85b": {
+      "file": "compose/notify.py",
+      "line": 78,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "meta: Mapping[str, Any] = field(default_factory=dict)"
+    },
+    "40051e756bb9": {
+      "file": "compose/notify.py",
+      "line": 91,
+      "rule_id": "py.any-annotation",
+      "rule": "注解用 Any",
+      "text": "payload: Mapping[str, Any] | None = None,"
+    },
+    "398a281eabe7": {
+      "file": "compose/notify.py",
+      "line": 91,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "payload: Mapping[str, Any] | None = None,"
+    },
+    "a63fe900e910": {
+      "file": "compose/notify.py",
+      "line": 130,
+      "rule_id": "dual.compat-comment",
+      "rule": "兼容/过渡意图注释（双轨信号）",
+      "text": "on_error: 可选订阅者异常钩子；缺省 None 保持静默隔离（向后兼容）。"
+    },
+    "e5a06c7c41d6": {
+      "file": "compose/notify.py",
+      "line": 170,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def subscribe(self, plugin: object) -> LifecycleBus:"
+    },
+    "022863e94096": {
+      "file": "compose/notify.py",
+      "line": 188,
+      "rule_id": "py.any-annotation",
+      "rule": "注解用 Any",
+      "text": "def runner_notifier(bus: LifecycleBus) -> Callable[[str, Mapping[str, Any]], None]:"
+    },
+    "4c1783f8f471": {
+      "file": "compose/notify.py",
+      "line": 188,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "def runner_notifier(bus: LifecycleBus) -> Callable[[str, Mapping[str, Any]], None]:"
+    },
+    "a061c8260958": {
+      "file": "compose/notify.py",
+      "line": 200,
+      "rule_id": "py.any-annotation",
+      "rule": "注解用 Any",
+      "text": "def notify(phase_name: str, projection: Mapping[str, Any]) -> None:"
+    },
+    "a91cd1a9138e": {
+      "file": "compose/notify.py",
+      "line": 200,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "def notify(phase_name: str, projection: Mapping[str, Any]) -> None:"
+    },
+    "dfd219f2e235": {
+      "file": "compose/ports.py",
+      "line": 24,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "StorePort        InMemoryStorePort      R7  src/harness/memory/（待实现）"
+    },
+    "62322c692d12": {
+      "file": "compose/ports.py",
+      "line": 30,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "EventStreamPort  InMemoryEventStream    R10 src/harness/observability/（待实现）"
+    },
+    "0c178d6660c9": {
+      "file": "compose/ports.py",
+      "line": 98,
+      "rule_id": "py.callable-ellipsis",
+      "rule": "Callable[..., ...] 省略参数类型",
+      "text": "def register(self, spec: ToolSpec, fn: Callable[..., DynamicValue]) -> None:"
+    },
+    "5da809fdf25c": {
+      "file": "compose/ports.py",
+      "line": 162,
+      "rule_id": "fake.class",
+      "rule": "fake/内存类名（生产源码禁止）",
+      "text": "class MemoryPort(Protocol):"
+    },
+    "a637ec3ad5d1": {
+      "file": "compose/ports.py",
+      "line": 188,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "默认实现 InMemoryStorePort（R7）内部无 IO，但签名统一 async 以支持远程后端。"
+    },
+    "210fec78975a": {
+      "file": "compose/ports.py",
+      "line": 207,
+      "rule_id": "py.callable-ellipsis",
+      "rule": "Callable[..., ...] 省略参数类型",
+      "text": "self, fn: Callable[..., DynamicValue], args: DynamicValue, ctx: PortCtx,"
+    },
+    "b9291e7308a7": {
+      "file": "compose/program.py",
+      "line": 441,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def gate(p: ProgramFn, policy: Callable[[AgentState], object]) -> ProgramFn:"
+    },
+    "a6d910ae1b82": {
+      "file": "compose/registry.py",
+      "line": 33,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def register(self, name: str, provider: Provider) -> object: ..."
+    },
+    "739279c5611a": {
+      "file": "compose/registry.py",
+      "line": 55,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def install(self, container: object, reg: Registry) -> None:"
+    },
+    "d7ae7172bcec": {
+      "file": "harness/_ctxview.py",
+      "line": 38,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def as_port_ctx(ctx: object) -> PortCtx:"
+    },
+    "27a9c8e1aa03": {
+      "file": "harness/context/__init__.py",
+      "line": 16,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "InMemoryBlobStore,"
+    },
+    "b9cab58d286e": {
+      "file": "harness/context/__init__.py",
+      "line": 59,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "\"InMemoryBlobStore\","
+    },
+    "b141e1c767cc": {
+      "file": "harness/context/compaction.py",
+      "line": 37,
+      "rule_id": "dual.compat-comment",
+      "rule": "兼容/过渡意图注释（双轨信号）",
+      "text": "\"\"\"统一 token 估算（兼容旧调用方；与 assemble 同口径）。"
+    },
+    "e30d7d269e41": {
+      "file": "harness/context/manager.py",
+      "line": 19,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "from .offloader import BlobPort, DefaultOffloader, InMemoryBlobStore, Offloader"
+    },
+    "c91be9963c90": {
+      "file": "harness/context/manager.py",
+      "line": 33,
+      "rule_id": "fake.class",
+      "rule": "fake/内存类名（生产源码禁止）",
+      "text": "class ContextMemoryManager:"
+    },
+    "0562ef232f2c": {
+      "file": "harness/context/manager.py",
+      "line": 73,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "self.blob = blob if blob is not None else InMemoryBlobStore()"
+    },
+    "9f1f126ae0b0": {
+      "file": "harness/context/manager.py",
+      "line": 149,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "async def recall(self, query: object, ctx: PortCtx | None = None) -> list[object]:"
+    },
+    "49581369be58": {
+      "file": "harness/context/manager.py",
+      "line": 149,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "async def recall(self, query: object, ctx: PortCtx | None = None) -> list[object]:"
+    },
+    "ee786ca76e40": {
+      "file": "harness/context/manager.py",
+      "line": 168,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "async def offload(self, value: object, ctx: PortCtx | None = None) -> str:"
+    },
+    "5023bb4e684b": {
+      "file": "harness/context/offload_policy.py",
+      "line": 6,
+      "rule_id": "dual.compat-comment",
+      "rule": "兼容/过渡意图注释（双轨信号）",
+      "text": "不留兼容层（对齐 D-10 纪律）。"
+    },
+    "7e95879a4930": {
+      "file": "harness/context/offloader.py",
+      "line": 18,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "\"InMemoryBlobStore\","
+    },
+    "032a6eb0fe5f": {
+      "file": "harness/context/offloader.py",
+      "line": 67,
+      "rule_id": "fake.class",
+      "rule": "fake/内存类名（生产源码禁止）",
+      "text": "class InMemoryBlobStore:"
+    },
+    "b13b2426f5d0": {
+      "file": "harness/context/offloader.py",
+      "line": 67,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "class InMemoryBlobStore:"
+    },
+    "a2730a77d020": {
+      "file": "harness/context/ports.py",
+      "line": 19,
+      "rule_id": "fake.class",
+      "rule": "fake/内存类名（生产源码禁止）",
+      "text": "class MemoryPortWithRecall(MemoryPort, Protocol):"
+    },
+    "3e8e531f21d2": {
+      "file": "harness/memory/__init__.py",
+      "line": 8,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "from .store import InMemoryStorePort"
+    },
+    "b0c9cb8e8c9f": {
+      "file": "harness/memory/__init__.py",
+      "line": 50,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "\"InMemoryStorePort\","
+    },
+    "cb763055c98c": {
+      "file": "harness/memory/memory.py",
+      "line": 1,
+      "rule_id": "fake.filename",
+      "rule": "fake.filename",
+      "text": "文件名信号：memory.py"
+    },
+    "4c79a32609b4": {
+      "file": "harness/memory/memory.py",
+      "line": 75,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def _run_sync(coro: Coroutine[object, object, _T]) -> _T:"
+    },
+    "3e56fc3afcb4": {
+      "file": "harness/memory/memory.py",
+      "line": 92,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def _run_typed(coro: Coroutine[object, object, list[Vector]]) -> list[Vector]:"
+    },
+    "4a9d3c976dfd": {
+      "file": "harness/memory/memory.py",
+      "line": 97,
+      "rule_id": "fake.class",
+      "rule": "fake/内存类名（生产源码禁止）",
+      "text": "class MemoryStore:"
+    },
+    "f8c3f134644c": {
+      "file": "harness/memory/memory.py",
+      "line": 102,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "_vector_store: 语义召回向量库；None 时用 R6 InMemoryVectorStore。"
+    },
+    "d107f9099061": {
+      "file": "harness/memory/memory.py",
+      "line": 123,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "vector_store: 向量库；None 用 R6 InMemoryVectorStore。"
+    },
+    "63fd8ba28ce0": {
+      "file": "harness/memory/memory.py",
+      "line": 127,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "from harness.rag.store import InMemoryVectorStore"
+    },
+    "8e84a607c46b": {
+      "file": "harness/memory/memory.py",
+      "line": 131,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "vector_store if vector_store is not None else InMemoryVectorStore()"
+    },
+    "134314c4dc00": {
+      "file": "harness/memory/memory.py",
+      "line": 373,
+      "rule_id": "dual.compat-comment",
+      "rule": "兼容/过渡意图注释（双轨信号）",
+      "text": "\"\"\"查当前层；先按稳定 id，回退对象身份/值比对（兼容旧调用方）。\"\"\""
+    },
+    "d06beb1d5a0a": {
+      "file": "harness/memory/store.py",
+      "line": 12,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "__all__ = [\"InMemoryStorePort\"]"
+    },
+    "e158f8858b11": {
+      "file": "harness/memory/store.py",
+      "line": 15,
+      "rule_id": "fake.class",
+      "rule": "fake/内存类名（生产源码禁止）",
+      "text": "class InMemoryStorePort:"
+    },
+    "afc42bd432d8": {
+      "file": "harness/memory/store.py",
+      "line": 15,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "class InMemoryStorePort:"
+    },
+    "7934f0fb0afe": {
+      "file": "harness/memory/types.py",
+      "line": 38,
+      "rule_id": "fake.class",
+      "rule": "fake/内存类名（生产源码禁止）",
+      "text": "class MemoryTier(StrEnum):"
+    },
+    "1efe7085930e": {
+      "file": "harness/memory/types.py",
+      "line": 52,
+      "rule_id": "fake.class",
+      "rule": "fake/内存类名（生产源码禁止）",
+      "text": "class MemoryKind(StrEnum):"
+    },
+    "1e534cd7a821": {
+      "file": "harness/memory/types.py",
+      "line": 75,
+      "rule_id": "fake.class",
+      "rule": "fake/内存类名（生产源码禁止）",
+      "text": "class MemoryScope:"
+    },
+    "bd41769829a3": {
+      "file": "harness/memory/types.py",
+      "line": 88,
+      "rule_id": "fake.class",
+      "rule": "fake/内存类名（生产源码禁止）",
+      "text": "class MemoryItem:"
+    },
+    "4df345783cf1": {
+      "file": "harness/memory/types.py",
+      "line": 89,
+      "rule_id": "dual.compat-comment",
+      "rule": "兼容/过渡意图注释（双轨信号）",
+      "text": "\"\"\"一条长期记忆条目（前五字段保留位置参数兼容旧调用方）。"
+    },
+    "43b424bb5b59": {
+      "file": "harness/memory/types.py",
+      "line": 118,
+      "rule_id": "fake.class",
+      "rule": "fake/内存类名（生产源码禁止）",
+      "text": "class MemoryQuery:"
+    },
+    "23869d67ae10": {
+      "file": "harness/memory/types.py",
+      "line": 154,
+      "rule_id": "dual.compat-comment",
+      "rule": "兼容/过渡意图注释（双轨信号）",
+      "text": "# 缺省 tenant（仅 demo/测试向后兼容；生产由 R12 强制注入真实 tenant）。"
+    },
+    "5569199d4c99": {
+      "file": "harness/memory/types.py",
+      "line": 193,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def resolve(ctx: object) -> MemoryScope:"
+    },
+    "b1068b30efa0": {
+      "file": "harness/memory/types.py",
+      "line": 197,
+      "rule_id": "dual.compat-comment",
+      "rule": "兼容/过渡意图注释（双轨信号）",
+      "text": "向后兼容（旧调用方不传 meta）。fail-closed 仍适用于显式错误 scope。"
+    },
+    "d22734dd61e0": {
+      "file": "harness/model/__init__.py",
+      "line": 10,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "ExactCache, HashCacheEmbedder, InMemoryCacheStore, SimilarityCache,"
+    },
+    "a33272336be5": {
+      "file": "harness/model/__init__.py",
+      "line": 14,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "from .registry import InMemoryModelRegistry, ModelEndpoint, ModelRegistry"
+    },
+    "ad78f2196240": {
+      "file": "harness/model/__init__.py",
+      "line": 47,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "\"InMemoryCacheStore\","
+    },
+    "27b3b6af3f7b": {
+      "file": "harness/model/__init__.py",
+      "line": 53,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "\"InMemoryModelRegistry\","
+    },
+    "539fc30f955e": {
+      "file": "harness/model/cache.py",
+      "line": 8,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "- InMemoryCacheStore：进程内默认"
+    },
+    "7be63cbe5f59": {
+      "file": "harness/model/cache.py",
+      "line": 34,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "\"InMemoryCacheStore\","
+    },
+    "5145c34f6167": {
+      "file": "harness/model/cache.py",
+      "line": 105,
+      "rule_id": "fake.class",
+      "rule": "fake/内存类名（生产源码禁止）",
+      "text": "class InMemoryCacheStore:"
+    },
+    "14245f3c9e04": {
+      "file": "harness/model/cache.py",
+      "line": 105,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "class InMemoryCacheStore:"
+    },
+    "6cd43e88eed1": {
+      "file": "harness/model/cache.py",
+      "line": 313,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "\"\"\"精确缓存：sha256 精确匹配；存储工具可注入（缺省 InMemoryCacheStore）。\"\"\""
+    },
+    "28d73a447a52": {
+      "file": "harness/model/cache.py",
+      "line": 324,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "self._store = store if store is not None else InMemoryCacheStore()"
+    },
+    "014cc721ff34": {
+      "file": "harness/model/cache.py",
+      "line": 387,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "self._store = store if store is not None else InMemoryCacheStore()"
+    },
+    "b51181be2cf9": {
+      "file": "harness/model/cache.py",
+      "line": 436,
+      "rule_id": "py.bare-container",
+      "rule": "裸容器类型（缺元素类型）",
+      "text": "\"vec\": list(vec) if vec is not None else None,"
+    },
+    "c451b18796aa": {
+      "file": "harness/model/capability.py",
+      "line": 16,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "from .registry import InMemoryModelRegistry, ModelRegistry"
+    },
+    "d3953ec246b7": {
+      "file": "harness/model/capability.py",
+      "line": 58,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "self._model_registry = registry or InMemoryModelRegistry()"
+    },
+    "e5ed964ec091": {
+      "file": "harness/model/capability.py",
+      "line": 69,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def install(self, container: object | None = None, reg: Registry | None = None) -> Registry:"
+    },
+    "315e0e113c99": {
+      "file": "harness/model/gateway.py",
+      "line": 98,
+      "rule_id": "dual.compat-comment",
+      "rule": "兼容/过渡意图注释（双轨信号）",
+      "text": "registry: 模型端点注册表（缺省 None=仅默认后端，兼容旧行为）。"
+    },
+    "bd4b7a083f8b": {
+      "file": "harness/model/gateway.py",
+      "line": 124,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "*, extra: dict[str, object] | None = None) -> None:"
+    },
+    "ffaa864089d0": {
+      "file": "harness/model/gateway.py",
+      "line": 124,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "*, extra: dict[str, object] | None = None) -> None:"
+    },
+    "736753941908": {
+      "file": "harness/model/gateway.py",
+      "line": 196,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def _extract_target(self, ctx: object, inv: Invocation | None = None) -> str | None:"
+    },
+    "c2e0567cb87b": {
+      "file": "harness/model/gateway.py",
+      "line": 212,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "async def _center(self, effect: Effect, ctx: object, target: str | None) -> Result:"
+    },
+    "9f4cb89d241b": {
+      "file": "harness/model/gateway.py",
+      "line": 260,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def as_dispatch(self) -> Callable[[Effect, object], Awaitable[Result]]:"
+    },
+    "8676dddfc36f": {
+      "file": "harness/model/gateway.py",
+      "line": 260,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "def as_dispatch(self) -> Callable[[Effect, object], Awaitable[Result]]:"
+    },
+    "5fbe0f339f6d": {
+      "file": "harness/model/gateway.py",
+      "line": 267,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "async def dispatch(effect: Effect, ctx: object) -> Result:"
+    },
+    "57be4c36291c": {
+      "file": "harness/model/registry.py",
+      "line": 14,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "__all__ = [\"ModelEndpoint\", \"ModelRegistry\", \"InMemoryModelRegistry\"]"
+    },
+    "76f9263b6efe": {
+      "file": "harness/model/registry.py",
+      "line": 71,
+      "rule_id": "fake.class",
+      "rule": "fake/内存类名（生产源码禁止）",
+      "text": "class InMemoryModelRegistry:"
+    },
+    "ccf7917b5a9b": {
+      "file": "harness/model/registry.py",
+      "line": 71,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "class InMemoryModelRegistry:"
+    },
+    "0a9321353346": {
+      "file": "harness/model/structured.py",
+      "line": 41,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def coerce(cls, raw: object) -> _JsonType | None:"
+    },
+    "b19e8294ffc8": {
+      "file": "harness/model/structured.py",
+      "line": 83,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def validate(self, value: object, schema: dict[str, DynamicValue]) -> list[str]:"
+    },
+    "c8ef95952258": {
+      "file": "harness/model/structured.py",
+      "line": 97,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def validate(self, value: object, schema: dict[str, DynamicValue]) -> list[str]:"
+    },
+    "17ab1dca4b33": {
+      "file": "harness/model/structured.py",
+      "line": 102,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def validate_json_schema(value: object, schema: dict[str, DynamicValue]) -> list[str]:"
+    },
+    "e4e2cd65fa21": {
+      "file": "harness/model/types.py",
+      "line": 232,
+      "rule_id": "dual.compat-comment",
+      "rule": "兼容/过渡意图注释（双轨信号）",
+      "text": "简单场景与向后兼容，但生产链路（gateway）走 reserve/commit。"
+    },
+    "95c72d871f6a": {
+      "file": "harness/rag/__init__.py",
+      "line": 9,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "from harness.rag.pipeline import CachePort, InMemoryCache, RAGPipeline"
+    },
+    "d2362465a29a": {
+      "file": "harness/rag/__init__.py",
+      "line": 15,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "from harness.rag.store import InMemoryVectorStore, VectorStore"
+    },
+    "328509cfae7d": {
+      "file": "harness/rag/__init__.py",
+      "line": 29,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "\"RAGPipeline\", \"CachePort\", \"InMemoryCache\","
+    },
+    "b9ede0000036": {
+      "file": "harness/rag/__init__.py",
+      "line": 36,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "\"VectorStore\", \"InMemoryVectorStore\","
+    },
+    "f9b57bee8161": {
+      "file": "harness/rag/pipeline.py",
+      "line": 13,
+      "rule_id": "py.any-annotation",
+      "rule": "注解用 Any",
+      "text": "from typing import Any, Protocol, runtime_checkable"
+    },
+    "dcd63f72b402": {
+      "file": "harness/rag/pipeline.py",
+      "line": 13,
+      "rule_id": "py.any-import",
+      "rule": "typing.Any 导入",
+      "text": "from typing import Any, Protocol, runtime_checkable"
+    },
+    "af665929fb9a": {
+      "file": "harness/rag/pipeline.py",
+      "line": 35,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "__all__ = [\"PIPELINE_NAME\", \"CachePort\", \"InMemoryCache\", \"RAGPipeline\"]"
+    },
+    "6c19411c4f08": {
+      "file": "harness/rag/pipeline.py",
+      "line": 69,
+      "rule_id": "fake.class",
+      "rule": "fake/内存类名（生产源码禁止）",
+      "text": "class InMemoryCache:"
+    },
+    "103ac98faef2": {
+      "file": "harness/rag/pipeline.py",
+      "line": 69,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "class InMemoryCache:"
+    },
+    "c101f7a548ce": {
+      "file": "harness/rag/pipeline.py",
+      "line": 129,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "cache: CachePort 实例（启用并委托）/ True（内置 InMemoryCache）/ None 或 False（关闭）。"
+    },
+    "05ba6c3b5539": {
+      "file": "harness/rag/pipeline.py",
+      "line": 142,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "self._cache: CachePort | None = InMemoryCache()"
+    },
+    "b50754eb38fa": {
+      "file": "harness/rag/pipeline.py",
+      "line": 198,
+      "rule_id": "py.bare-container",
+      "rule": "裸容器类型（缺元素类型）",
+      "text": "\"meta\": dict(h.chunk.meta),"
+    },
+    "53044244ab3f": {
+      "file": "harness/rag/pipeline.py",
+      "line": 251,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def with_(self, **replacements: object) -> RAGPipeline:"
+    },
+    "5ad92ef18948": {
+      "file": "harness/rag/pipeline.py",
+      "line": 264,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "current: dict[str, object] = {"
+    },
+    "640209ba90eb": {
+      "file": "harness/rag/pipeline.py",
+      "line": 264,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "current: dict[str, object] = {"
+    },
+    "07cfb8919029": {
+      "file": "harness/rag/pipeline.py",
+      "line": 287,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "默认内存实现与自定义共享缓存走同一路径，避免误删他人的缓存条目。"
+    },
+    "a1143446411d": {
+      "file": "harness/rag/post.py",
+      "line": 33,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "filters: dict[str, object] | None = None,"
+    },
+    "6d750734b603": {
+      "file": "harness/rag/post.py",
+      "line": 33,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "filters: dict[str, object] | None = None,"
+    },
+    "ea14e31df5af": {
+      "file": "harness/rag/post.py",
+      "line": 44,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "filters: dict[str, object] | None = None,"
+    },
+    "d1de45fbd6f4": {
+      "file": "harness/rag/post.py",
+      "line": 44,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "filters: dict[str, object] | None = None,"
+    },
+    "08a6192c0377": {
+      "file": "harness/rag/post.py",
+      "line": 74,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "filters: dict[str, object] | None = None,"
+    },
+    "9da3e50a9251": {
+      "file": "harness/rag/post.py",
+      "line": 74,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "filters: dict[str, object] | None = None,"
+    },
+    "26707b7ace07": {
+      "file": "harness/rag/post.py",
+      "line": 103,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "filters: dict[str, object] | None = None,"
+    },
+    "4eaf891cac15": {
+      "file": "harness/rag/post.py",
+      "line": 103,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "filters: dict[str, object] | None = None,"
+    },
+    "334480b393a0": {
+      "file": "harness/rag/retriever.py",
+      "line": 91,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "# getattr 的静态类型是 object；callable() 只收窄到 Callable[..., object]，"
+    },
+    "dfba870c608c": {
+      "file": "harness/rag/retriever.py",
+      "line": 91,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "# getattr 的静态类型是 object；callable() 只收窄到 Callable[..., object]，"
+    },
+    "85dda16efc75": {
+      "file": "harness/rag/retriever.py",
+      "line": 91,
+      "rule_id": "py.callable-ellipsis",
+      "rule": "Callable[..., ...] 省略参数类型",
+      "text": "# getattr 的静态类型是 object；callable() 只收窄到 Callable[..., object]，"
+    },
+    "6d9c01b64659": {
+      "file": "harness/rag/store.py",
+      "line": 12,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "__all__ = [\"InMemoryVectorStore\", \"VectorStore\", \"matches_filters\"]"
+    },
+    "0f8fdd398eb9": {
+      "file": "harness/rag/store.py",
+      "line": 18,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def matches_filters(chunk: Chunk, filters: dict[str, object] | None) -> bool:"
+    },
+    "2175c1cb0926": {
+      "file": "harness/rag/store.py",
+      "line": 18,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "def matches_filters(chunk: Chunk, filters: dict[str, object] | None) -> bool:"
+    },
+    "64b73569fd48": {
+      "file": "harness/rag/store.py",
+      "line": 47,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "self, vec: Vector, top_k: int, filters: dict[str, object] | None = None"
+    },
+    "ef83eaf16bf4": {
+      "file": "harness/rag/store.py",
+      "line": 47,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "self, vec: Vector, top_k: int, filters: dict[str, object] | None = None"
+    },
+    "757e226d0834": {
+      "file": "harness/rag/store.py",
+      "line": 53,
+      "rule_id": "fake.class",
+      "rule": "fake/内存类名（生产源码禁止）",
+      "text": "class InMemoryVectorStore:"
+    },
+    "11c641168fd4": {
+      "file": "harness/rag/store.py",
+      "line": 53,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "class InMemoryVectorStore:"
+    },
+    "0fcee44c320d": {
+      "file": "harness/rag/store.py",
+      "line": 76,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "self, vec: Vector, top_k: int, filters: dict[str, object] | None = None"
+    },
+    "d3d842dfbeb7": {
+      "file": "harness/rag/store.py",
+      "line": 76,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "self, vec: Vector, top_k: int, filters: dict[str, object] | None = None"
+    },
+    "111324e609cd": {
+      "file": "harness/rag/types.py",
+      "line": 59,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "meta: dict[str, object] = Field(default_factory=dict, description=\"Metadata\")"
+    },
+    "439d60229842": {
+      "file": "harness/rag/types.py",
+      "line": 59,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "meta: dict[str, object] = Field(default_factory=dict, description=\"Metadata\")"
+    },
+    "5d95f6184d0a": {
+      "file": "harness/rag/types.py",
+      "line": 78,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "meta: dict[str, object] = Field(default_factory=dict, description=\"Metadata\")"
+    },
+    "7b8d09328136": {
+      "file": "harness/rag/types.py",
+      "line": 78,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "meta: dict[str, object] = Field(default_factory=dict, description=\"Metadata\")"
+    },
+    "23034e38215b": {
+      "file": "harness/rag/types.py",
+      "line": 110,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "filters: dict[str, object] | None = Field(default=None, description=\"Metadata filter\")"
+    },
+    "d29a0a06d4dd": {
+      "file": "harness/rag/types.py",
+      "line": 110,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "filters: dict[str, object] | None = Field(default=None, description=\"Metadata filter\")"
+    },
+    "5ed0a7aa8f92": {
+      "file": "harness/resilience/__init__.py",
+      "line": 9,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "from .breaker import BreakerStore, CircuitBreaker, InMemoryBreakerStore"
+    },
+    "95f137419c7d": {
+      "file": "harness/resilience/__init__.py",
+      "line": 43,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "\"BreakerStatus\", \"BreakerState\", \"BreakerStore\", \"InMemoryBreakerStore\","
+    },
+    "d160d2f8948c": {
+      "file": "harness/resilience/breaker.py",
+      "line": 19,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "__all__ = [\"BreakerStore\", \"CircuitBreaker\", \"InMemoryBreakerStore\"]"
+    },
+    "d919d2197fc3": {
+      "file": "harness/resilience/breaker.py",
+      "line": 32,
+      "rule_id": "fake.class",
+      "rule": "fake/内存类名（生产源码禁止）",
+      "text": "class InMemoryBreakerStore:"
+    },
+    "51d1ed916ae1": {
+      "file": "harness/resilience/breaker.py",
+      "line": 32,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "class InMemoryBreakerStore:"
+    },
+    "fed488cf8894": {
+      "file": "harness/resilience/breaker.py",
+      "line": 48,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def _normalize_key(key: object) -> Dimension:"
+    },
+    "91fdd0def4da": {
+      "file": "harness/resilience/breaker.py",
+      "line": 102,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "self._store: BreakerStore = store if store is not None else InMemoryBreakerStore()"
+    },
+    "555172f8613b": {
+      "file": "harness/resilience/breaker.py",
+      "line": 121,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "async def state(self, key: object) -> BreakerState:"
+    },
+    "492924a09a58": {
+      "file": "harness/resilience/breaker.py",
+      "line": 143,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "async def maybe_half_open(self, key: object) -> None:"
+    },
+    "9ae1d2ea17bd": {
+      "file": "harness/resilience/capability.py",
+      "line": 73,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "core: Callable[[Invocation], Result | Awaitable[Result]] | object,"
+    },
+    "526743a290b8": {
+      "file": "harness/resilience/capability.py",
+      "line": 75,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "registry: object | None = None,"
+    },
+    "b69b67f17d9c": {
+      "file": "harness/resilience/capability.py",
+      "line": 76,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "bus: object | None = None,"
+    },
+    "b5e8275f9c8c": {
+      "file": "harness/resilience/capability.py",
+      "line": 77,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "notify: Callable[[str, Mapping[str, object]], None] | None = None,"
+    },
+    "7228c2b8550f": {
+      "file": "harness/resilience/capability.py",
+      "line": 77,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "notify: Callable[[str, Mapping[str, object]], None] | None = None,"
+    },
+    "728903f6e713": {
+      "file": "harness/resilience/capability.py",
+      "line": 104,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def plugins(self) -> tuple[object, ...]:"
+    },
+    "d22a515bf419": {
+      "file": "harness/resilience/capability.py",
+      "line": 104,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "def plugins(self) -> tuple[object, ...]:"
+    },
+    "bda3d7457584": {
+      "file": "harness/resilience/defenses.py",
+      "line": 118,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "session_state: dict[str, dict[str, object]] | None = None,"
+    },
+    "1ddd8d10047d": {
+      "file": "harness/resilience/defenses.py",
+      "line": 118,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "session_state: dict[str, dict[str, object]] | None = None,"
+    },
+    "7e26bded61db": {
+      "file": "harness/resilience/defenses.py",
+      "line": 132,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def _session(self, session_id: str) -> dict[str, object]:"
+    },
+    "9ce9638f74bf": {
+      "file": "harness/resilience/defenses.py",
+      "line": 132,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "def _session(self, session_id: str) -> dict[str, object]:"
+    },
+    "f8d9657baa4d": {
+      "file": "harness/resilience/defenses.py",
+      "line": 140,
+      "rule_id": "py.bare-container",
+      "rule": "裸容器类型（缺元素类型）",
+      "text": "state = {\"available\": set(self._initial_available)}"
+    },
+    "386f1823b74b": {
+      "file": "harness/resilience/executor.py",
+      "line": 58,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def _as_invocation(effect: Effect, ctx: object) -> Invocation:"
+    },
+    "98b11ee32141": {
+      "file": "harness/resilience/executor.py",
+      "line": 68,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "shared: dict[str, object] = ctx_meta if isinstance(ctx_meta, dict) else {}"
+    },
+    "36220419d07d": {
+      "file": "harness/resilience/executor.py",
+      "line": 68,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "shared: dict[str, object] = ctx_meta if isinstance(ctx_meta, dict) else {}"
+    },
+    "53b7097e916f": {
+      "file": "harness/resilience/executor.py",
+      "line": 94,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "registry: object | None = None,"
+    },
+    "66c871db46f8": {
+      "file": "harness/resilience/executor.py",
+      "line": 95,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "bus: object | None = None,"
+    },
+    "4937f72ac06c": {
+      "file": "harness/resilience/executor.py",
+      "line": 96,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "notify: Callable[[str, Mapping[str, object]], None] | None = None,"
+    },
+    "b306645555af": {
+      "file": "harness/resilience/executor.py",
+      "line": 96,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "notify: Callable[[str, Mapping[str, object]], None] | None = None,"
+    },
+    "f76e8fa20946": {
+      "file": "harness/resilience/executor.py",
+      "line": 283,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "async def adapter(effect: Effect, ctx: object) -> Result:"
+    },
+    "ab7aee395e02": {
+      "file": "harness/resilience/types.py",
+      "line": 205,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def classify(self, result: Result, ctx: object) -> FailureClass:"
+    },
+    "18ad4f1a7f78": {
+      "file": "harness/resilience/types.py",
+      "line": 219,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def classify(self, result: Result, ctx: object) -> FailureClass:"
+    },
+    "13ea1779bc52": {
+      "file": "harness/resilience/types.py",
+      "line": 235,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "result: Result, ctx: object, *, classifier: FailureClassifier | None = None"
+    },
+    "765288e46118": {
+      "file": "harness/tools/decorator.py",
+      "line": 64,
+      "rule_id": "py.callable-ellipsis",
+      "rule": "Callable[..., ...] 省略参数类型",
+      "text": "fn: Callable[..., DynamicValue]"
+    },
+    "dda704fcee42": {
+      "file": "harness/tools/decorator.py",
+      "line": 88,
+      "rule_id": "py.callable-ellipsis",
+      "rule": "Callable[..., ...] 省略参数类型",
+      "text": ") -> Callable[[Callable[..., DynamicValue]], ToolFn]:"
+    },
+    "9e090813988e": {
+      "file": "harness/tools/decorator.py",
+      "line": 101,
+      "rule_id": "py.callable-ellipsis",
+      "rule": "Callable[..., ...] 省略参数类型",
+      "text": "def decorate(original: Callable[..., DynamicValue]) -> ToolFn:"
+    },
+    "d32ad7673afe": {
+      "file": "harness/tools/decorator.py",
+      "line": 122,
+      "rule_id": "py.callable-ellipsis",
+      "rule": "Callable[..., ...] 省略参数类型",
+      "text": "fn: Callable[..., DynamicValue] = model_wrapper"
+    },
+    "7b8a58907c73": {
+      "file": "harness/tools/execution.py",
+      "line": 46,
+      "rule_id": "py.bare-container",
+      "rule": "裸容器类型（缺元素类型）",
+      "text": "parameters_schema={\"type\": \"object\", \"properties\": properties, \"required\": list(required)},"
+    },
+    "04728c15ff8f": {
+      "file": "harness/tools/execution.py",
+      "line": 50,
+      "rule_id": "py.callable-ellipsis",
+      "rule": "Callable[..., ...] 省略参数类型",
+      "text": "async def _run(self, fn: Callable[..., DynamicValue], args: dict[str, DynamicValue],"
+    },
+    "b85e89578aaa": {
+      "file": "harness/tools/mcp.py",
+      "line": 75,
+      "rule_id": "py.callable-ellipsis",
+      "rule": "Callable[..., ...] 省略参数类型",
+      "text": "def _invoker(self, server: str, tool_name: str) -> Callable[..., DynamicValue]:"
+    },
+    "f372e7967db9": {
+      "file": "harness/tools/registry.py",
+      "line": 47,
+      "rule_id": "py.callable-ellipsis",
+      "rule": "Callable[..., ...] 省略参数类型",
+      "text": "_fns: dict[str, Callable[..., DynamicValue]]"
+    },
+    "279347527fd4": {
+      "file": "harness/tools/registry.py",
+      "line": 70,
+      "rule_id": "py.callable-ellipsis",
+      "rule": "Callable[..., ...] 省略参数类型",
+      "text": "def register(self, spec: ToolSpec, fn: Callable[..., DynamicValue]) -> None:"
+    },
+    "53b45395ac07": {
+      "file": "harness/tools/registry.py",
+      "line": 116,
+      "rule_id": "py.callable-ellipsis",
+      "rule": "Callable[..., ...] 省略参数类型",
+      "text": "def bind(self, name: str, fn: Callable[..., DynamicValue]) -> None:"
+    },
+    "cf271bc39e5d": {
+      "file": "ports/adapters/llm.py",
+      "line": 25,
+      "rule_id": "dual.legacy-suffix",
+      "rule": "Legacy/Compat 命名的旁路实现（双轨信号；已登记豁免的除外）",
+      "text": "class OpenAICompatLLM:"
+    },
+    "69f7b136af26": {
+      "file": "ports/adapters/llm.py",
+      "line": 64,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def _payload(self, req: LLMRequest, *, stream: bool) -> dict[str, object]:"
+    },
+    "92084f4cde7e": {
+      "file": "ports/adapters/llm.py",
+      "line": 64,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "def _payload(self, req: LLMRequest, *, stream: bool) -> dict[str, object]:"
+    },
+    "b692d173346f": {
+      "file": "ports/adapters/llm.py",
+      "line": 66,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "body: dict[str, object] = {"
+    },
+    "a594172ad461": {
+      "file": "ports/adapters/llm.py",
+      "line": 66,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "body: dict[str, object] = {"
+    },
+    "3003347ab257": {
+      "file": "ports/adapters/llm.py",
+      "line": 88,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def _usage_from(self, raw: object) -> Usage:"
+    },
+    "92666712cee8": {
+      "file": "ports/adapters/llm.py",
+      "line": 98,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def _tool_calls_from(self, raw: object) -> list[ToolCall]:"
+    },
+    "a36afc3dce3c": {
+      "file": "ports/adapters/llm.py",
+      "line": 110,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "fn: dict[str, object] = raw_fn if isinstance(raw_fn, dict) else {}"
+    },
+    "a99371db9d3b": {
+      "file": "ports/adapters/llm.py",
+      "line": 110,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "fn: dict[str, object] = raw_fn if isinstance(raw_fn, dict) else {}"
+    },
+    "59d46d778832": {
+      "file": "ports/adapters/llm.py",
+      "line": 111,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "args: object = fn.get(\"arguments\", \"{}\")"
+    },
+    "8ea0c2eb0ee9": {
+      "file": "ports/adapters/llm.py",
+      "line": 114,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "parsed: object = args"
+    },
+    "8a7cb6c8607e": {
+      "file": "ports/adapters/mcp.py",
+      "line": 21,
+      "rule_id": "py.any-annotation",
+      "rule": "注解用 Any",
+      "text": "from typing import Any, Protocol, runtime_checkable"
+    },
+    "2ff3812b2193": {
+      "file": "ports/adapters/mcp.py",
+      "line": 21,
+      "rule_id": "py.any-import",
+      "rule": "typing.Any 导入",
+      "text": "from typing import Any, Protocol, runtime_checkable"
+    },
+    "2f64427c6c53": {
+      "file": "ports/adapters/mcp.py",
+      "line": 220,
+      "rule_id": "py.any-annotation",
+      "rule": "注解用 Any",
+      "text": "async def send(self, message: dict[str, Any]) -> None:"
+    },
+    "da2624ff634d": {
+      "file": "ports/adapters/mcp.py",
+      "line": 220,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "async def send(self, message: dict[str, Any]) -> None:"
+    },
+    "c79ec8e95e6c": {
+      "file": "ports/adapters/mcp.py",
+      "line": 226,
+      "rule_id": "py.any-annotation",
+      "rule": "注解用 Any",
+      "text": "async def recv(self) -> dict[str, Any]:"
+    },
+    "3017af8c437d": {
+      "file": "ports/adapters/mcp.py",
+      "line": 226,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "async def recv(self) -> dict[str, Any]:"
+    },
+    "07d9e1b76a7f": {
+      "file": "ports/adapters/mcp.py",
+      "line": 232,
+      "rule_id": "py.any-annotation",
+      "rule": "注解用 Any",
+      "text": "payload: Any = json.loads(line)"
+    },
+    "4df073f7f373": {
+      "file": "runtime/__init__.py",
+      "line": 20,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "from .runner import InMemoryEventStore, Runner"
+    },
+    "bcfb0c001979": {
+      "file": "runtime/__init__.py",
+      "line": 30,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "\"Interpreter\", \"InterpreterImpl\", \"EffectBatch\", \"Runner\", \"InMemoryEventStore\","
+    },
+    "e6884b3c233c": {
+      "file": "runtime/runner.py",
+      "line": 6,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "依赖注入：call / store / ctx_factory / notify 均可替换；store 未注入时用内存实现，"
+    },
+    "7adb8bd23223": {
+      "file": "runtime/runner.py",
+      "line": 51,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "__all__ = [\"InMemoryEventStore\", \"Runner\"]"
+    },
+    "6a3067a741fc": {
+      "file": "runtime/runner.py",
+      "line": 141,
+      "rule_id": "fake.class",
+      "rule": "fake/内存类名（生产源码禁止）",
+      "text": "class InMemoryEventStore(EventStore):"
+    },
+    "40603bf45756": {
+      "file": "runtime/runner.py",
+      "line": 141,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "class InMemoryEventStore(EventStore):"
+    },
+    "8eeabd3d76cc": {
+      "file": "runtime/runner.py",
+      "line": 205,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "store: checkpoint 存储；缺省用 InMemoryEventStore。"
+    },
+    "b5fdfcfadd29": {
+      "file": "runtime/runner.py",
+      "line": 213,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "self._store = store or InMemoryEventStore()  # 快照存储（缺省内存）"
+    },
+    "29f864c95da8": {
+      "file": "runtime/types.py",
+      "line": 19,
+      "rule_id": "py.any-annotation",
+      "rule": "注解用 Any",
+      "text": "from typing import Any, Protocol, TypedDict, cast"
+    },
+    "0d40508ccacb": {
+      "file": "runtime/types.py",
+      "line": 19,
+      "rule_id": "py.any-import",
+      "rule": "typing.Any 导入",
+      "text": "from typing import Any, Protocol, TypedDict, cast"
+    },
+    "6eeb6f06b79a": {
+      "file": "runtime/types.py",
+      "line": 732,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "`InMemoryEventStore` 在 runner.py 提供，装配期由 `Runner(store=...)` 注入。"
+    },
+    "1bf37b8e4144": {
+      "file": "runtime/types.py",
+      "line": 735,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "路径（step/run/resume）上阻塞事件循环；签名统一 async，内存实现内部无 IO 直接返回。"
+    },
+    "d9476aa06806": {
+      "file": "runtime/types.py",
+      "line": 854,
+      "rule_id": "dual.compat-comment",
+      "rule": "兼容/过渡意图注释（双轨信号）",
+      "text": "\"\"\"从规范化快照还原 AgentState（兼容旧快照：缺字段回退 scratch）。"
+    },
+    "0f33e4e2bf42": {
+      "file": "runtime/types.py",
+      "line": 867,
+      "rule_id": "dual.compat-comment",
+      "rule": "兼容/过渡意图注释（双轨信号）",
+      "text": "\"\"\"读托管字段：优先显式字段，兼容旧快照从 scratch 回退。\"\"\""
+    },
+    "541ba14312c8": {
+      "file": "archs/base.py",
+      "line": 26,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "def join(self, results: list[Any]) -> Any: ..."
+    },
+    "5a043c2bfb09": {
+      "file": "archs/base.py",
+      "line": 26,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `results` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "def join(self, results: list[Any]) -> Any: ..."
+    },
+    "2b5d78c68cab": {
+      "file": "archs/base.py",
+      "line": 119,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "async def recognize(self, text: str, ctx: AgentState) -> IntentResult: ..."
+    },
+    "f658e27e466d": {
+      "file": "archs/base.py",
+      "line": 119,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `ctx` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def recognize(self, text: str, ctx: AgentState) -> IntentResult: ..."
+    },
+    "111363cce13c": {
+      "file": "archs/base.py",
+      "line": 164,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "def static_check(self) -> StaticCheckReport: ..."
+    },
+    "79f1bdfb737c": {
+      "file": "archs/base.py",
+      "line": 165,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "def compile(self) -> Program: ..."
+    },
+    "488d54b7ff08": {
+      "file": "compose/ports.py",
+      "line": 80,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "55ec5e6fa931": {
+      "file": "compose/ports.py",
+      "line": 78,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `ctx` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def complete(self, req: LLMRequest, ctx: PortCtx) -> LLMResponse:"
+    },
+    "ba96205c6770": {
+      "file": "compose/ports.py",
+      "line": 89,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "1c97432d98f3": {
+      "file": "compose/ports.py",
+      "line": 82,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `ctx` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "def stream(self, req: LLMRequest, ctx: PortCtx) -> AsyncIterator[str]:"
+    },
+    "7001067f795b": {
+      "file": "compose/ports.py",
+      "line": 100,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "8b76ea824023": {
+      "file": "compose/ports.py",
+      "line": 98,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `fn` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "def register(self, spec: ToolSpec, fn: Callable[..., DynamicValue]) -> None:"
+    },
+    "bf8fe9030201": {
+      "file": "compose/ports.py",
+      "line": 104,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "6588c289786c": {
+      "file": "compose/ports.py",
+      "line": 102,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `level` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "def catalog(self, level: int = 1) -> list[ToolSpec]:"
+    },
+    "1028eacb8305": {
+      "file": "compose/ports.py",
+      "line": 108,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "4cfc5f25b5f7": {
+      "file": "compose/ports.py",
+      "line": 106,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `ctx` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def call(self, call: ToolCall, ctx: PortCtx) -> ToolResult:"
+    },
+    "2b00a92990b2": {
+      "file": "compose/ports.py",
+      "line": 118,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "2cc243f4c6a3": {
+      "file": "compose/ports.py",
+      "line": 122,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "9b47206bc1a9": {
+      "file": "compose/ports.py",
+      "line": 126,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "cbc36b5e58c7": {
+      "file": "compose/ports.py",
+      "line": 124,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `name` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "def body(self, name: str) -> str:"
+    },
+    "d90b4e0fb184": {
+      "file": "compose/ports.py",
+      "line": 136,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "dcba5d6210e6": {
+      "file": "compose/ports.py",
+      "line": 134,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `ctx` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def ingest(self, documents: list[DynamicValue], ctx: PortCtx) -> int:"
+    },
+    "79fe686b3fdd": {
+      "file": "compose/ports.py",
+      "line": 140,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "b573e89a208b": {
+      "file": "compose/ports.py",
+      "line": 138,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `ctx` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def retrieve(self, query: str, ctx: PortCtx) -> list[DynamicValue]:"
+    },
+    "5c568fcabba4": {
+      "file": "compose/ports.py",
+      "line": 158,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "78361ad7c7b1": {
+      "file": "compose/ports.py",
+      "line": 154,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `names` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "names: list[str],"
+    },
+    "be22415af23b": {
+      "file": "compose/ports.py",
+      "line": 155,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `skills` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "skills: list[SkillManifest],"
+    },
+    "16c0bb2f7e2b": {
+      "file": "compose/ports.py",
+      "line": 172,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "5f04d402a8e5": {
+      "file": "compose/ports.py",
+      "line": 170,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `ctx` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def read(self, namespace: str, key: str, ctx: PortCtx) -> DynamicValue:"
+    },
+    "a4b50f15f81f": {
+      "file": "compose/ports.py",
+      "line": 176,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "4d728722ab47": {
+      "file": "compose/ports.py",
+      "line": 174,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `ctx` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def write(self, namespace: str, key: str, value: DynamicValue, ctx: PortCtx) -> None:"
+    },
+    "1dd6f4a814e2": {
+      "file": "compose/ports.py",
+      "line": 180,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "5da5dad76ed1": {
+      "file": "compose/ports.py",
+      "line": 178,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `ctx` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def forget(self, namespace: str, key: str, ctx: PortCtx) -> None:"
+    },
+    "081e3421e881": {
+      "file": "compose/ports.py",
+      "line": 194,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "6c27a32c02ce": {
+      "file": "compose/ports.py",
+      "line": 192,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `snapshot` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def save(self, session_id: str, snapshot: dict[str, DynamicValue]) -> None:"
+    },
+    "3eb544cd78bf": {
+      "file": "compose/ports.py",
+      "line": 198,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "7be1dcb7e902": {
+      "file": "compose/ports.py",
+      "line": 196,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `session_id` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def load(self, session_id: str) -> dict[str, DynamicValue] | None:"
+    },
+    "3ad6e445e435": {
+      "file": "compose/ports.py",
+      "line": 210,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "beab955e6d4c": {
+      "file": "compose/ports.py",
+      "line": 207,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `ctx` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "self, fn: Callable[..., DynamicValue], args: DynamicValue, ctx: PortCtx,"
+    },
+    "3fe6bd169791": {
+      "file": "compose/ports.py",
+      "line": 224,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "97ba0cbe0f4e": {
+      "file": "compose/ports.py",
+      "line": 222,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `event` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def append(self, event: dict[str, DynamicValue]) -> None:"
+    },
+    "cd42702d7cf0": {
+      "file": "compose/ports.py",
+      "line": 233,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "b87edbd23a3f": {
+      "file": "compose/ports.py",
+      "line": 231,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `ctx` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def record(self, event: dict[str, DynamicValue], ctx: PortCtx) -> None:"
+    },
+    "5d9c437c7451": {
+      "file": "compose/ports.py",
+      "line": 243,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "db7c8b5ff8ef": {
+      "file": "compose/ports.py",
+      "line": 241,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `ctx` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def score(self, case_id: str, output: DynamicValue, ctx: PortCtx) -> float:"
+    },
+    "478f654eb6a0": {
+      "file": "compose/ports.py",
+      "line": 258,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "7c18c97dc7e0": {
+      "file": "compose/ports.py",
+      "line": 256,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `records` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def export(self, records: tuple[DynamicValue, ...]) -> None:"
+    },
+    "f4ae84a146f7": {
+      "file": "compose/ports.py",
+      "line": 272,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "8e4d5febdfbd": {
+      "file": "compose/ports.py",
+      "line": 270,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `ctx` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "def span(self, name: str, ctx: PortCtx) -> AbstractContextManager[DynamicValue]:"
+    },
+    "c98d9094ddad": {
+      "file": "compose/ports.py",
+      "line": 276,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "e11106cc2ef7": {
+      "file": "compose/ports.py",
+      "line": 274,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `tags` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "def metric(self, name: str, value: float, tags: dict[str, DynamicValue] | None = None) -> None:"
+    },
+    "a56ab30e7700": {
+      "file": "compose/ports.py",
+      "line": 280,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "8300e7432241": {
+      "file": "compose/ports.py",
+      "line": 278,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `event` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "def log(self, event: dict[str, DynamicValue]) -> None:"
+    },
+    "9bef1f0eb6aa": {
+      "file": "compose/ports.py",
+      "line": 290,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "ca268d34782b": {
+      "file": "compose/ports.py",
+      "line": 288,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `ctx` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def ask(self, question: str, options: list[str] | None, ctx: PortCtx) -> str:"
+    },
+    "569fc7d5b250": {
+      "file": "compose/ports.py",
+      "line": 300,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "d955ee02cca9": {
+      "file": "compose/ports.py",
+      "line": 298,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `ctx` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def list_tools(self, server: str, ctx: PortCtx) -> list[ToolSpec]:"
+    },
+    "8cd478e57ee4": {
+      "file": "compose/ports.py",
+      "line": 306,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "100738ef821e": {
+      "file": "compose/ports.py",
+      "line": 303,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `ctx` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "self, server: str, tool: str, args: dict[str, DynamicValue], ctx: PortCtx,"
+    },
+    "da221e8f5518": {
+      "file": "compose/ports.py",
+      "line": 320,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "4c24a21963cf": {
+      "file": "compose/ports.py",
+      "line": 318,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `since` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "def subscribe(self, topic: str, since: int | None = None) -> AsyncIterator[DynamicValue]:"
+    },
+    "bb8455b341e1": {
+      "file": "compose/ports.py",
+      "line": 324,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "cf997ff73ffc": {
+      "file": "compose/registry.py",
+      "line": 33,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "def register(self, name: str, provider: Provider) -> object: ..."
+    },
+    "58fff06ece33": {
+      "file": "compose/registry.py",
+      "line": 33,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `provider` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "def register(self, name: str, provider: Provider) -> object: ..."
+    },
+    "9f2e474ed23b": {
+      "file": "compose/registry.py",
+      "line": 35,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "def has(self, name: str) -> bool: ..."
+    },
+    "a1e0cf77fd41": {
+      "file": "compose/registry.py",
+      "line": 35,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `name` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "def has(self, name: str) -> bool: ..."
+    },
+    "ef5109f45a6e": {
+      "file": "compose/registry.py",
+      "line": 62,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "dcddd4f1544e": {
+      "file": "compose/registry.py",
+      "line": 55,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `reg` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "def install(self, container: object, reg: Registry) -> None:"
+    },
+    "ac7678b2e1f0": {
+      "file": "harness/context/assembler.py",
+      "line": 29,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "92c06e5c11cf": {
+      "file": "harness/context/assembler.py",
+      "line": 27,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `budget` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "def assemble(self, sections: list[ContextSection], budget: TokenBudget) -> list[Message]:"
+    },
+    "8a2993cb4a17": {
+      "file": "harness/context/compaction.py",
+      "line": 55,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "70828bb1944e": {
+      "file": "harness/context/compaction.py",
+      "line": 53,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `state` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "def should_compact(self, state: AgentState) -> bool:"
+    },
+    "b1d8e3328f60": {
+      "file": "harness/context/compaction.py",
+      "line": 59,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "cdc9d411fe40": {
+      "file": "harness/context/compaction.py",
+      "line": 57,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `messages` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "def compact(self, messages: tuple[Message, ...]) -> tuple[Message, ...]:"
+    },
+    "ee213a8afef1": {
+      "file": "harness/context/manager.py",
+      "line": 168,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `ctx` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def offload(self, value: object, ctx: PortCtx | None = None) -> str:"
+    },
+    "343dfea00b6c": {
+      "file": "harness/context/offloader.py",
+      "line": 46,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "f0dd36922669": {
+      "file": "harness/context/offloader.py",
+      "line": 44,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `value` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def put(self, value: DynamicValue) -> str:"
+    },
+    "9223efc7d9c9": {
+      "file": "harness/context/offloader.py",
+      "line": 50,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "5fd0621c8c99": {
+      "file": "harness/context/offloader.py",
+      "line": 48,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `handle` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def get(self, handle: str) -> DynamicValue | None:"
+    },
+    "f4d17f01906d": {
+      "file": "harness/context/offloader.py",
+      "line": 54,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "0f31906963b2": {
+      "file": "harness/context/offloader.py",
+      "line": 52,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `handle` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def delete(self, handle: str) -> None:"
+    },
+    "c72ba80b54a2": {
+      "file": "harness/context/offloader.py",
+      "line": 64,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "ae34386ad4c8": {
+      "file": "harness/context/offloader.py",
+      "line": 62,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `store` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def offload(self, value: DynamicValue, store: BlobPort) -> str:"
+    },
+    "d899889fdeb3": {
+      "file": "harness/context/ports.py",
+      "line": 24,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "3dfcbd80fef0": {
+      "file": "harness/context/ports.py",
+      "line": 22,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `ctx` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def recall(self, query: MemoryQuery, ctx: PortCtx) -> list[MemoryItem]:"
+    },
+    "9139b64187f9": {
+      "file": "harness/context/reinjector.py",
+      "line": 40,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "27c249bc7f53": {
+      "file": "harness/context/reinjector.py",
+      "line": 34,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `view` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "view: tuple[Message, ...],"
+    },
+    "3b69c31e1f05": {
+      "file": "harness/context/reinjector.py",
+      "line": 35,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `summary` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "summary: Message | None,"
+    },
+    "f22b0fa8d010": {
+      "file": "harness/context/reinjector.py",
+      "line": 32,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `budget` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "def reinject("
+    },
+    "c147cc502424": {
+      "file": "harness/context/token_counter.py",
+      "line": 21,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "19cd6cfaba04": {
+      "file": "harness/context/token_counter.py",
+      "line": 19,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `text` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "def count(self, text: str) -> int:"
+    },
+    "9ffcc828ba4c": {
+      "file": "harness/memory/memory.py",
+      "line": 143,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `ctx` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def read(self, namespace: str, key: str, ctx: PortCtx) -> DynamicValue:"
+    },
+    "59a4188de5c8": {
+      "file": "harness/memory/memory.py",
+      "line": 148,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `ctx` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "self, namespace: str, key: str, value: DynamicValue, ctx: PortCtx"
+    },
+    "3986b26410f4": {
+      "file": "harness/memory/memory.py",
+      "line": 156,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `ctx` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def forget(self, namespace: str, key: str, ctx: PortCtx) -> None:"
+    },
+    "7161d90cd8bb": {
+      "file": "harness/model/cache.py",
+      "line": 63,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "fc74618bbcce": {
+      "file": "harness/model/cache.py",
+      "line": 61,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `version` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def get(self, request: LLMRequest, *, version: str = \"current\") -> LLMResponse | None:"
+    },
+    "c98a89ecd472": {
+      "file": "harness/model/cache.py",
+      "line": 67,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "ea7cc71187d6": {
+      "file": "harness/model/cache.py",
+      "line": 65,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `version` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def put(self, request: LLMRequest, resp: LLMResponse, *, version: str = \"current\") -> None:"
+    },
+    "e390cc0a1a0e": {
+      "file": "harness/model/cache.py",
+      "line": 71,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "2547098ce5bb": {
+      "file": "harness/model/cache.py",
+      "line": 69,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `version` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def invalidate(self, request: LLMRequest, *, version: str = \"current\") -> None:"
+    },
+    "dc9d68b0d2de": {
+      "file": "harness/model/cache.py",
+      "line": 90,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "f32083b166cb": {
+      "file": "harness/model/cache.py",
+      "line": 88,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `key` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def get(self, key: str) -> str | None:"
+    },
+    "0286bc015fa9": {
+      "file": "harness/model/cache.py",
+      "line": 94,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "5ab135d89681": {
+      "file": "harness/model/cache.py",
+      "line": 92,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `ttl` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def put(self, key: str, value: str, *, ttl: int | None = None) -> None:"
+    },
+    "e05b209d29dc": {
+      "file": "harness/model/cache.py",
+      "line": 98,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "6a723b99f6ed": {
+      "file": "harness/model/cache.py",
+      "line": 96,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `key` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def delete(self, key: str) -> None:"
+    },
+    "ef4830b619c8": {
+      "file": "harness/model/cache.py",
+      "line": 102,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "5a152e91007b": {
+      "file": "harness/model/cache.py",
+      "line": 100,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `prefix` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def scan(self, prefix: str) -> list[tuple[str, str]]:"
+    },
+    "a841bf12c08f": {
+      "file": "harness/model/cache.py",
+      "line": 161,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "2bf7336ec12c": {
+      "file": "harness/model/cache.py",
+      "line": 159,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `text` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def embed(self, text: str) -> tuple[float, ...]:"
+    },
+    "bbab7498613b": {
+      "file": "harness/model/registry.py",
+      "line": 48,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "f7ca84817a71": {
+      "file": "harness/model/registry.py",
+      "line": 41,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `provider` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "self, name: str, provider: Provider | None = None, *,"
+    },
+    "578ad9421989": {
+      "file": "harness/model/registry.py",
+      "line": 42,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `model` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "base_url: str | None = None, api_key: str | None = None, model: str | None = None,"
+    },
+    "ef3f3a965d01": {
+      "file": "harness/model/registry.py",
+      "line": 52,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "691475576c35": {
+      "file": "harness/model/registry.py",
+      "line": 50,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `llm` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "def register_llm(self, name: str, llm: LLMPort) -> None:"
+    },
+    "e3ddf1c4ed8d": {
+      "file": "harness/model/registry.py",
+      "line": 56,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "5d2e6a709ae1": {
+      "file": "harness/model/registry.py",
+      "line": 54,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `name` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "def resolve(self, name: str) -> Provider | ModelEndpoint | None:"
+    },
+    "a7a8b700ffc4": {
+      "file": "harness/model/registry.py",
+      "line": 60,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "e57c2a0deb99": {
+      "file": "harness/model/registry.py",
+      "line": 58,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `name` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "def resolve_llm(self, name: str) -> LLMPort | None:"
+    },
+    "52c85b9dcae0": {
+      "file": "harness/model/registry.py",
+      "line": 64,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "b18c6ec69542": {
+      "file": "harness/model/registry.py",
+      "line": 62,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `provider` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "def register_provider(self, name: str, provider: Provider) -> None:"
+    },
+    "5e8bec4429c1": {
+      "file": "harness/model/registry.py",
+      "line": 68,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "97f3501589b3": {
+      "file": "harness/model/registry.py",
+      "line": 66,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `name` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "def has(self, name: str) -> bool:"
+    },
+    "c6ebd071a643": {
+      "file": "harness/model/router.py",
+      "line": 32,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "03b97c08659a": {
+      "file": "harness/model/router.py",
+      "line": 30,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `ctx` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "def route(self, effect: Effect, ctx: PortCtx) -> RouteDecision:"
+    },
+    "344e99e0d80d": {
+      "file": "harness/model/router.py",
+      "line": 130,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `ctx` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "def route(self, effect: Effect, ctx: PortCtx) -> RouteDecision:"
+    },
+    "1387214d7461": {
+      "file": "harness/model/structured.py",
+      "line": 85,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "8f673d0085d6": {
+      "file": "harness/model/structured.py",
+      "line": 83,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `schema` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "def validate(self, value: object, schema: dict[str, DynamicValue]) -> list[str]:"
+    },
+    "23d83c11c67a": {
+      "file": "harness/rag/embedder.py",
+      "line": 26,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "2c327411a49f": {
+      "file": "harness/rag/embedder.py",
+      "line": 24,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `texts` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def embed(self, texts: list[str]) -> list[Vector]:"
+    },
+    "ba323db39182": {
+      "file": "harness/rag/embedder.py",
+      "line": 37,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "97f1b3215bc3": {
+      "file": "harness/rag/embedder.py",
+      "line": 35,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `texts` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def embed(self, texts: list[str]) -> list[Vector]:"
+    },
+    "8ecc082f7423": {
+      "file": "harness/rag/pipeline.py",
+      "line": 54,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "728080bedb82": {
+      "file": "harness/rag/pipeline.py",
+      "line": 52,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `key` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "def get(self, key: str) -> RAGResult | None:"
+    },
+    "88feeaaaa028": {
+      "file": "harness/rag/pipeline.py",
+      "line": 58,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "b600db54925d": {
+      "file": "harness/rag/pipeline.py",
+      "line": 56,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `value` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "def set(self, key: str, value: RAGResult) -> None:"
+    },
+    "a36e5f3cb8a8": {
+      "file": "harness/rag/post.py",
+      "line": 36,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "910aa6d44a3e": {
+      "file": "harness/rag/post.py",
+      "line": 31,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `hits` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "hits: list[Hit],"
+    },
+    "3cc628abd859": {
+      "file": "harness/rag/post.py",
+      "line": 32,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `detector` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "detector: InjectionDetector | None = None,"
+    },
+    "3ad9bcbdb9e0": {
+      "file": "harness/rag/post.py",
+      "line": 29,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `filters` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def filter("
+    },
+    "6873895cafde": {
+      "file": "harness/rag/post.py",
+      "line": 47,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "f899ba4fa184": {
+      "file": "harness/rag/post.py",
+      "line": 40,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `hits` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "hits: list[Hit],"
+    },
+    "c0251487c19c": {
+      "file": "harness/rag/post.py",
+      "line": 41,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `budget` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "budget: TokenBudget,"
+    },
+    "c2e2b4748fe2": {
+      "file": "harness/rag/post.py",
+      "line": 38,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `filters` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def assemble("
+    },
+    "192a7362250c": {
+      "file": "harness/rag/rerank.py",
+      "line": 23,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "02ea3c372e43": {
+      "file": "harness/rag/rerank.py",
+      "line": 21,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `query` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "def rerank(self, hits: list[Hit], query: Query) -> list[Hit]:"
+    },
+    "cb7498056f21": {
+      "file": "harness/rag/retriever.py",
+      "line": 36,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "5e622217ce15": {
+      "file": "harness/rag/retriever.py",
+      "line": 34,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `vec` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def retrieve(self, query: Query, vec: Vector) -> list[Hit]:"
+    },
+    "37b33a2a8335": {
+      "file": "harness/rag/rewrite.py",
+      "line": 51,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "ee3ab1e50f0f": {
+      "file": "harness/rag/rewrite.py",
+      "line": 49,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `query` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def rewrite(self, query: Query) -> list[Query]:"
+    },
+    "6f54dd3f5fde": {
+      "file": "harness/rag/splitter.py",
+      "line": 28,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "6908dc0b7a96": {
+      "file": "harness/rag/splitter.py",
+      "line": 26,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `doc` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "def split(self, doc: Document) -> list[Chunk]:"
+    },
+    "d818aea5d969": {
+      "file": "harness/rag/store.py",
+      "line": 44,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "be0c439e7549": {
+      "file": "harness/rag/store.py",
+      "line": 42,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `chunks` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def upsert(self, chunks: list[Chunk]) -> None:"
+    },
+    "2da526a2e321": {
+      "file": "harness/rag/store.py",
+      "line": 50,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "0b4e1e52b658": {
+      "file": "harness/rag/store.py",
+      "line": 47,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `filters` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "self, vec: Vector, top_k: int, filters: dict[str, object] | None = None"
+    },
+    "86387193fe86": {
+      "file": "harness/resilience/breaker.py",
+      "line": 28,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "async def load(self, dim: Dimension) -> BreakerState | None: ..."
+    },
+    "616ae805120c": {
+      "file": "harness/resilience/breaker.py",
+      "line": 28,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `dim` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def load(self, dim: Dimension) -> BreakerState | None: ..."
+    },
+    "dedb508537ef": {
+      "file": "harness/resilience/breaker.py",
+      "line": 29,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "async def save(self, dim: Dimension, state: BreakerState) -> None: ..."
+    },
+    "35a52faf543b": {
+      "file": "harness/resilience/breaker.py",
+      "line": 29,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `state` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def save(self, dim: Dimension, state: BreakerState) -> None: ..."
+    },
+    "019050dff95a": {
+      "file": "harness/resilience/defenses.py",
+      "line": 350,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `session_id` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "def is_tripped(self, session_id: str) -> bool:"
+    },
+    "d5d2aefb266a": {
+      "file": "harness/resilience/types.py",
+      "line": 219,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `ctx` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "def classify(self, result: Result, ctx: object) -> FailureClass:"
+    },
+    "db9dad7a59a2": {
+      "file": "harness/skills/provider.py",
+      "line": 53,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "af94f6273d30": {
+      "file": "harness/skills/provider.py",
+      "line": 45,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `text` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "def detect(self, text: str) -> InjectionVerdict:"
+    },
+    "0d9bb7e2d241": {
+      "file": "harness/tools/mcp.py",
+      "line": 48,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "5d70d06686ff": {
+      "file": "harness/tools/mcp.py",
+      "line": 46,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `server` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def list_tools(self, server: str) -> list[ToolSpec]:"
+    },
+    "d007157495d3": {
+      "file": "harness/tools/mcp.py",
+      "line": 54,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "a44504b885d9": {
+      "file": "harness/tools/mcp.py",
+      "line": 51,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `args` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "self, server: str, tool: str, args: dict[str, DynamicValue],"
+    },
+    "8c94844183c8": {
+      "file": "harness/tools/mcp.py",
+      "line": 58,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "e419288f2446": {
+      "file": "harness/tools/mcp.py",
+      "line": 56,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `server` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def ping(self, server: str) -> bool:"
+    },
+    "3d7d319dd47b": {
+      "file": "harness/tools/mcp.py",
+      "line": 83,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `ctx` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def connect(self, server: str, ctx: PortCtx) -> list[ToolSpec]:"
+    },
+    "774652c07e2c": {
+      "file": "harness/tools/mcp.py",
+      "line": 105,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `ctx` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def list_tools(self, server: str, ctx: PortCtx) -> list[ToolSpec]:"
+    },
+    "833194480b87": {
+      "file": "harness/tools/mcp.py",
+      "line": 110,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `ctx` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "self, server: str, tool: str, args: dict[str, DynamicValue], ctx: PortCtx,"
+    },
+    "06b1fb9c180a": {
+      "file": "harness/tools/mcp.py",
+      "line": 115,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `ctx` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def ping(self, server: str, ctx: PortCtx) -> bool:"
+    },
+    "10362d6111d2": {
+      "file": "ports/adapters/llm.py",
+      "line": 129,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `ctx` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def complete(self, req: LLMRequest, ctx: PortCtx) -> LLMResponse:"
+    },
+    "a75b423d69e7": {
+      "file": "ports/adapters/mcp.py",
+      "line": 142,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "8dc50a568c4a": {
+      "file": "ports/adapters/mcp.py",
+      "line": 140,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `message` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def send(self, message: dict[str, DynamicValue]) -> None:"
+    },
+    "386811b0ef65": {
+      "file": "ports/adapters/mcp.py",
+      "line": 146,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "f422bbdedfdd": {
+      "file": "ports/adapters/mcp.py",
+      "line": 150,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "d902c870d446": {
+      "file": "ports/adapters/mcp.py",
+      "line": 159,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "d1f025e1a7b5": {
+      "file": "ports/adapters/mcp.py",
+      "line": 157,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `data` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def write(self, data: bytes) -> None:"
+    },
+    "856de1623db7": {
+      "file": "ports/adapters/mcp.py",
+      "line": 163,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "19458a7f7f9b": {
+      "file": "ports/adapters/mcp.py",
+      "line": 167,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "1c840ff10346": {
+      "file": "ports/adapters/mcp.py",
+      "line": 171,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "08cb4e225d82": {
+      "file": "ports/adapters/mcp.py",
+      "line": 175,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "431d0c1dc3c6": {
+      "file": "ports/adapters/mcp.py",
+      "line": 179,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "74c6a587a696": {
+      "file": "ports/adapters/mcp.py",
+      "line": 278,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `server` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def list_tools(self, server: str) -> list[ToolSpec]:"
+    },
+    "3b7a2058e9a9": {
+      "file": "ports/adapters/mcp.py",
+      "line": 283,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `server` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def call_tool(self, server: str, tool: str, args: dict[str, DynamicValue]) -> DynamicValue:"
+    },
+    "b33d52f53f79": {
+      "file": "ports/adapters/mcp.py",
+      "line": 288,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `server` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def ping(self, server: str) -> bool:"
+    },
+    "d15b8e31a478": {
+      "file": "ports/adapters/mcp.py",
+      "line": 370,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `server` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def list_tools(self, server: str) -> list[ToolSpec]:"
+    },
+    "8934c6f5f5e3": {
+      "file": "ports/adapters/mcp.py",
+      "line": 374,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `server` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def call_tool(self, server: str, tool: str, args: dict[str, DynamicValue]) -> DynamicValue:"
+    },
+    "542803a9ebdf": {
+      "file": "ports/adapters/mcp.py",
+      "line": 378,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `server` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def ping(self, server: str) -> bool:"
+    },
+    "c231edbe9ad6": {
+      "file": "ports/adapters/webfetch.py",
+      "line": 67,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `ctx` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def fetch(self, url: str, ctx: PortCtx) -> str:"
+    },
+    "0c2814bef626": {
+      "file": "runtime/interpreter.py",
+      "line": 62,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "352d03d59151": {
+      "file": "runtime/interpreter.py",
+      "line": 53,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `value` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "def send(self, value: DynamicValue) -> SendResult:"
+    },
+    "3025996d21d5": {
+      "file": "runtime/types.py",
+      "line": 740,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "d8f0b67c735d": {
+      "file": "runtime/types.py",
+      "line": 738,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `snapshot` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def save(self, session_id: str, snapshot: JsonSnapshot) -> None:"
+    },
+    "7279f2e66906": {
+      "file": "runtime/types.py",
+      "line": 744,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "82b06c4c8581": {
+      "file": "runtime/types.py",
+      "line": 742,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `session_id` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def load(self, session_id: str) -> JsonSnapshot | None:"
+    }
+  }
+}

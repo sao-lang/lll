@@ -78,9 +78,9 @@ docs/
 | 5 | [R5 工具·MCP·技能](./02-模块详设/Agent/R5-工具MCP与技能.md) | 统一 ToolRegistry/MCP 合并/技能/三级披露/danger 路由（门禁 r5，已实现） | 开发者 | ✅ 已实现 |
 | 6 | [R6 RAG 检索增强](./02-模块详设/Agent/R6-RAG检索增强.md) | 20 项链路优化/混合检索 RRF/重排/引用溯源（门禁 r6，已实现） | 开发者 | ✅ 已实现 |
 | 7 | [R7 上下文与记忆](./02-模块详设/Agent/R7-上下文与记忆.md) | 组装/压缩/卸载/分层记忆 hot-warm-cold | 开发者 | 📐 定稿 |
-| 8 | [R8 认知与多Agent编排](./02-模块详设/Agent/R8-认知与多Agent编排.md) | 意图/规划/反思/多 Agent 编排（架构详见 R12） | 开发者 | 📐 定稿 |
-| 9 | [R9 安全与HITL](./02-模块详设/Agent/R9-安全与HITL.md) | 护栏/注入防御/沙盒/审计/审批流 | 开发者 | 📐 定稿 |
-| 10 | [R10 可观测评测持久化](./02-模块详设/Agent/R10-可观测评测与持久化.md) | Trace/Metric/事件流/Eval/回放/checkpoint | 开发者 | 📐 定稿 |
+| 8 | [R8 认知与多Agent编排](./02-模块详设/Agent/R8-认知与多Agent编排.md) | 意图/规划/反思/多 Agent 编排（架构详见 R12；门禁 r8 13/13） | 开发者 | ✅ 已实现 |
+| 9 | [R9 安全与HITL](./02-模块详设/Agent/R9-安全与HITL.md) | 护栏/注入防御/沙盒/审计/审批流（门禁 r9 14/14） | 开发者 | ✅ 已实现 |
+| 10 | [R10 可观测评测持久化](./02-模块详设/Agent/R10-可观测评测与持久化.md) | Trace/Metric/事件流/Eval/回放/checkpoint（门禁 r10 16/16） | 开发者 | ✅ 已实现 |
 | 11 | [R11 集成接入与治理](./02-模块详设/Agent/R11-集成接入与治理.md) | 四组 API/三类接入契约/灰度回滚/CLI | 开发者 | 📐 定稿 |
 | 12 | [R12 内置架构与组合](./02-模块详设/Agent/R12-内置架构与组合.md) | **10 内置架构逐个详设**（compile结构/参数/场景/流程图/static_check）+ 10 A 类算子 | 开发者 | 📐 自查补齐 |
 | 13 | [R13 可插拔与协议契约](./02-模块详设/Agent/R13-可插拔与协议契约.md) | **三层插拔+四要素+约30协议目录+两个装配例子** | 开发者 | 📐 自查补齐 |
@@ -135,11 +135,11 @@ AgentState → Program(用户逻辑, generator) → yield Effect
 ## 从旧体系迁移
 
 - 旧文档（Agent框架设计方案 / 大纲 / M1~M11 / Harness H0~H10）已被新体系吸收并删除。
-- **已实现 R1~R6**（runtime / hooks / resilience / model / tools+skills / rag）：门禁 key `r1`~`r6`，测试 `tests/r1`~`tests/r6`，demo `demo_r1`~`demo_r6`。
+- **已实现 R1~R6、R8~R10**（runtime / hooks / resilience / model / tools+skills / rag / cognition / security / observability·eval·durability）：门禁 key `r1`~`r6`、`r8`~`r10`，测试 `tests/r1`~`tests/r6`、`tests/r8`~`tests/r10`，demo `demo_r1`~`demo_r6`、`demo_r8`~`demo_r10`。
 
 ## 流程纪律
 
 每个模块必须**单独闭环**并通过**门禁**才能合入；违反门禁的模块冻结迭代。详见[《门禁体系》](./03-流程与规范/门禁体系.md)。
 
 ---
-*索引版本：v3.4 · 2026-11-21 · 算子核心架构落地（R2 取消、src/compose 为核心）；新增算子与组合架构链路图 + 两份代码阅读指南；待办归并至总设计附录 B.1*
+*索引版本：v3.5 · 2026-11-23 · R8/R9/R10 实现落点同步（状态表 ✅ 已实现，门禁 r8 13/13、r9 14/14、r10 16/16）；沿用 v3.4 算子核心架构口径（R2 取消、src/compose 为核心）；待办归并至总设计附录 B.1*

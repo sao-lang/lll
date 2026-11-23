@@ -22,12 +22,12 @@
     RAGPort          RAGPipeline            R6  src/harness/rag/（待实现）
     MemoryPort       MemoryStore            R7  src/harness/memory/（待实现）
     StorePort        InMemoryStorePort      R7  src/harness/memory/（待实现）
-    SandboxPort      LocalSandbox           R9  src/harness/security/（待实现）
-    AuditPort        AuditLogger            R9  src/harness/security/（待实现）
-    HumanPort        ConsoleHumanPort       R9  src/harness/security/（待实现）
-    EvalPort         RuleEval               R10 src/harness/eval/（待实现）
-    TelemetryPort    NoopTelemetry          R10 src/harness/observability/（待实现）
-    EventStreamPort  InMemoryEventStream    R10 src/harness/observability/（待实现）
+    SandboxPort      LocalSandbox           R9  src/harness/security/ports.py ✅已实现
+    AuditPort        AuditLogger            R9  src/harness/security/ports.py ✅已实现
+    HumanPort        ConsoleHumanPort       R9  src/harness/security/ports.py ✅已实现
+    EvalPort         RuleEval               R10 src/harness/eval/rules.py ✅已实现
+    TelemetryPort    NoopTelemetry          R10 src/harness/observability/ ✅已实现
+    EventStreamPort  InMemoryEventStream    R10 src/harness/observability/ ✅已实现
 
 "待实现"指对应模块尚未开发；装配层（R12/R13）在用户未注入时注册这些默认实例。
 公共 API 见 docs/02-模块详设/Agent/R13-可插拔与协议契约.md。

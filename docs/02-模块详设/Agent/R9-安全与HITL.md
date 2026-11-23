@@ -1,12 +1,12 @@
 # R9：安全与 HITL（security）
 
-> **实现状态**：设计定稿，代码待实现（当前仓库已实现 R1~R4：runtime/hooks/resilience/model；本模块为设计态）。验证矩阵中的 tests/rN/ 为预留路径。
+> **实现状态**：已实现（src/harness/security/；tests/r9；tests/demos/demo_r9.py；门禁 r9 14/14）。
 
 
 > **权威来源**：[《AGENT 总设计》](../../01-总览与设计/AGENT-总设计.md) §R9。本文为模块级拆分详设。
-> 层：L1（横切）· 依赖：R1+R2 · 源码包：`src/harness/security/`（原 M8）· 门禁 key：无（设计态）
+> 层：L1（横切）· 依赖：R1+R2 · 源码包：`src/harness/security/`（原 M8）· 门禁 key：r9
 
-> **⏳ 回头实现清单**：本模块负责 SandboxPort→LocalSandbox、AuditPort→AuditLogger、HumanPort→ConsoleHumanPort 三个默认实现（总设计[附录 B.1.2](../../01-总览与设计/AGENT-总设计.md)）。开发时须落地并勾销。
+> **✅ 回头清单已勾销**：LocalSandbox/AuditLogger/ConsoleHumanPort 三个默认实现已落地 src/harness/security/ports.py（B.1.2 对应行已移 B.1.1）。
 
 ---
 
@@ -17,7 +17,7 @@
 
 ## 2. 设计架构
 
-纵深防御：模型级安全是必要不充分条件，harness 提供独立执行期强制层。每层独立强制，一道护栏（`③ injection_guard` call 装饰器 / ⑥安全组件）的 allow 不能覆盖 deny（取最严格）。核心原则：**工具/检索/网页/技能正文一律不可信**，注入防御在进上下文前由注入检测护栏强制（`before_model` 为 Lifecycle 通知点，只通知不拦截；真正的拦截由 `③ injection_guard` 装饰器 / ⑥安全组件在调用层完成）。审计覆盖全部事件且与事件日志同源可回放。
+纵深防御：模型级安全是必要不充分条件，harness 提供独立执行期强制层。每层独立强制，一道护栏（`③ injection_guard` call 装饰器，位于 `compose/call.py` / ⑥安全组件；R9 Guardrail 复用 `harness.skills.KeywordInjectionDetector` 单检测器）的 allow 不能覆盖 deny（取最严格）。核心原则：**工具/检索/网页/技能正文一律不可信**，注入防御在进上下文前由注入检测护栏强制（`before_model` 为 Lifecycle 通知点，只通知不拦截；真正的拦截由 `③ injection_guard` 装饰器 / ⑥安全组件在调用层完成）。审计覆盖全部事件且与事件日志同源可回放。
 
 ## 3. 流程图
 
@@ -40,7 +40,7 @@ flowchart TD
 ## 4. API 规范（完整接口）
 
 ```python
-# ---- 安全域 DTO（本次补齐：此前 SecurityCtx/SafetyVerdict/SafetyReport 只有名字无结构）----
+# ---- 安全域 DTO（已实现 src/harness/security/types.py）----
 @dataclass(frozen=True, slots=True)
 class SecurityCtx:
     """安全检查上下文：Invocation（组合层）/ Notice（Lifecycle 只读投影）面向安全域的具名投影，避免检测器直接依赖 R2 全量上下文。
@@ -110,7 +110,7 @@ class InjectionDetector(Protocol):
 class SandboxPort(Protocol):
     async def run(self, fn, args, ctx) -> DynamicValue: ...
 class AuditPort(Protocol):
-    def record(self, event: AuditEvent, ctx: PortCtx) -> None: ...
+    async def record(self, event: dict[str, DynamicValue], ctx: PortCtx) -> None: ...  # 依 src/compose/ports.py 签名
 class HumanPort(Protocol):
     async def ask(self, question, options, ctx) -> str: ...
 class ApprovalFlow:
@@ -137,18 +137,18 @@ class ApprovalFlow:
 | 注入点 | 协议 | 默认 | 校验 |
 |--------|------|------|------|
 | 护栏 | Guardrail | 规则库+模型判别 | 命中策略明确 |
-| 注入检测 | InjectionDetector | 规则+启发式 | 不可信输入必过 |
-| 沙盒 | SandboxPort | 进程隔离 | 资源限额/网络白名单 |
-| 审批 | HumanPort | 终端 | 挂起态跨周期有效 |
-| 审计 | AuditPort | 本地日志 | 不可旁路/防篡改 |
+| 注入检测 | InjectionDetector | `KeywordInjectionDetector`（单检测器复用，已实现） | 不可信输入必过 |
+| 沙盒 | SandboxPort | `LocalSandbox`（已实现） | 资源限额/网络白名单 |
+| 审批 | HumanPort | `ConsoleHumanPort`（已实现） | 挂起态跨周期有效 |
+| 审计 | AuditPort | `AuditLogger`（已实现） | 不可旁路/防篡改 |
 
 ## 7. 模块内闭环核对（CL-1~CL-5）
 
 | 条件 | 实现 | 证据 |
 |------|------|------|
-| CL-1 契约自足 | 依赖 R1 types + R2 AOP 增强器/Lifecycle 通知 + 安全协议 | import 扫描 |
+| CL-1 契约自足 | 依赖 R1 types + compose call/notify + 安全协议 | import 扫描 |
 | CL-2 自带 fake | fake SandboxPort/AuditPort/HumanPort | fake 用例 |
-| CL-3 自带测试 | tests/r9/ | 覆盖率报告 |
+| CL-3 自带测试 | tests/r9/（已落地） | 覆盖率报告 |
 | CL-4 独立 demo | `make demo-r9` | demo 冒烟 |
 | CL-5 文档自足 | 本文 + AGENT-总设计对应章节 | 文档评审 |
 
@@ -181,4 +181,23 @@ class ApprovalFlow:
 | R9-红线 | 安全 | secret 进上下文/trace/记忆；CRITICAL 未审批；审计可旁路→拒绝 | 红线 |
 
 ---
-*R9 模块详设 v2.0 · 派生自 AGENT-总设计 · 设计态*
+
+## 11. 实现落点（2026-11-23）
+
+**源码**：
+- `src/harness/security/types.py`：SecurityCtx / SafetyVerdict / SafetyReport / AuditEvent 四个真实 dataclass；SafetyReport 由 `InjectionVerdict` 派生。
+- `src/harness/security/guard.py`：RuleGuardrail + `inspect_untrusted`，复用 `harness.skills.KeywordInjectionDetector` 单检测器（不另立检测器）；`SafetyReport` 由 `InjectionVerdict` 派生。
+- `src/harness/security/ports.py`：LocalSandbox / AuditLogger / ConsoleHumanPort 三个默认实现（B.1.2 对应行已移 B.1.1）。
+- `src/harness/security/approval.py`：ApprovalFlow（trigger_danger / timeout / resume_strategy；timeout → deny）。
+- `src/harness/security/capability.py`：SecurityCapability（注册 sandbox / audit / human 三端口）；ToolsCapability 注入三端口到 ToolRegistry。
+- 审计链：`verify_hash_chain` 可校验 AuditEvent 哈希链。
+- 测试与 demo：`tests/r9/`（含 test_guardrail / sandbox / approval / audit / wiring）、`tests/demos/demo_r9.py`；门禁 r9 14/14。
+
+**四项既定决策（实现已遵循）**：
+1. **确定性默认**：规则护栏 + 默认三端口实现开箱即用，不依赖外部系统。
+2. **单检测器复用**：注入检测统一复用 `harness.skills.KeywordInjectionDetector`，R9 不重复实现检测器。
+3. **R1 EventStore 复用**：审计与事件日志同源可回放，不另建事件日志底座。
+4. **全量落地**：三默认实现 + 审批流 + 能力注册一次性交付，B.1.2 清单已勾销。
+
+---
+*R9 模块详设 v2.1 · 已实现（src/harness/security/，11-23）*

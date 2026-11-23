@@ -6,6 +6,7 @@
 > **配套**：模块详设 `docs/02-模块详设/Agent/`（由本文按 R1~R13 拆分派生，每模块模块内闭环、含 API/字段/门禁）；能力全集见[《能力域全景》](./能力域全景.md)（含自查补齐内容，见附录 B.1 待办清单）。
 > **状态**：设计定稿——**算子核心架构**（依据 `docs/01-总览与设计/组合式工具层重构规格-20261121.md` P1~P9 / D-1~D-10）。R1 一行不改；R2 取消（文档《算子与装配》承接其能力）；组合层 = 算子核心；工具层 R3~R9 可挑选可组合；对外 API 不变。依赖方向恒为 **工具层 → 组合层（算子 + call） → 内核 R1**，R1 零依赖上层。
 > **版本记录**：
+> - 2026-11-23（R8/R9/R10 实现）：R8 认知与多 Agent 编排、R9 安全与 HITL、R10 可观测评测与持久化落地——cognition（四级级联意图 + `intent_as_program` 单入口 + 确定性服务，契约由 `archs/base.py` 单一 re-export）/ security（复用 `KeywordInjectionDetector` 单检测器 + 沙盒/审计/HITL 三默认实现 + 审批流）/ observability·eval·durability（复用 R1 EventStore，R10 不重复声明）；AOP 已删除；11 门禁全绿、pytest 全绿、mypy strict 101 文件干净、source_purity rc=0。本次为文档同步，无代码行为变更。
 > - 2026-11-21（意图识别默认四级级联路由）：意图策略默认实现由单级"规则/LLM 分类"改为**四级级联 `CascadeIntentStrategy`**（L1 关键词→L2 语义/采样库→L3 便宜模型→L4 主模型，逐级置信度阈值短路 + 兜底）；四个部件 `KeywordMatcher`/`IntentSampleStore`/`CheapIntentModel`/`PrimaryIntentModel` 各自可按接口注入，`strategy=` 整体注入则整包替换默认级联（两级注入共存）；修 R12 Router/RouterSkill 裂缝——统一经 `intent_as_program()` 单入口消费 `IntentResult`，不再把 classifier 塞进 prompt 解析。IntentResult 加可选 trace（观察语义，不下沉内核）。同步 R8/R12/R13/总设/能力域全景；纯文档变更无代码改动。
 > - 2026-11-21（R7 D4/D5 新增方案）：R7 上下文管理补两项正交增强——**D4 大 tool 结果落盘而非截断**（`OffloadPolicy` 阈值判定 + BlobPort 句柄，`mode="truncate"` 构造即拒绝，不留兼容层）；**D5 KV cache 命中率一等可观测指标**（`CacheTelemetry` hits/misses/label/hit_rate 挂 `ContextMemoryManager.cache_telemetry` 观测面，可进 R10 trace、无访问 0.0 不产 NaN）。同步 R7 详设 §11.6/§12.5/§4 与总设 §R7。9 个 TDD 测试 + gate r7 15/15，全量绿、R1 零改动。
 > - 2026-11-21（算子核心架构重构）：框架核心由 AOP 五角色容器改为**算子核心**。核心定性——能力（169 项，做什么）与承载形态（7 种，怎么实现）二维分类，"算子"专指 ① 组合算子（`Program → Program`）；A 类算子恰好 10 个（seq/par/branch/race/loop/map_state/map_effect/fallback/gate/retry 流程级），纯函数、状态进 `State.scratch` 的 `x-*`，resume 靠 program_factory 重建；②有状态守卫 + ③call 装饰器取代原 AOP 五角色固定链（③在调用前后驱动②的 check/observe）；④notify 是 R1 既有回调；⑤Port/⑥组件可插拔；⑦内核机制不进算子层。R1 零改动（代价：call 拦不到 Spawn/Suspend/Terminate，靠 notify 观察，D-7）；领域字段净化登记技术债（D-9）；整体替换不留兼容层（D-10），R6 先试点。本次重写总纲 §1.2/§2/§5、R1（加定位节）、R2（《算子与装配》）、R12（10 算子 + 装配期边界）、R13（ToolLayer + Port 归位），R3~R7 按 7 承载形态归位。
@@ -1341,7 +1342,7 @@ class MemoryItem:
 
 ## R8 认知与多 Agent 编排
 
-> 层：L1/L2 · 依赖：R1+R2 · 源码包：`harness/cognition/` + archs/ · 详见 R8 模块详设
+> 层：L1/L2 · 依赖：R1+R2 · 源码包：`harness/cognition/` + archs/（已实现）· 详见 R8 模块详设
 > **注**：10 内置架构与 7 组合算子的逐个详设见 [R12](../02-模块详设/Agent/R12-内置架构与组合.md)；三层可插拔与协议全集见 [R13](../02-模块详设/Agent/R13-可插拔与协议契约.md)。本章仅给认知服务与架构归约。
 
 ### R8.1 职责与边界
@@ -1465,7 +1466,7 @@ seq(a,b); par([...]); branch(fn, arms); race([...]); retry(n,backoff); map_state
 
 ## R9 安全与 HITL
 
-> 层：L1（横切）· 依赖：R1+R2 · 源码包：`harness/security/` · 详见 R9 模块详设
+> 层：L1（横切）· 依赖：R1+R2 · 源码包：`harness/security/`（已实现）· 详见 R9 模块详设
 
 ### R9.1 职责与边界
 
@@ -1547,7 +1548,7 @@ class ApprovalFlow:                                # HITL 审批流
 
 ## R10 可观测·评测·持久化
 
-> 层：L2/L3 · 依赖：R1+R2 · 源码包：`harness/observability/` + eval/ + durability/ · 详见 R10 模块详设
+> 层：L2/L3 · 依赖：R1+R2 · 源码包：`harness/observability/` + eval/ + durability/（已实现）· 详见 R10 模块详设
 
 ### R10.1 职责与边界
 
@@ -1606,9 +1607,7 @@ class EvalPort(Protocol):
 class Judge(Protocol):
     name: str
     async def score(self, case, output: Trace, ctx) -> Score: ...
-class EventStore(Protocol):                           # checkpoint 存储
-    def save(self, session_id: str, snapshot: JsonSnapshot) -> None: ...
-    def load(self, session_id: str) -> JsonSnapshot|None: ...
+# checkpoint 复用 R1 EventStore（唯一声明 src/runtime/types.py），R10 仅消费 + durability 层跨进程后端；replay_events 来自 R1。
 def replay_events(events, initial: AgentState) -> AgentState: ...
 ```
 
@@ -1837,11 +1836,12 @@ decorated = build_call(base, decorators=[retry_call, timeout])      # ③函数�
 | DisclosureIndex | ToolIndex | `src/harness/tools/index.py` | ✅ 已实现（R5，三级披露+预算） |
 | RAGPort | RAGPipeline | `src/harness/rag/pipeline.py` | ✅ 已实现（R6，五段+三增强+横切，履约 ingest/retrieve，2026-11-19 勾销） |
 
-### B.1.2 待实现模块：回头实现清单 ⏳
+### B.1.2 待实现模块：回头实现清单 ⏳（仅余 R7 记忆完整性；R9/R10 六项 2026-11-23 已实现 ✅）
 
 > 下列默认实现**必须**在对应模块开发时落地（四要素②）。协议已在 R2 定齐、归属在此锁定，
 > 模块开发验收时须逐项勾销。**在模块实现前，这些 `...` 是合法的接口占位，不是遗漏。**
 
+> **2026-11-23 勾销（R8/R9/R10 实现完成）**：SandboxPort/AuditPort/HumanPort/EvalPort/TelemetryPort/EventStreamPort 六项默认实现已落地，B.1.2 对应行标记 ✅（B.1.1 口径），证据见 R9/R10 模块详设 §11 实现落点。
 > **2026-11-19 勾销（R6 实现完成，非静默删除）**：原 `RAGPort→RAGPipeline` 行已移入 B.1.1。
 > 证据：`src/harness/rag/pipeline.py` 履约 `ingest(documents,ctx)->int` / `retrieve(query,ctx)->list[DynamicValue]`，
 > `isinstance(p, PORT_PROTOCOLS["rag"])` 经 `tests/r6/test_pipeline.py` 断言；20 项链路五段+三增强+横切落地，
@@ -1851,12 +1851,12 @@ decorated = build_call(base, decorators=[retry_call, timeout])      # ③函数�
 |------|------|---------|------|------|
 | MemoryPort | MemoryStore | R7 记忆 | `src/harness/memory/` | 已实现骨架（2026-11-20）；完整性修订待补双轴七类 + 四链优化（R7 详设 §12） |
 | StorePort | InMemoryStorePort | R7 记忆 | `src/harness/memory/` | 已实现 save/load（短期 checkpoint 用，与 memory 分离） |
-| SandboxPort | LocalSandbox | R9 安全 | `src/harness/security/` | R9 开发时实现 run（进程/容器隔离） |
-| AuditPort | AuditLogger | R9 安全 | `src/harness/security/` | R9 开发时实现 record（不可篡改留痕） |
-| HumanPort | ConsoleHumanPort | R9 HITL | `src/harness/security/` | R9 开发时实现 ask（审批/挂起/resume） |
-| EvalPort | RuleEval | R10 评测 | `src/harness/eval/` | R10 开发时实现 score（golden 集 + LLM-as-judge） |
-| TelemetryPort | NoopTelemetry | R10 可观测 | `src/harness/observability/` | R10 开发时实现 span/metric/log（兼容 OTel） |
-| EventStreamPort | InMemoryEventStream | R10 事件流 | `src/harness/observability/` | R10 开发时实现 subscribe/publish（R10 §4.1 schema） |
+| SandboxPort | LocalSandbox | R9 安全 | `src/harness/security/ports.py` | ✅ 已实现（2026-11-23，B.1.1 口径） |
+| AuditPort | AuditLogger | R9 安全 | `src/harness/security/ports.py` | ✅ 已实现（2026-11-23，B.1.1 口径；`record(dict, ctx)` async + 哈希链） |
+| HumanPort | ConsoleHumanPort | R9 HITL | `src/harness/security/ports.py` | ✅ 已实现（2026-11-23，B.1.1 口径） |
+| EvalPort | RuleEval | R10 评测 | `src/harness/eval/rules.py` | ✅ 已实现（2026-11-23，B.1.1 口径；`score(case_id, output, ctx)->float`） |
+| TelemetryPort | NoopTelemetry | R10 可观测 | `src/harness/observability/` | ✅ 已实现（2026-11-23，B.1.1 口径；span/metric/log） |
+| EventStreamPort | InMemoryEventStream | R10 事件流 | `src/harness/observability/stream.py` | ✅ 已实现（2026-11-23，B.1.1 口径；R10 §4.1 schema） |
 
 **回头实现纪律**：
 1. 每完成一个模块，把 B.1.2 对应行移到 B.1.1，状态改 ✅，并更新 `src/hooks/protocols.py` 模块 docstring 的归属表（两处同步）。
