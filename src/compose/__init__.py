@@ -28,6 +28,7 @@ from .guards import (
     FaultRecord,
     RoutingTarget,
 )
+from .input import bind_input, current_input
 from .program import (
     branch,
     fallback,
@@ -61,6 +62,7 @@ __all__ = [
     # ①A 类算子（Program → Program）
     "seq", "par", "branch", "race", "loop", "map_state", "map_effect",
     "fallback", "gate", "retry",
+    "current_input", "bind_input",
     # call 装饰器 / 装配
     "CallFn", "build_call",
     "retry_call", "timeout", "danger_route", "injection_guard",

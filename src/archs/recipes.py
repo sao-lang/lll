@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import Final, cast
 
 from compose import DangerLevel, ToolSpec
+from compose.input import current_input
 from compose.program import ProgramFn, branch_value, loop_until, map_effect, par, seq
 from harness.cognition import intent_as_program
 from runtime import AgentState, DynamicValue, Effect, Invoke, Program, Spawn, Terminate
@@ -218,8 +219,8 @@ class ReAct:
         决策基于 LLM 回注的 tool_calls（非 AgentState），故用 loop_until（回注值驱动，
         不读 state port，红队 B5）；每轮把 assistant/tool 消息累积进历史，交下一轮 LLM。
         """
-        # 语义门面注入的用户输入（红队 B2）：作为首轮 user 消息，不靠用户在 call 里补。
-        input_text = getattr(self, "input_text", "")
+        # 语义输入（Round2 Blk-3/4）：从 ContextVar 读，每调用链隔离，不用共享实例属性。
+        input_text = current_input()
         messages: list[DynamicValue] = (
             [{"role": "user", "content": input_text}] if input_text else []
         )
