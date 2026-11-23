@@ -489,7 +489,7 @@ def loop_until(
     *,
     done: Callable[[DynamicValue], bool],
     max_rounds: int = 30,
-    reason_fn: Callable[[], str] | None = None,
+    reason_fn: Callable[[bool], str] | None = None,
 ) -> ProgramFn:
     """回注值驱动的循环：每轮把上一步回注值交给 step 生成下一步 Program，done 为真停止。
 
@@ -518,7 +518,8 @@ def loop_until(
                 break
             feedback = out
         # 终态 reason：架构可注入（handoff/graph 的静态条件），缺省沿用收敛/耗尽语义。
-        reason = (reason_fn() if reason_fn is not None
+        # 终态 reason：架构可注入（handoff/graph 的静态或运行期条件），缺省沿用收敛/耗尽。
+        reason = (reason_fn(converged) if reason_fn is not None
                   else ("" if converged else "turns_exhausted"))
         yield Terminate(output=last, reason=reason)
     return program

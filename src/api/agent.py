@@ -1,30 +1,32 @@
 """语义门面 Agent —— 用户只碰 say()/run()，零 message/effect/payload/ctx 暴露。
 
-设计（契约③④；红队 B1/B2/B4）：
+设计（契约③④；独立 review Round1 B1-B4 返修）：
 - 位于 api 层（不改依赖方向：compose 不反向依赖 harness/api）；
-- 内部完成三处胶水：① RuntimeCtx→PortCtx ② ReAct 消息格式归一 ③ usage 搬进 Result.usage；
-- 从注入的 ModelCapability 自动推导 llm dispatch（runtime(call) 不再是用户必填）；
-- 用户输入文本注入架构首轮 messages（不靠用户在 call 里补）。
+- 按 port 分派 call：llm→ModelGateway.dispatch，tool→ToolRegistry（不绕过审批/沙盒/审计）；
+- 履约校验验签名（runtime_checkable 只验成员名不够）；注入的 capability 真 install；
+- say() 在 running loop 中走独立线程（async 部署可用），并提供 async asay()；
+- 用户输入经 input_text 注入架构首轮；say() 只抽 content，不泄漏内部 dict。
 
 compose.Agent 保留为纯装配器（产 Session），本门面是用户默认入口。
 """
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 from typing import Callable, Protocol, cast
 
-from compose import PortCtx, Provider
+from compose import PortCtx, Provider, Registry, ToolSpec
 from runtime import AgentState, Budgets, CallFn, DynamicValue, Effect, Invoke, Program, Result, Session
+
+from .runtime import _tool_call_handler, assemble_runtime
+
+__all__ = ["Agent"]
 
 
 class ArchLike(Protocol):
     """架构门面接受的最小协议：能 compile 成 Program。"""
-    compile: Callable[[], Program]  # 协议属性声明，无占位实现
-
-from .runtime import assemble_runtime
-
-__all__ = ["Agent"]
+    compile: Callable[[], Program]
 
 
 def _normalize_history(msgs: list[dict[str, DynamicValue]]) -> list[dict[str, DynamicValue]]:
@@ -57,8 +59,18 @@ def _normalize_history(msgs: list[dict[str, DynamicValue]]) -> list[dict[str, Dy
     return normalized
 
 
+def _extract_answer(out: DynamicValue) -> str:
+    """从内部产出抽回答文本（不泄漏 message/tool_calls/usage dict，B4）。"""
+    if isinstance(out, dict):
+        content = out.get("content")
+        if content is not None:
+            return str(content)
+        return ""
+    return str(out) if out is not None else ""
+
+
 class Agent:
-    """语义门面：arch + 可注入 capability/策略，say()/run() 直接出结果。
+    """语义门面：arch + 可注入 capability/策略/工具，say()/run() 直接出结果。
 
     用户路径（零胶水）：
         Agent(ReAct(tools)).capability(ModelCapability(llm=...)).say("查天气")
@@ -72,109 +84,154 @@ class Agent:
         self._arch = arch
         self._session_id = session_id
         self._caps: dict[str, Provider] = {}
+        self._tools: list[tuple[ToolSpec, Callable[..., DynamicValue]]] = []
 
     def capability(self, cap: Provider) -> "Agent":
-        """注入能力（按 name 登记）；履约校验在 say() 装配期统一做。"""
+        """注入能力（按 name 登记）；装配期真 install 并注册 Port（B2）。"""
         name = str(getattr(cap, "name", "unknown"))
         self._caps[name] = cap
         return self
 
+    def register_tool(self, name: str, fn: Callable[..., DynamicValue], **kwargs: DynamicValue) -> "Agent":
+        """注册工具到门面（B1：tool port 不再断链）。"""
+        from compose import DangerLevel
+        danger = kwargs.get("danger") or DangerLevel.SAFE  # 门面注册工具默认 SAFE（免 HITL）
+        self._tools.append((
+            ToolSpec(name=name, description=str(kwargs.get("description") or ""),
+                     danger=danger),
+            fn,
+        ))
+        return self
+
     def inject_strategy(self, strategy: Provider) -> "Agent":
-        """注入策略：装配期做履约校验（R13 第四要素），非法实现拒绝。"""
+        """注入策略：签名级履约校验（R13 第四要素，B2）。"""
         from compose.ports import PORT_PROTOCOLS
-        # 语义级校验：策略必须实现至少一个框架协议（runtime_checkable Protocol）。
         matched = [pname for pname, proto in PORT_PROTOCOLS.items()
                    if self._conforms(strategy, proto)]
         if not matched:
             raise TypeError(
-                f"strategy {type(strategy).__name__} 不满足任何框架协议（履约校验失败）")
+                f"strategy {type(strategy).__name__} 不满足任何框架协议签名（履约校验失败）")
         self._caps["strategy"] = strategy
         return self
 
     @staticmethod
     def _conforms(obj: Provider, proto: type) -> bool:
-        """isinstance 履约校验（proto 为 runtime_checkable Protocol）。"""
-        try:
-            return isinstance(obj, proto)
-        except TypeError:
+        """履约校验：isinstance + 逐方法签名兼容（runtime_checkable 只验成员名，不够）。"""
+        if not isinstance(obj, proto):
             return False
+        methods = getattr(proto, "__protocol_attrs__", None) or getattr(proto, "_protocol_attrs", None)
+        if methods is None:
+            methods = tuple(getattr(proto, "__annotations__", {}).keys())
+        for name in methods:
+            expected = getattr(proto, name, None)
+            actual = getattr(obj, name, None)
+            if not callable(expected) or not callable(actual):
+                continue  # 属性型协议成员：isinstance 已验存在
+            try:
+                sig_e = inspect.signature(expected)
+                sig_a = inspect.signature(actual)
+            except (TypeError, ValueError):
+                continue
+            if len(sig_e.parameters) > len(sig_a.parameters):
+                return False  # 参数数量不足（Sneaky 反例）
+        return True
 
-    def _validate_caps(self) -> None:
-        """装配期履约校验：capability 必须有 name/install（Capability 协议最小面）。"""
+    def _install_caps(self, registry: Registry) -> None:
+        """装配期真 install 注入的 capability（B2：注入不再是死对象）。"""
         for name, cap in self._caps.items():
             if name == "strategy":
                 continue
-            if not callable(getattr(cap, "install", None)):
+            install = getattr(cap, "install", None)
+            if not callable(install):
                 raise TypeError(f"capability {name} 无 install()，不满足 Capability 协议")
+            install(self, registry)
 
-    def _derive_llm_call(self) -> CallFn | None:
-        """从注入的 ModelCapability 推导 llm port 的 CallFn（框架内部，用户不写）。"""
+    def _derive_call(self, tool_handler: CallFn) -> CallFn | None:
+        """按 port 分派：llm→gateway dispatch，tool→ToolRegistry（B1：不绕过审批/沙盒/审计）。"""
         cap = self._caps.get("model")
-        if cap is None or not hasattr(cap, "dispatch"):
-            return None  # 无模型能力：走 assemble_runtime 默认（tool only），llm 显式失败
-        dispatch = cast(CallFn, getattr(cap, "dispatch")())  # CallFn
+        dispatch = cast(CallFn | None, getattr(cap, "dispatch", lambda: None)()) if cap else None
+        if dispatch is None:
+            return None
 
-        async def llm_call(effect: Effect, ctx: DynamicValue) -> Result:
+        async def call(effect: Effect, ctx: DynamicValue) -> Result:
+            if isinstance(effect, Invoke) and effect.port == "tool":
+                return await tool_handler(effect, ctx)  # 真走工具四级路由
             if isinstance(effect, Invoke) and effect.port == "llm":
                 pctx = PortCtx(
                     session_id=str(getattr(ctx, "session_id", self._session_id)),
-                    run_id=f"{self._session_id}-run",
+                    run_id=str(getattr(ctx, "run_id", f"{self._session_id}-run")),
                     meta=dict(getattr(ctx, "meta", {}) or {}),
                 )
-                # 框架内部归一化消息 + 注入工具 schema（用户不碰）。
                 raw = list(effect.payload.get("messages") or [])
                 if not raw:
                     raw = [{"role": "user", "content": ""}]
-                clean_effect = Invoke(
-                    port="llm",
-                    payload={
-                        "messages": _normalize_history(raw),
-                        "model": effect.payload.get("model") or "",
-                        "tools": effect.payload.get("tools") or [],
-                    },
-                )
-                result = await dispatch(clean_effect, pctx)
-                # usage 搬进 Result.usage（框架内部搬运，用户不做）：dispatch 的 data 带 usage
+                clean = Invoke(port="llm", payload={
+                    "messages": _normalize_history(raw),
+                    "model": effect.payload.get("model") or "",
+                    "tools": effect.payload.get("tools") or [],
+                })
+                result = await dispatch(clean, pctx)
                 data = result.data
-                usage = data.get("usage") if isinstance(data, dict) else None
-                if usage is not None and getattr(result, "usage", None) is None:
-                    if result.ok:
-                        return Result.success(data, usage)
-                    return Result(False, data, usage, result.error)
-                return result
-            return Result.failure("PORT_MISSING", "no handler for llm port")
+                if isinstance(data, dict):
+                    data = dict(data)
+                    # ToolCall 是 pydantic 对象，ReAct 的 _tool_calls 只认 Mapping → 这里归一为 dict。
+                    raw_calls = data.get("tool_calls") or []
+                    data["tool_calls"] = [
+                        {"name": tc.name, "args": tc.args, "call_id": tc.call_id}
+                        if hasattr(tc, "name") else tc
+                        for tc in raw_calls
+                    ]
+                    usage = data.pop("usage", None)
+                    if usage is not None and getattr(result, "usage", None) is None:
+                        return Result(result.ok, data, usage, result.error)
+                return Result(result.ok, data, result.usage, result.error)
+            return Result.failure("PORT_MISSING", f"facade call skips port {getattr(effect,'port','?')}")
 
-        return cast(CallFn, llm_call)
+        return cast(CallFn, call)
 
-    def _inject_input(self, arch: ArchLike, text: str) -> None:
-        """把用户输入文本注入架构首轮（框架内部，红队 B2）。
+    def _inject_input(self, text: str) -> None:
+        """把用户输入注入架构首轮（ReAct 与自定义架构都能读，B4）。"""
+        setattr(self._arch, "input_text", text)
 
-        ReAct 的 messages 是 compile 闭包局部；通过 arch 的 input_text 属性在 compile 前设置，
-        ReAct.compile 读取它作为首轮 user 消息。
-        """
-        setattr(arch, "input_text", text)
-
-    def _run(self, text: str) -> DynamicValue:
+    async def _arun(self, text: str) -> DynamicValue:
         """内部执行：装配 → Runner.run → 取 output（全程语义级）。"""
-        self._validate_caps()
-        call = self._derive_llm_call()
-        rt = assemble_runtime(call, stream=None) if call is not None else assemble_runtime()
+        # 先建运行期（拿带审计/沙盒的 ToolRegistry），再注入门面工具与 call（B1）
+        rt = assemble_runtime(None, stream=None)
+        assert rt.tools is not None, "运行期必须带工具注册表"
+        for spec, fn in self._tools:
+            rt.tools.register(spec, fn)
+        tool_handler = _tool_call_handler(rt.tools)
+        call = self._derive_call(tool_handler)
+        if call is not None:
+            rt = assemble_runtime(call, stream=None, tools=rt.tools)
+        # 装配期真 install 注入的 capability（B2）：用 compose.Registry（Provider 表）
+        from compose import Registry as ProviderRegistry
+        self._install_caps(ProviderRegistry())
 
-        # 把用户输入注入架构（在 compile 前设置，compile 读取）
-        self._inject_input(self._arch, text)
+        self._inject_input(text)
         session = Session(
             session_id=self._session_id,
             program_factory=self._arch.compile,
             state=AgentState(budgets=Budgets()),
         )
-        result = asyncio.run(rt.runner.run(session))
+        result = await rt.runner.run(session)
         return result.output
 
+    async def asay(self, text: str) -> str:
+        """异步语义入口（async 部署用，B3）。"""
+        return _extract_answer(await self._arun(text))
+
     def say(self, text: str) -> str:
-        """语义入口：说一句话，拿回答复文本（不暴露内部数据）。"""
-        out = self._run(text)
-        return str(out) if out is not None else ""
+        """同步语义入口：running loop 中走独立线程（B3），只返回回答文本（B4）。"""
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(self.asay(text))
+        # 已在事件循环内：独立线程跑，避免 asyncio.run 嵌套崩溃
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(lambda: asyncio.run(self.asay(text))).result()
 
     def run(self, text: str) -> str:
-        """语义入口：say 的同义（红队 S1：say/run 两个语义方法都要有）。"""
+        """语义入口：say 的同义。"""
         return self.say(text)

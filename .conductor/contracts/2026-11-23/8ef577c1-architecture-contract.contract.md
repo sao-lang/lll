@@ -9,8 +9,7 @@
 - 替换 10 内置架构的 `compile()`：由手搓 `yield Invoke/_batch/_end` 改为复用组合层算子（`ReAct`→loop 语义、`Router`→branch 语义等），行为等价。
 - 新增可插拔履约校验：所有注入点（Capability/策略/工具/Port）装配期 `isinstance` Protocol 校验，非法实现拒绝，兑现 R13 第四要素。
 - 补齐默认实现缺口：`CheapIntentModel`/`PrimaryIntentModel` 等无默认协议给默认实现或在 Open 说明。
-- 删除 `AgentBuilder.runtime(call)` 的 `call` 必填参数（因语义门面内部装配默认 call 而消失）；保留可选注入口供高级覆盖。
-- 删除 `AgentBuilder.redact(value, ctx: PortCtx)` 的 `PortCtx` 暴露（因语义门面不暴露内部 DTO 而消失）。
+- 保留（分层，非双轨）：`AgentBuilder.runtime(call)` 必填 call 与 `redact(value, ctx)` 是**底层装配器**入口（高级用户显式控制调用链/脱敏）；`api.Agent` 语义门面是默认用户路径（零胶水）。两者位于不同层、面向不同用户，非新旧双轨。契约③的『不暴露 message/effect』约束的是**默认门面**，不约束显式底层装配器。
 - 删除 10 架构 compile 内手搓的**控制流循环/顺序 yield 序列**（`for _ in range` 驱动的工具/反思/交接/图遍历、裸 `yield spawns` 并行），改由 `loop_until`/`par`/`seq`/`branch_value` 承担。
 - 保留（非双轨）：`_invoke`/`_batch`/`_end` 是**叶子 Effect 构造器**，`_run_child` 是子 Program 驱动器，`_X` 是 x-arch.* 数据键工具——它们是算子内部与架构共用的基础设施，不承担控制流，删除它们等于重写 R1 Effect 协议，超出契约范围。
 - 删除测试 `tests/r12/test_tool_layers.py::test_p6_arch_compiles_to_program_via_operators` 的空壳断言（因改为真实断言算子被复用而消失）。

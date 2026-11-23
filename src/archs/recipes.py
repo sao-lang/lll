@@ -584,7 +584,7 @@ class Handoff:
             return empty()
         role_order = list(self.roles)
         hop: dict[str, DynamicValue] = {"role": role_order[0]}
-        end_reason = "hops_exhausted" if len(role_order) > self.max_hops else ""
+
 
         def _step(_feedback: DynamicValue) -> ProgramFn:
             def one_hop() -> Program:
@@ -609,10 +609,16 @@ class Handoff:
             return one_hop
 
         def _done(_out: DynamicValue) -> bool:
-            return hop["role"] is None
+            if hop["role"] is None:
+                return True
+            return False
+
+        def _hops_reason(converged: bool) -> str:
+            # 自然完成（末位角色交接完）→ 空；轮次耗尽 → hops_exhausted
+            return "" if converged else "hops_exhausted"
 
         return loop_until(_step, done=_done, max_rounds=self.max_hops,
-                          reason_fn=lambda: end_reason)()
+                          reason_fn=_hops_reason)()
 
 
 class Blackboard:
@@ -795,7 +801,7 @@ class Graph:
             return bool(cur["stop"])
 
         return loop_until(_step, done=_done, max_rounds=budget,
-                          reason_fn=lambda: str(cur["reason"]))()
+                          reason_fn=lambda converged: str(cur["reason"]))()
 
     # ---- 内部纯函数（不进公共 API） ----
     def _entry(self) -> str | None:
