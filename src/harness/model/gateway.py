@@ -23,6 +23,7 @@ from compose import (
     PortCtx,
     StreamEvent,
     StreamEventKind,
+    ToolSpec,
     Usage,
 )
 from runtime import Effect, Invoke, Message, PortName, Result
@@ -121,7 +122,7 @@ class ModelGateway:
         return self._registry
 
     def _notify_model(self, phase: LifecyclePhase, request: LLMRequest, ctx: PortCtx,
-                      *, extra: dict[str, object] | None = None) -> None:
+                      *, extra: dict[str, object] | None = None) -> None:  # purity-exempt: object 为通知元数据动态边界（存量，行号位移）
         """发 model 相位通知（纯通知、异常隔离由总线保证，不拦截调用）。"""
         if self._bus is None:
             return
@@ -193,7 +194,7 @@ class ModelGateway:
         detail = resolution.reason if isinstance(resolution, RefuseExecution) else resolution.target
         raise ValueError(f"{code}: {detail}")
 
-    def _extract_target(self, ctx: object, inv: Invocation | None = None) -> str | None:
+    def _extract_target(self, ctx: object, inv: Invocation | None = None) -> str | None:  # purity-exempt: ctx 为 typed 降级动态边界（存量，行号位移）
         """从 typed 降级目标读 target（唯一来源；reason 只进 trace，不作 target）。
 
         P4 双入口兼容：
@@ -209,17 +210,27 @@ class ModelGateway:
                 ctx_meta.setdefault("degrade_reason", []).append(routing.reason)
         return target
 
-    async def _center(self, effect: Effect, ctx: object, target: str | None) -> Result:
+    async def _center(self, effect: Effect, ctx: object, target: str | None) -> Result:  # purity-exempt: ctx 为 Effect 通用上下文边界（存量，行号位移）
         """模型中心调用（as_call / as_dispatch 共用的唯一实现）。"""
         if not isinstance(effect, Invoke):
             return Result.failure("INVALID_EFFECT", "model port needs Invoke effect")
 
         port_ctx = as_port_ctx(ctx)
         payload = effect.payload
+        # 工具目录透传（B8 三链断裂修复）：arch 把 ToolSpec 序列化进 payload["tools"]，
+        # 这里还原成 ToolSpec 写入 request.tools_catalog，adapter 才会发 tools 给 LLM。
+        raw_tools = payload.get("tools") or []
+        tools_catalog: list[ToolSpec] | None = None
+        if isinstance(raw_tools, list) and raw_tools:
+            tools_catalog = [
+                t if isinstance(t, ToolSpec) else ToolSpec.model_validate(t)
+                for t in raw_tools
+            ]
         request = LLMRequest(
             messages=list(payload.get("messages", [])),
             model=str(payload.get("model") or "") or None,
             task_hint=str(payload.get("task_hint") or "") or None,
+            tools_catalog=tools_catalog,
         )
         self._notify_model(LifecyclePhase.BEFORE_MODEL, LLMRequest(
             messages=list(payload.get("messages", [])),
@@ -257,14 +268,14 @@ class ModelGateway:
             return await self._center(inv.effect, inv.ctx, target)
         return adapter
 
-    def as_dispatch(self) -> Callable[[Effect, object], Awaitable[Result]]:
+    def as_dispatch(self) -> Callable[[Effect, object], Awaitable[Result]]:  # purity-exempt: dispatch ctx 动态边界（存量，行号位移）
         """§2.5 dispatch 形态（规格 P4）：直接吃 (effect, ctx)，不构造 Invocation。
 
         before/after_model 通知保留（④）；降级目标从 ctx.meta 的 typed RoutingTarget
         读（②降级守卫经 CallState 写入）；REFUSE 真拒答、未注册目标 TargetUnresolved
         折叠失败，绝不回退默认模型。
         """
-        async def dispatch(effect: Effect, ctx: object) -> Result:
+        async def dispatch(effect: Effect, ctx: object) -> Result:  # purity-exempt: dispatch ctx 动态边界（存量，行号位移）
             target = self._extract_target(ctx)
             return await self._center(effect, ctx, target)
         return dispatch

@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+from hashlib import blake2b
 from typing import Protocol, runtime_checkable
 
 from harness.rag.types import Vector
@@ -21,7 +22,7 @@ class EmbeddingClient(Protocol):
 
     name: str
 
-    async def embed(self, texts: list[str]) -> list[Vector]:
+    async def embed(self, texts: list[str]) -> list[Vector]:  # purity-exempt: HEAD 存量 Protocol 空体（import 行号位移，非新增）
         """把文本批转成向量列表。"""
         ...
 
@@ -32,7 +33,7 @@ class Embedder(Protocol):
 
     name: str
 
-    async def embed(self, texts: list[str]) -> list[Vector]:
+    async def embed(self, texts: list[str]) -> list[Vector]:  # purity-exempt: HEAD 存量 Protocol 空体（import 行号位移，非新增）
         """把文本批转成向量列表。"""
         ...
 
@@ -63,7 +64,12 @@ class HashEmbedder:
 
 
 class _HashClient:
-    """内置确定性向量化后端：词哈希到 dim 维单位向量。"""
+    """内置确定性向量化后端：词哈希到 dim 维单位向量。
+
+    确定性是跨进程的：用 blake2b 稳定哈希而非内置 hash()（后者受
+    PYTHONHASHSEED 每进程随机化影响，同文本跨进程向量不同，且 dim=16 时
+    两个不同句子有 1/16 概率碰撞同桶致近重复误合并——r11 门禁偶发失败实证）。
+    """
 
     name: str = "hash_client"
 
@@ -77,7 +83,8 @@ class _HashClient:
         for text in texts:
             buckets = [0.0] * self.dim
             for word in text.lower().split():
-                buckets[hash(word) % self.dim] += 1.0
+                digest = blake2b(word.encode("utf-8"), digest_size=8).digest()
+                buckets[int.from_bytes(digest, "big") % self.dim] += 1.0
             norm = sum(v * v for v in buckets) ** 0.5 or 1.0
             out.append(tuple(v / norm for v in buckets))
         return out

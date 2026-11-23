@@ -224,7 +224,12 @@ class ReAct:
         messages: list[DynamicValue] = (
             [{"role": "user", "content": input_text}] if input_text else []
         )
-        tools = [t.model_dump() if hasattr(t, "model_dump") else t for t in self.tools]
+        # 工具声明归一：ToolSpec / ToolFn(@tool 产出，取 .spec) / dict 三形态同权，
+        # 用户可直接 ReAct([get_weather]) 注入 @tool 装饰函数。
+        tools = [
+            t.spec if hasattr(t, "spec") else (t.model_dump() if hasattr(t, "model_dump") else t)
+            for t in self.tools
+        ]
 
         def _step(_feedback: DynamicValue) -> ProgramFn:
             """一轮：LLM → （若有 tool_calls）工具 → 累积消息，产出本轮结论或工具结果。"""
@@ -277,10 +282,28 @@ class PlanExecute:
         return _report(self.name, tuple(errs), ("llm",))
 
     def compile(self) -> Program:
-        """PlanExecute = plan → loop_until(步执行 + replan 预算)，由算子承担步循环。"""
+        """PlanExecute = plan → loop_until(步执行 + replan 预算)，由算子承担步循环。
+
+        策略有一等双形态（可插拔的正当能力，非兼容层）：
+        - 决策型：实现 plan()/execute()/replan()，框架真调其方法产 DTO；
+        - 提示词型：仅提供 name/prompt，由 LLM 依据 prompt 决策（LLM-backed 策略）。
+        两种形态都有测试覆盖；注入决策型策略即真生效（B2）。
+        """
         def program() -> Program:
-            steps0 = self._parse_steps((yield _invoke("llm", {"messages": [
-                {"role": "system", "content": getattr(self.planner, "prompt", "plan")}]})))
+            goal = current_input()
+            steps0: list[DynamicValue] = []
+            # 决策型策略：真调 planner.plan()（注入即生效 B2）。
+            if callable(getattr(self.planner, "plan", None)):
+                planned = self.planner.plan(goal)
+                steps0 = [
+                    {"port": "tool", "payload": {"action": s.action, "step_id": s.step_id,
+                                                  "check": s.check}}
+                    for s in planned
+                ]
+            # 提示词型策略：LLM 依据 planner.prompt 决策（未实现 plan 方法的合法形态）。
+            if not steps0:
+                steps0 = self._parse_steps((yield _invoke("llm", {"messages": [
+                    {"role": "system", "content": getattr(self.planner, "prompt", "plan")}]})))
             budget0 = self.max_replans if hasattr(self, "max_replans") else len(steps0) + 1
 
             def _step(ctrl: DynamicValue) -> ProgramFn:
@@ -296,25 +319,51 @@ class PlanExecute:
                                                     "budget": b, "steps": cur})
                             return
                         step_map = _dict(cur[idx])
+                        # 决策型 executor：真调 execute()（注入即生效 B2）。
+                        exec_output = None
+                        if callable(getattr(self.executor, "execute", None)):
+                            from harness.cognition import Step as _Step
+                            payload = _dict(_get(step_map, "payload", {}))
+                            step_obj = _Step(
+                                action=str(_get(payload, "action", "") or _get(payload, "name", "")),
+                                check=str(_get(payload, "check", "")),
+                                step_id=str(_get(payload, "step_id", "")),
+                            )
+                            exec_output = self.executor.execute(step_obj).output
                         out = yield _invoke(str(_get(step_map, "port", "tool")),
                                             _dict(_get(step_map, "payload", {})))
+                        # executor 真产出结果时合并进 out（决策生效，非仅回显）。
+                        if exec_output is not None and isinstance(out, dict):
+                            out = {**out, "executor_output": exec_output}
                         failed = bool(_get(_dict(out), "ok", True) is False
                                       or _get(_dict(out), "error"))
                         if failed and self.replanner is not None and b > 0:
-                            yield _invoke("llm", {"messages": [
-                                {"role": "system",
-                                 "content": getattr(self.replanner, "prompt", "replan")},
-                                {"role": "user",
-                                 "content": {"steps": cur, "failed": cur[idx], "last": out}},
-                            ]})
-                            b -= 1  # replan 结果不入 cur：保持旧列表迭代（与旧 for 等价）
+                            if callable(getattr(self.replanner, "replan", None)):
+                                # 决策型 replanner：真调 replan()，结果替换 cur（B2）。
+                                revised = self.replanner.replan(
+                                    goal, tuple(steps0), (str(_get(_dict(out), "error", "")),))
+                                cur = [{"port": "tool", "payload": {
+                                    "action": s.action, "step_id": s.step_id, "check": s.check}}
+                                    for s in revised]
+                            else:
+                                # 提示词型：LLM 依据 prompt 重规划（原路径）。
+                                yield _invoke("llm", {"messages": [
+                                    {"role": "system",
+                                     "content": getattr(self.replanner, "prompt", "replan")},
+                                    {"role": "user",
+                                     "content": {"steps": cur, "failed": cur[idx], "last": out}},
+                                ]})
+                            b -= 1
                         yield Terminate(output={"idx": idx + 1, "last": out,
                                                 "budget": b, "steps": cur})
                     return gen()
                 return one_round
 
             def _done(out: DynamicValue) -> bool:
-                return isinstance(out, dict) and int(out.get("idx", 0)) >= len(steps0)
+                # replan 会替换 steps 列表，故用本轮回注的 steps 长度动态判断终止。
+                if not isinstance(out, dict):
+                    return False
+                return int(out.get("idx", 0)) >= len(out.get("steps", steps0))
 
             out = yield from _run_child(
                 loop_until(_step, done=_done, max_rounds=max(1, len(steps0) + 1))())
@@ -353,6 +402,7 @@ class Reflection:
     def compile(self) -> Program:
         """Reflection = draft → loop_until(critique→revise)，算子承担反思循环。"""
         def program() -> Program:
+            goal_text = current_input()
             first = _get(_dict((yield _invoke("llm", {"messages": [
                 {"role": "system", "content": "draft"}]}))), "content", "") or ""
 
@@ -361,11 +411,20 @@ class Reflection:
                 draft = str(_get(_dict(best), "best", best)) if isinstance(best, dict) else str(best)
                 def one_round() -> Program:
                     def gen() -> Generator[Effect, DynamicValue, None]:
-                        critique = _dict((yield _invoke("llm", {"messages": [
-                            {"role": "system",
-                             "content": getattr(self.reflector, "prompt", "critique")},
-                            {"role": "user", "content": draft},
-                        ]})))
+                        # 决策型 reflector：真调 critique()（注入即生效 B2）；
+                        # 提示词型：LLM 依据 prompt 评判（原路径）。
+                        if callable(getattr(self.reflector, "critique", None)):
+                            verdict = self.reflector.critique(draft, goal_text)
+                            critique: dict[str, DynamicValue] = {
+                                "passed": verdict.passed, "score": verdict.score,
+                                "comments": verdict.comments,
+                            }
+                        else:
+                            critique = _dict((yield _invoke("llm", {"messages": [
+                                {"role": "system",
+                                 "content": getattr(self.reflector, "prompt", "critique")},
+                                {"role": "user", "content": draft},
+                            ]})))
                         if bool(_get(critique, "passed", False)):
                             yield Terminate(output={"best": draft, "passed": True})
                             return
@@ -414,7 +473,7 @@ class Router:
         """Router = branch_value(意图源, 决策, arms)，由值驱动分支算子承担路由。"""
         def source() -> Program:
             def p() -> Program:
-                raw = yield from _run_child(intent_as_program(self.classifier, text="")())
+                raw = yield from _run_child(intent_as_program(self.classifier, text=current_input())())
                 yield _end(raw)
                 return None
             return p()
@@ -447,7 +506,7 @@ class RouterSkill(Router):
         """RouterSkill = branch_value(路由) + seq(skill.body, downstream)，算子承担路由与顺序。"""
         def source() -> Program:
             def p() -> Program:
-                raw = yield from _run_child(intent_as_program(self.classifier, text="")())
+                raw = yield from _run_child(intent_as_program(self.classifier, text=current_input())())
                 yield _end(raw)
                 return None
             return p()

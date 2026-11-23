@@ -78,9 +78,44 @@ def _first_line(doc: str | None) -> str:
     return stripped.splitlines()[0].strip()
 
 
+_JSON_TYPES: dict[type, str] = {
+    str: "string", int: "integer", float: "number", bool: "boolean",
+    dict: "object", list: "array", tuple: "array", set: "array",
+}
+
+
+def _annotation_schema(annotation: DynamicValue) -> dict[str, DynamicValue]:
+    """把单个 Python 类型注解推导为 JSON Schema 片段（逐参数推导，B8）。
+
+    支持：基础类型、Optional[T]（nullable）、list[T]/dict 泛型、未知类型退回 string。
+    """
+    import types
+    from typing import Union, get_args, get_origin
+
+    origin = get_origin(annotation)
+    args = get_args(annotation)
+    origin_cmp = cast(object, origin)  # purity-exempt: 类型注解推导需与 typing 泛型对象比较，object 是唯一安全公共类型
+    ann_cmp = cast(object, annotation)  # purity-exempt: 同上，注解可能是 type/typing 别名，cast object 做类型判别
+    if origin_cmp is Union or isinstance(origin_cmp, types.UnionType):
+        non_none = [a for a in args if a is not type(None)]
+        if len(non_none) == 1:
+            sub = _annotation_schema(non_none[0])
+            return {**sub, "type": [sub.get("type"), "null"]}
+        return {"type": "string"}
+    if origin_cmp in (list, tuple, set):
+        item = _annotation_schema(args[0]) if args else {}
+        return {"type": "array", "items": item}
+    if origin_cmp is dict:
+        return {"type": "object"}
+    if ann_cmp in _JSON_TYPES and isinstance(ann_cmp, type):
+        return {"type": _JSON_TYPES[ann_cmp]}
+    return {"type": "string"}
+
+
 def tool(
     *,
     name: str | None = None,
+    description: str | None = None,
     danger: DangerLevel,
     sandbox: SandboxPolicy = SandboxPolicy.AUTO,
     timeout: float = 30.0,
@@ -89,7 +124,9 @@ def tool(
     """装饰器工厂：生成带 ToolSpec 的 ToolFn。
 
     参数：
-        name: 工具名；缺省取函数名。danger: 风险等级（必填，决定路由）。
+        name: 工具名；缺省取函数名。
+        description: 一句话描述；缺省取 docstring 首行（显式声明优先）。
+        danger: 风险等级（必填，决定路由）。
         sandbox/timeout/retries: 执行策略声明；仅供装配层读取，ToolSpec 不承载执行策略字段。
     返回：
         接受原函数、返回 ToolFn 的装饰器。
@@ -112,6 +149,7 @@ def tool(
                 # 首参是 BaseModel 子类：schema 由模型生成，校验也交给模型构造。
                 model_cls = annotation
 
+        schema: dict[str, DynamicValue]
         if model_cls is not None:
             schema = model_cls.model_json_schema()
 
@@ -121,18 +159,38 @@ def tool(
 
             fn: Callable[..., DynamicValue] = model_wrapper
         else:
-            schema = {"type": "object", "properties": {}}
+            # 逐参数类型注解 → JSON Schema（B8：city: str 等普通注解也推导）。
+            properties: dict[str, DynamicValue] = {}
+            required: list[str] = []
+            has_var_kwargs = any(
+                p.kind is inspect.Parameter.VAR_KEYWORD for p in params
+            )
+            for p in params:
+                if p.name in ("self", "cls") or p.kind in (
+                    inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD
+                ):
+                    continue
+                hint = hints.get(p.name, p.annotation)
+                if hint is inspect.Parameter.empty:
+                    hint = object  # 无注解 → string 兜底
+                properties[p.name] = _annotation_schema(hint)
+                if p.default is inspect.Parameter.empty:
+                    required.append(p.name)
+            schema = {"type": "object", "properties": properties}
+            if required:
+                schema["required"] = required
+            # 自由 **kwargs 工具：无具名参数时不强加 extra=forbid（透传语义）。
+            if has_var_kwargs and not properties:
+                schema = {"type": "object", "properties": {}}
 
             def plain_wrapper(**kwargs: DynamicValue) -> DynamicValue:
-                # 为何：无参/自由 kwargs 工具不约束字段，透传即可；
-                # registry 层按空 properties 统一做 extra=forbid（见 registry.call）。
                 return original(**kwargs)
 
             fn = plain_wrapper
 
         spec = ToolSpec(
             name=name or meta.__name__,
-            description=_first_line(meta.__doc__),
+            description=description if description is not None else _first_line(meta.__doc__),
             parameters_schema=schema,
             danger=danger,
             source=ToolSource.LOCAL.value,

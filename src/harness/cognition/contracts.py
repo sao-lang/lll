@@ -124,23 +124,26 @@ class PrimaryIntentModel(NamedStrategy, Protocol):
 
 @runtime_checkable
 class Planner(NamedStrategy, Protocol):
-    """规划策略：把目标分解为步骤。"""
-    pass
+    """规划策略：把目标分解为步骤（注入即被调用，非空壳）。"""
+    def plan(self, goal: str, ctx: AgentState | None = None) -> tuple[Step, ...]: ...
 
 
 @runtime_checkable
 class Executor(NamedStrategy, Protocol):
-    """步骤执行策略。"""
-    pass
+    """步骤执行策略：执行单步产出结构化结果。"""
+    def execute(self, step: Step, ctx: AgentState | None = None) -> StepResult: ...
 
 
 @runtime_checkable
 class RePlanner(NamedStrategy, Protocol):
     """重规划策略：失败后产出新步骤。"""
-    pass
+    def replan(
+        self, goal: str, steps: tuple[Step, ...], failures: tuple[str, ...],
+        ctx: AgentState | None = None,
+    ) -> tuple[Step, ...]: ...
 
 
 @runtime_checkable
 class ReflectStrategy(NamedStrategy, Protocol):
-    """反思评判策略。"""
-    pass
+    """反思评判策略：对草稿给出通过判定与评分。"""
+    def critique(self, draft: str, goal: str, ctx: AgentState | None = None) -> Critique: ...

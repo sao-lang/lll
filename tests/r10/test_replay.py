@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 
-from runtime import AgentState, InMemoryEventStore, Result, Terminate, replay_events
+from runtime import AgentState, Budgets, InMemoryEventStore, Result, Terminate, replay_events
 from harness.durability import CheckpointManager, CheckpointSnapshot, replay_snapshot
 
 
@@ -51,8 +51,26 @@ def test_t04_fingerprint_detects_drift() -> None:
 
 
 def test_t04_replay_snapshot() -> None:
-    """replay_snapshot：从快照的 events 重建 State。"""
-    mgr = CheckpointManager()
-    snap = mgr.snapshot("s10", _state("init"), (_event("final"),))
+    """replay_snapshot：从真实落盘快照（plain dict events）重建终态。
+
+    旧版用内存 Ev 对象（带真属性）自证，掩盖了 load() 返回 plain dict 的现实；
+    R1 restore_checkpoint 按 disposition 重建真实 Effect，故这里必须用同构 plain dict。
+    """
+    store = InMemoryEventStore()
+    mgr = CheckpointManager(store=store)
+    real_event = {
+        "seq": 0, "session_id": "s10", "step": 0,
+        "state_snapshot": {
+            "messages": [], "scratch": {}, "version": "0.0.0", "output": None,
+            "budgets": Budgets().__dict__,
+            "last_skill": None, "last_child": None, "last_wait_human": None,
+            "last_step_kinds": [], "last_tokens": 0, "last_reason": "",
+        },
+        "effects": [{"output": "final", "reason": "", "disposition": "terminate"}],
+        "results": [{"ok": True, "data": None, "usage": None, "error": None}],
+        "batched": False, "ts": 0, "cost_usd": 0, "tokens": 0,
+        "status": "done", "reason": "terminated",
+    }
+    snap = mgr.snapshot("s10", _state("init"), (real_event,))  # type: ignore[arg-type]
     final = replay_snapshot(snap)
     assert final.output == "final"

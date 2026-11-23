@@ -17,14 +17,24 @@ from harness.eval import EvalCase, GoldenJudge, RuleEval  # noqa: E402
 from harness.observability import (  # noqa: E402
     EventEnvelope, InMemoryEventStream, NoopTelemetry, TimelineProjection, Trace,
 )
-from runtime import Result, Terminate  # noqa: E402
+from runtime import Budgets  # noqa: E402
 
 
-class _Ev:
-    """回放事件（results 用真实 Result）。"""
-    effects = (Terminate(output="final-answer"),)
-    results = (Result.success(None),)
-    reason = ""
+def _plain_event(output: str) -> dict:
+    """与 R1 JsonSnapshot 同构的 plain dict 事件（真实落盘形态，非内存对象假绿）。"""
+    return {
+        "seq": 0, "session_id": "demo-s10", "step": 0,
+        "state_snapshot": {
+            "messages": [], "scratch": {}, "version": "0.0.0", "output": None,
+            "budgets": Budgets().__dict__, "last_skill": None, "last_child": None,
+            "last_wait_human": None, "last_step_kinds": [], "last_tokens": 0,
+            "last_reason": "",
+        },
+        "effects": [{"output": output, "reason": "", "disposition": "terminate"}],
+        "results": [{"ok": True, "data": None, "usage": None, "error": None}],
+        "batched": False, "ts": 0, "cost_usd": 0, "tokens": 0,
+        "status": "done", "reason": "terminated",
+    }
 
 
 def main() -> None:
@@ -49,7 +59,7 @@ def main() -> None:
 
     mgr = CheckpointManager()
     from runtime import AgentState
-    snap = mgr.snapshot("demo-s10", AgentState(), (_Ev(),))
+    snap = mgr.snapshot("demo-s10", AgentState(), (_plain_event("final-answer"),))  # type: ignore[arg-type]
     print(f"[R10] checkpoint fingerprint={snap.fingerprint}")
     from harness.durability import replay_snapshot
     print(f"[R10] replay output={replay_snapshot(snap).output!r}")

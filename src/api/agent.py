@@ -17,6 +17,7 @@ import asyncio
 import inspect
 import json
 from collections.abc import Awaitable
+from contextvars import ContextVar
 from typing import Callable, Protocol, cast
 
 from compose import (
@@ -66,6 +67,9 @@ def _normalize_history(msgs: list[dict[str, DynamicValue]]) -> list[dict[str, Dy
             normalized.append({"role": role, "content": str(m.get("content") or "")})
     return normalized
 
+
+# 记忆召回上下文（ContextVar 按调用链隔离，并发 say 互不串扰）。
+_memory_context: ContextVar[tuple[str, ...]] = ContextVar("agentkit_memory_context", default=())
 
 _ALLOWED_ANSWER_KEYS = frozenset({"content", "text", "answer", "output"})
 
@@ -187,6 +191,7 @@ class Agent:
         arch: ArchLike,
         *,
         session_id: str = "agent",
+        system: str | None = None,
         stream: InMemoryEventStream | None = None,
         store: EventStore | None = None,
         budgets: Budgets | None = None,
@@ -195,8 +200,10 @@ class Agent:
 
         默认零胶水（不传底座）；可选注入 stream/store/budgets 供可观测场景
         （事件流投影 / 审计同源回放 / 自定义预算）——不改变 say() 语义。
+        system: 一等系统提示，门面在首轮 LLM 调用前置注入（用户无需包装 LLM）。
         """
         self._arch = arch
+        self._system = system
         self._session_id = session_id
         self._stream = stream
         self._store = store
@@ -208,11 +215,30 @@ class Agent:
         self._port_handlers: dict[str, Callable[[Effect, DynamicValue], Awaitable[Result]]] = {}
         self._installed: dict[str, Provider] = {}  # 幂等按对象身份：同名但换对象要重装（Round4 S3）
 
+    @property
+    def stream(self) -> InMemoryEventStream:
+        """可观测事件流底座（一等公开属性）：内置自建，注入则复用注入实例。
+
+        用户目标：agent.stream 直接可读；想外接自己的 sink 时用 use(自己的 sink 能力)。
+        """
+        if self._stream is None:
+            from harness.observability import InMemoryEventStream as _Stream
+            self._stream = _Stream()
+        return self._stream
+
     def capability(self, cap: Provider) -> "Agent":
         """注入能力（按 name 登记）；装配期真 install 进持久 Registry。"""
         name = str(getattr(cap, "name", "unknown"))
         self._caps[name] = cap
         return self
+
+    def use(self, cap: Provider) -> "Agent":
+        """能力插拔的一等 API（用户目标写法）：capability() 的链式别名。
+
+        use() 与 capability() 完全等价——都是真注入、装配期真 install，
+        不是兼容双轨，只是用户-facing 的命名。链式返回 self 支持连续 use()。
+        """
+        return self.capability(cap)
 
     def register_tool(self, name: str, fn: Callable[..., DynamicValue], **kwargs: DynamicValue) -> "Agent":
         """注册工具到门面（tool port 走四级路由）。"""
@@ -348,9 +374,8 @@ class Agent:
 
         return cast(CallFn, call)
 
-    @staticmethod
-    async def _call_llm(effect: Invoke, ctx: DynamicValue, dispatch: CallFn) -> Result:
-        """llm port：ctx 转换 + 消息归一 + ToolCall 归一 + usage 搬运（框架内部）。"""
+    async def _call_llm(self, effect: Invoke, ctx: DynamicValue, dispatch: CallFn) -> Result:
+        """llm port：ctx 转换 + 消息归一 + system 前置 + ToolCall 归一 + usage 搬运（框架内部）。"""
         pctx = PortCtx(
             session_id=str(getattr(ctx, "session_id", "")),
             run_id=str(getattr(ctx, "run_id", "facade-run")),
@@ -359,8 +384,24 @@ class Agent:
         raw = list(effect.payload.get("messages") or [])
         if not raw:
             raw = [{"role": "user", "content": ""}]
+        messages = _normalize_history(raw)
+        # system 一等参数（B9）：门面在首轮前置 system 消息，用户无需包装 LLM。
+        # 已含 system（架构自带或历史回注）时不重复注入。
+        if self._system and not any(m.get("role") == "system" for m in messages):
+            messages = [{"role": "system", "content": self._system}, *messages]
+        # 记忆召回（MemoryCapability 钩子）：把命中记忆拼入 system 段（自动召回，用户零胶水）。
+        recalled = _memory_context.get()
+        if recalled:
+            memory_text = "相关记忆：" + "；".join(recalled)
+            sys_idx = next((i for i, m in enumerate(messages) if m.get("role") == "system"), None)
+            if sys_idx is None:
+                messages = [{"role": "system", "content": memory_text}, *messages]
+            else:
+                m = dict(messages[sys_idx])
+                m["content"] = f"{m.get('content', '')}\n{memory_text}".strip()
+                messages = [*messages[:sys_idx], m, *messages[sys_idx + 1:]]
         clean = Invoke(port="llm", payload={
-            "messages": _normalize_history(raw),
+            "messages": messages,
             "model": effect.payload.get("model") or "",
             "tools": effect.payload.get("tools") or [],
         })
@@ -387,20 +428,39 @@ class Agent:
         都在**同一次装配**中完成——tools/audit/sandbox/store/bus 全同源（Round3 审计断裂修复）。
         """
         self._install_caps()
-        from harness.tools import ToolRegistry
+        from harness.tools import ToolRegistry, clear_pending, pending_tools
         tools_snapshot = list(self._tools)
         facade = self
 
         def tool_setup(registry: ToolRegistry) -> None:
+            # @tool 一份声明三处消费：pending 的 ToolFn（spec+fn）自动注册进执行链，
+            # 用户无需再 register_tool。同名时以显式 register_tool 为准（去重不冲突）。
+            pending = pending_tools()
+            registered: set[str] = set()
+            for tool_fn in pending:
+                registry.register(tool_fn.spec, tool_fn)
+                registered.add(tool_fn.spec.name)
+            if pending:
+                clear_pending()  # 已注册即消费，避免跨 say 重复累积
             for spec, fn in tools_snapshot:
+                if spec.name in registered:
+                    continue
                 registry.register(spec, fn)
 
         def call_factory(tool_handler: CallFn) -> CallFn:
             return facade._derive_call(tool_handler)
 
+        # 注入即生效（B5）：门面注入的 SecurityCapability 必须真进执行链。
+        # 不传时 assemble_runtime 默认 new 一个，导致用户注入的 sandbox/human/audit
+        # 被静默替换——这是"看起来注入成功、实际没生效"的死注入根因。
+        from harness.security import SecurityCapability
+        sec_cap = self._caps.get("security")
+        security = sec_cap if isinstance(sec_cap, SecurityCapability) else None
+
         rt = assemble_runtime(None,
                               stream=self._stream,
                               store=self._store,
+                              security=security,
                               tool_setup=tool_setup, call_factory=call_factory)
         self.runtime = rt
         session = Session(
@@ -413,9 +473,28 @@ class Agent:
         return result.output
 
     async def asay(self, text: str) -> str:
-        """异步语义入口：输入经 ContextVar 按调用链绑定（并发安全）。"""
+        """异步语义入口：输入经 ContextVar 按调用链绑定（并发安全）。
+
+        MemoryCapability 注入后自动 recall（before）与写回（after）——用户在钩子里
+        得到记忆能力，无需手写 memory.write/recall/ingest。
+        """
+        from harness.context import MemoryCapability
+        mem_cap = next(
+            (c for c in self._caps.values() if isinstance(c, MemoryCapability)), None)
+        ctx = PortCtx(session_id=self._session_id, run_id="facade-run")
         with bind_input(text):
-            return _extract_answer(await self._arun())
+            if mem_cap is not None:
+                recalled = await mem_cap.recall_before(text, ctx)
+                token = _memory_context.set(recalled)
+                try:
+                    answer = _extract_answer(await self._arun())
+                finally:
+                    _memory_context.reset(token)
+            else:
+                answer = _extract_answer(await self._arun())
+        if mem_cap is not None:
+            mem_cap.write_after(text, answer, ctx)
+        return answer
 
     def say(self, text: str) -> str:
         """同步语义入口：running loop 中走独立线程，只返回白名单文本。"""

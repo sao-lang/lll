@@ -152,8 +152,14 @@ class MemoryStore:
             raise ValueError(f"secret key rejected: {key}")
         self._scan_value(value, key)
         self._kv[(namespace, key)] = value
+        # write 与 recall 必须同一通道（B7）：只写 _kv 会让按标准 MemoryPort.write
+        # 写入的记忆永远召不回（recall 只读 _items）。同步 ingest 进召回链；
+        # 非字符串值转文本，namespace/key 作为来源标识便于溯源。
+        text = value if isinstance(value, str) else str(value)
+        if text.strip():
+            self.ingest(text, ctx, source=f"write:{namespace}/{key}")
 
-    async def forget(self, namespace: str, key: str, ctx: PortCtx) -> None:
+    async def forget(self, namespace: str, key: str, ctx: PortCtx) -> None:  # purity-exempt: MemoryPort 统一签名要求 ctx；KV 遗忘不依赖 scope
         """遗忘指定键值；不存在幂等。"""
         self._kv.pop((namespace, key), None)
 

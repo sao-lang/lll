@@ -18,9 +18,9 @@ from runtime import (
     EventStore,
     InMemoryEventStore,
     JsonSnapshot,
+    restore_checkpoint,
     replay_events,
 )
-from runtime.types import revive
 
 __all__ = ["CheckpointSnapshot", "CheckpointManager", "replay_snapshot"]
 
@@ -119,11 +119,22 @@ class CheckpointManager:
 
 
 def replay_snapshot(snap: CheckpointSnapshot) -> AgentState:
-    """从快照的 events 回放终态（复用 R1 replay_events，不重造 fold）。
+    """从快照的 events 回放终态（复用 R1 restore_checkpoint，不重造 fold）。
 
-    events 在 CheckpointManager.load() 里是 R1 JsonSnapshot 还原的 plain dict，
-    R1 replay_events 读 `event.effects` 属性会崩。这里用 R1 的 revive() 把 dict
-    递归还原为可属性访问的 Replayed 代理——复活在 R10 适配层做，R1 零改动。
+    load() 返回的 events 是 R1 JsonSnapshot 里的 plain dict。R1 的 revive() 只产
+    Replayed(dict) 代理，isinstance(effect, Invoke/Terminate) 判断全失效，导致
+    fold 静默丢状态（output=None、messages=()）。唯一正确的还原边界是 R1 的
+    restore_checkpoint：它按 disposition 用 _effect_from_plain 重建真实 Effect、
+    用 restore_state 还原状态，fold 的类型判断才成立。R1 零改动，本层只做 DTO→JsonSnapshot 组装。
     """
-    revived = tuple(revive(e) for e in snap.events)
-    return replay_events(revived, snap.state)
+    # 回放起点用 load() 保留的初始态（scratch）；终态由 events 重建。
+    # state 段复用 _to_json_snapshot 的规范化口径（AgentState → R1 StateSnapshot）。
+    from runtime import Program
+
+    def _empty_program() -> Program:  # pragma: no cover - 回放不驱动 Program
+        return (lambda: None)  # type: ignore[return-value]
+
+    jsonsnap: JsonSnapshot = _to_json_snapshot(snap)
+    restored = restore_checkpoint(jsonsnap, _empty_program)
+    # restore_checkpoint 只重建 Event（含真实 Effect）+ 初始态；终态需 R1 replay fold。
+    return replay_events(restored.events, restored.state)

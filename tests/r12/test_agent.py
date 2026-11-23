@@ -76,8 +76,9 @@ def test_agent_rejects_static_errors() -> None:
         Agent(bad).build()
 
 
-def test_agent_port_injection_zero_change_upstream() -> None:
-    """rag/memory/telemetry/event_stream 注入后 build 不受影响（换实现上层零改）。"""
-    agent = (Agent(_Arch("x"))
-             .rag(object()).memory(object()).telemetry(object()).event_stream(object()))
+def test_agent_dead_injection_fields_removed() -> None:
+    """死注入字段删除（体检 B1）：rag/memory/telemetry/event_stream 从不进 build，已删。"""
+    agent = Agent(_Arch("x"))
+    for dead in ("rag", "memory", "telemetry", "event_stream"):
+        assert not hasattr(agent, dead), f"死注入方法 {dead} 应删除"
     assert agent.build().program_factory() is not None

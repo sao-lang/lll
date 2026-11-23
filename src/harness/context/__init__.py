@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from .assembler import ContextAssembler, DefaultContextAssembler, SYSTEM_SECTION_NAME
+from .capability import MemoryCapability
 from .compaction import CompactionPolicy, DefaultCompactionPolicy, count_tokens
 from .manager import ContextMemoryManager
 from .observability import CacheTelemetry
@@ -13,7 +14,7 @@ from .offloader import (
     BLOB_HANDLE_SCHEME,
     BlobPort,
     DefaultOffloader,
-    InMemoryBlobStore,
+    InMemoryBlobStore,  # purity-exempt: 生产内存 blob 后端（存量，行号位移），非测试替身
     Offloader,
     make_handle,
     parse_handle,
@@ -52,11 +53,11 @@ __all__ = [
     "MemoryScope",
     "ScopeResolver",
     "make_item_id",
-    "ContextMemoryManager",
+    "ContextMemoryManager", "MemoryCapability",
     "CacheTelemetry", "OffloadPolicy", "DEFAULT_OFFLOAD_THRESHOLD",
     "BlobPort",
     "Offloader",
-    "InMemoryBlobStore",
+    "InMemoryBlobStore",  # purity-exempt: 生产默认后端导出名（存量，行号位移）
     "DefaultOffloader",
     "BLOB_HANDLE_SCHEME",
     "make_handle",

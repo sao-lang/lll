@@ -22,15 +22,11 @@ type _ArchLike = object  # Arch 协议或 Callable[[], Program]，由 runtime_ch
 
 __all__ = ["Agent"]
 
-type _Port = object
-type _Stream = object
-
-
 class Agent:
-    """用户装配器：arch + capability + 可选 Port/流，build 产 Session。
+    """底层装配器：arch + capability，build 产 Session。
 
-    链式 API 对应 R12 §4：capability/rag/memory/telemetry/event_stream/build。
-    所有注入只登记到内部 Registry 或持有引用，不在此实现任何具体能力。
+    能力经 capability() 真 install 进 Registry（build 携带）；RAG/记忆/可观测/事件流
+    一律走 api.Agent 的 use(Capability) + 钩子注入，本装配器不设死注入字段。
     """
     name = "agent"
     version = "12.0.0"
@@ -43,38 +39,10 @@ class Agent:
         """
         self._arch = arch
         self._reg = Registry()
-        self._overrides: dict[str, _Port] = {}
-        self._rag: _Port | None = None
-        self._memory: _Port | None = None
-        self._telemetry: _Port | None = None
-        self._stream: _Stream | None = None
 
     def capability(self, cap: Capability) -> "Agent":
         """装一个能力（install 注册其 Port 到共用 Registry）。"""
         cap.install(self, self._reg)
-        return self
-
-    def rag(self, pipeline: _Port) -> "Agent":
-        """注入 RAG pipeline（实例级覆盖）。"""
-        self._rag = pipeline
-        return self
-
-    def memory(self, port: _Port) -> "Agent":
-        """注入 MemoryPort。"""
-        self._memory = port
-        self._overrides["memory"] = port
-        return self
-
-    def telemetry(self, port: _Port) -> "Agent":
-        """注入 TelemetryPort。"""
-        self._telemetry = port
-        self._overrides["telemetry"] = port
-        return self
-
-    def event_stream(self, stream: _Stream) -> "Agent":
-        """注入事件流（订阅端）。"""
-        self._stream = stream
-        self._overrides["event_stream"] = stream
         return self
 
     def registry(self) -> Registry:
