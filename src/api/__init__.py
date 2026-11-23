@@ -11,6 +11,8 @@ from .stream import StreamGateway
 from .static_api import static_check_api
 from .governance import KillSwitch, CostLimiter, Rollout, FeatureFlags, Governance
 from .builder import AgentBuilder
+from .agent import Agent
+from . import dsl
 from .cli import CLI, CLIResult
 from .runtime import AgentRuntime, assemble_runtime, capability_tools
 from .wiring import (
@@ -24,7 +26,7 @@ __all__ = [
     "PortRegistry", "PROTOCOL_NAMES",
     "StreamGateway", "static_check_api",
     "KillSwitch", "CostLimiter", "Rollout", "FeatureFlags", "Governance",
-    "AgentBuilder", "CLI", "CLIResult",
+    "AgentBuilder", "Agent", "dsl", "CLI", "CLIResult",
     "AgentRuntime", "assemble_runtime", "capability_tools",
     "ApprovingHumanPort", "VerifyingAuditPort", "CheckpointEventStore",
     "R1AuditEventSink", "replay_audit_events",

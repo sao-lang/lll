@@ -483,3 +483,78 @@ def retry(p: ProgramFn, *, attempts: int = 3, backoff: float = 0.0) -> ProgramFn
             )
         yield Terminate(output=out)
     return program
+
+def loop_until(
+    step: Callable[[DynamicValue], ProgramFn],
+    *,
+    done: Callable[[DynamicValue], bool],
+    max_rounds: int = 30,
+    reason_fn: Callable[[], str] | None = None,
+) -> ProgramFn:
+    """回注值驱动的循环：每轮把上一步回注值交给 step 生成下一步 Program，done 为真停止。
+
+    与 loop 的区别：loop 读 `port="state"`（拿 AgentState），本算子只读 port 回注的
+    Result.data——ReAct 的 tool_calls 决策就在这上面，不需要 state port（真实 Runner
+    无该 port，红队 B5）。纯函数：step/done 都是外部注入的纯 callable，本算子不持进度。
+
+    Args:
+        step: 上一步回注值 → 下一轮 Program 工厂（纯）。
+        done: 回注值 → 是否结束（纯）。
+        max_rounds: 防御上限；真实约束仍由 R1 Budgets 兜底。
+
+    Returns:
+        新 Program（不改 step/done）。
+    """
+    def program() -> Generator[Effect, AgentState, None]:
+        feedback: DynamicValue = None
+        last: DynamicValue = None
+        state = AgentState()
+        converged = False
+        for _ in range(max(1, max_rounds)):
+            out, state = yield from _run_child(step(feedback), state)
+            last = out
+            if done(out):
+                converged = True
+                break
+            feedback = out
+        # 终态 reason：架构可注入（handoff/graph 的静态条件），缺省沿用收敛/耗尽语义。
+        reason = (reason_fn() if reason_fn is not None
+                  else ("" if converged else "turns_exhausted"))
+        yield Terminate(output=last, reason=reason)
+    return program
+
+
+def branch_value(
+    source: ProgramFn,
+    fn: Callable[[DynamicValue], str],
+    arms: dict[str, ProgramFn],
+    *,
+    default: str = "",
+    no_route_reason: str = "no_route",
+) -> ProgramFn:
+    """值驱动分支：从 source 的 Terminate.output 取值选 arm（不经 state port）。
+
+    与 branch 的区别：branch 首 yield Invoke(port="state") 读 AgentState（真实 Runner
+    无此 port）；本算子从 source Program 的回注值决策——Router 的 IntentResult 即此类。
+    纯函数：fn 外部注入、arms 不改。
+
+    Args:
+        source: 产生决策值的 Program 工厂。
+        fn: 决策值 → arm key 的纯函数。
+        arms: key → Program 工厂。
+        default: 无匹配时的兜底 key。
+        no_route_reason: 无 arm 时的 Terminate.reason。
+
+    Returns:
+        新 Program（不改 source/arms）。
+    """
+    def program() -> Generator[Effect, AgentState, None]:
+        raw, state = yield from _run_child(source, AgentState())
+        key = fn(raw)
+        target = arms.get(key) or arms.get(default)
+        if target is None:
+            yield Terminate(output=None, reason=no_route_reason)
+            return
+        out, _ = yield from _run_child(target, state)
+        yield Terminate(output=out)
+    return program

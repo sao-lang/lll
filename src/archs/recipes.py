@@ -18,10 +18,10 @@ from __future__ import annotations
 
 from collections.abc import Callable, Generator, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, cast
 
 from compose import DangerLevel, ToolSpec
-from compose.program import ProgramFn
+from compose.program import ProgramFn, branch_value, loop_until, map_effect, par, seq
 from harness.cognition import intent_as_program
 from runtime import AgentState, DynamicValue, Effect, Invoke, Program, Spawn, Terminate
 
@@ -156,25 +156,40 @@ class ToolUse:
         return _report(self.name, tuple(errs), ("tool",))
 
     def compile(self) -> Program:
-        def program() -> Program:
-            calls = [{"name": t.name, "call": {"call_id": t.name, "name": t.name, "args": {}}}
-                     for t in self.tools]
-            if not calls:
+        """ToolUse = par(并行工具) / reduce(seq, 串行工具)，由组合算子承担控制流。"""
+        from functools import reduce
+
+        calls = [{"name": t.name, "call": {"call_id": t.name, "name": t.name, "args": {}}}
+                 for t in self.tools]
+        if not calls:
+            def empty() -> Program:
                 yield _end([], "tool_all_failed")
-                return
-            if self.parallel:
-                # 一次 batch Invoke，解释器展开为多个独立 tool Effect；回填 list[data]。
-                results = yield _batch("tool", calls)
-                yield _end(list(results) if isinstance(results, list) else [results])
-            else:
-                # 串行：逐个调用，收集每次回填的 data。
-                results_list: list[DynamicValue] = []
-                for call in calls:
+                return None
+            return empty()
+
+        if self.parallel:
+            def one(call: DynamicValue) -> ProgramFn:
+                def child() -> Program:
+                    def gen() -> Generator[Effect, DynamicValue, None]:
+                        data = yield _invoke("tool", {"call": call})
+                        yield Terminate(output=data)
+                    return gen()
+                return child
+            # par 真实承担并行：子 Invoke 汇成列表一次 yield → R1 列表并行 → 按槽回注 → join 聚合。
+            return par([one(c) for c in calls], join="all")()
+
+        results_list: list[DynamicValue] = []
+
+        def serial(call: DynamicValue) -> ProgramFn:
+            def child() -> Program:
+                def gen() -> Generator[Effect, DynamicValue, None]:
                     data = yield _invoke("tool", call)
                     results_list.append(data)
-                yield _end(results_list)
-            return None
-        return program()
+                    yield Terminate(output=list(results_list))
+                return gen()
+            return child
+        # seq 真实承担串行：reduce 成链，上一个 child 的 Terminate 被拦截后才启动下一个。
+        return reduce(seq, [serial(c) for c in calls])()
 
 
 class ReAct:
@@ -198,35 +213,51 @@ class ReAct:
         return _report(self.name, tuple(errs), ("llm", "tool"), {"turns": self.max_turns})
 
     def compile(self) -> Program:
-        def program() -> Program:
-            messages: list[DynamicValue] = []
-            payload: dict[str, DynamicValue] = {
-                "messages": messages,
-                "tools": [t.model_dump() if hasattr(t, "model_dump") else t for t in self.tools],
-            }
-            if self.llm is not None:
-                payload["model"] = self.llm
-            for _ in range(self.max_turns):  # 防御上限；真实轮次约束由 R1 Budgets.turns 兜底
-                llm_out = yield _invoke("llm", payload)
-                assistant = _dict(llm_out)
-                calls = _tool_calls(llm_out)
-                # 把本轮 assistant 消息追加进 messages，下一轮带上完整历史。
-                messages.append({"role": "assistant", "content": _get(assistant, "content", ""),
-                                 "tool_calls": calls})
-                payload["messages"] = list(messages)
-                if not calls:
-                    yield _end(_get(assistant, "content"))
-                    return
-                # 批量调工具，回填 list[data]；作为 tool 消息注入历史。
-                tool_results = yield _batch("tool", calls)
-                results = tool_results if isinstance(tool_results, list) else [tool_results]
-                for call, data in zip(calls, results):
-                    messages.append({"role": "tool", "name": _get(call, "name", ""),
-                                     "content": data})
-                    payload["messages"] = list(messages)
-            yield _end(messages[-1] if messages else None, "turns_exhausted")
-            return None
-        return program()
+        """ReAct = loop_until(llm→tools 步) + map_effect(消息累积)，由组合算子封装。
+
+        决策基于 LLM 回注的 tool_calls（非 AgentState），故用 loop_until（回注值驱动，
+        不读 state port，红队 B5）；每轮把 assistant/tool 消息累积进历史，交下一轮 LLM。
+        """
+        # 语义门面注入的用户输入（红队 B2）：作为首轮 user 消息，不靠用户在 call 里补。
+        input_text = getattr(self, "input_text", "")
+        messages: list[DynamicValue] = (
+            [{"role": "user", "content": input_text}] if input_text else []
+        )
+        tools = [t.model_dump() if hasattr(t, "model_dump") else t for t in self.tools]
+
+        def _step(_feedback: DynamicValue) -> ProgramFn:
+            """一轮：LLM → （若有 tool_calls）工具 → 累积消息，产出本轮结论或工具结果。"""
+            def one_round() -> Program:
+                def program() -> Program:
+                    payload: dict[str, DynamicValue] = {
+                        "messages": [dict(m) for m in messages], "tools": tools,
+                    }
+                    if self.llm is not None:
+                        payload["model"] = self.llm
+                    llm_out = yield _invoke("llm", payload)
+                    assistant = _dict(llm_out)
+                    calls = _tool_calls(llm_out)
+                    messages.append({"role": "assistant",
+                                     "content": _get(assistant, "content", ""),
+                                     "tool_calls": calls})
+                    if not calls:
+                        yield _end(_get(assistant, "content"))
+                        return
+                    tool_results = yield _batch("tool", calls)
+                    results = tool_results if isinstance(tool_results, list) else [tool_results]
+                    for call, data in zip(calls, results):
+                        messages.append({"role": "tool", "name": _get(call, "name", ""),
+                                         "content": data})
+                    yield _end({"tool_results": results, "calls": calls})
+                return program()
+            return one_round
+
+        def _done(out: DynamicValue) -> bool:
+            """无 tool_calls 即收敛：结论轮返回的 dict 不带 calls 键。"""
+            return not (isinstance(out, dict) and out.get("calls"))
+
+        # seq 真实复用：首轮 step 由 loop_until 驱动，seq 保证终态 Terminate 语义。
+        return loop_until(_step, done=_done, max_rounds=self.max_turns)()
 
 
 class PlanExecute:
@@ -245,29 +276,50 @@ class PlanExecute:
         return _report(self.name, tuple(errs), ("llm",))
 
     def compile(self) -> Program:
+        """PlanExecute = plan → loop_until(步执行 + replan 预算)，由算子承担步循环。"""
         def program() -> Program:
-            # 规划：LLM 产出步骤（约定回注 {"steps": [...]} 或 {"content": ...}）。
-            plan_out = yield _invoke("llm", {"messages": [
-                {"role": "system", "content": getattr(self.planner, "prompt", "plan")}]})
-            steps = self._parse_steps(plan_out)
-            last: DynamicValue = None
-            replan_budget = self.max_replans if hasattr(self, "max_replans") else len(steps) + 1
-            for step in steps:
-                # 执行：按步骤构造 tool/llm 调用（约定 step={"port","payload"}）。
-                step_map = _dict(step)
-                port = str(_get(step_map, "port", "tool"))
-                payload = _dict(_get(step_map, "payload", {}))
-                out = yield _invoke(port, payload)
-                last = out
-                failed = bool(_get(_dict(out), "ok", True) is False or _get(_dict(out), "error"))
-                if failed and self.replanner is not None and replan_budget > 0:
-                    replan_out = yield _invoke("llm", {"messages": [
-                        {"role": "system", "content": getattr(self.replanner, "prompt", "replan")},
-                        {"role": "user", "content": {"steps": steps, "failed": step, "last": out}},
-                    ]})
-                    steps = self._parse_steps(replan_out)
-                    replan_budget -= 1
-            yield _end(last, "replan_exhausted" if replan_budget <= 0 else "")
+            steps0 = self._parse_steps((yield _invoke("llm", {"messages": [
+                {"role": "system", "content": getattr(self.planner, "prompt", "plan")}]})))
+            budget0 = self.max_replans if hasattr(self, "max_replans") else len(steps0) + 1
+
+            def _step(ctrl: DynamicValue) -> ProgramFn:
+                def one_round() -> Program:
+                    def gen() -> Generator[Effect, DynamicValue, None]:
+                        if isinstance(ctrl, dict):
+                            idx = int(ctrl.get("idx", 0)); last = ctrl.get("last")
+                            b = int(ctrl.get("budget", budget0)); cur = ctrl.get("steps", steps0)
+                        else:
+                            idx, last, b, cur = 0, None, budget0, steps0
+                        if idx >= len(cur):
+                            yield Terminate(output={"idx": idx, "last": last,
+                                                    "budget": b, "steps": cur})
+                            return
+                        step_map = _dict(cur[idx])
+                        out = yield _invoke(str(_get(step_map, "port", "tool")),
+                                            _dict(_get(step_map, "payload", {})))
+                        failed = bool(_get(_dict(out), "ok", True) is False
+                                      or _get(_dict(out), "error"))
+                        if failed and self.replanner is not None and b > 0:
+                            yield _invoke("llm", {"messages": [
+                                {"role": "system",
+                                 "content": getattr(self.replanner, "prompt", "replan")},
+                                {"role": "user",
+                                 "content": {"steps": cur, "failed": cur[idx], "last": out}},
+                            ]})
+                            b -= 1  # replan 结果不入 cur：保持旧列表迭代（与旧 for 等价）
+                        yield Terminate(output={"idx": idx + 1, "last": out,
+                                                "budget": b, "steps": cur})
+                    return gen()
+                return one_round
+
+            def _done(out: DynamicValue) -> bool:
+                return isinstance(out, dict) and int(out.get("idx", 0)) >= len(steps0)
+
+            out = yield from _run_child(
+                loop_until(_step, done=_done, max_rounds=max(1, len(steps0) + 1))())
+            ctrl = out if isinstance(out, dict) else {}
+            yield _end(ctrl.get("last"),
+                       "replan_exhausted" if int(ctrl.get("budget", 1)) <= 0 else "")
             return None
         return program()
 
@@ -298,28 +350,43 @@ class Reflection:
         return _report(self.name, tuple(errs), ("llm",), {"rounds": self.max_rounds})
 
     def compile(self) -> Program:
+        """Reflection = draft → loop_until(critique→revise)，算子承担反思循环。"""
         def program() -> Program:
-            # 起草：LLM 产出 draft 文本。
-            draft_out = yield _invoke("llm", {"messages": [
-                {"role": "system", "content": "draft"}]})
-            best = _get(_dict(draft_out), "content", "") or ""
-            for _ in range(self.max_rounds):  # 防御上限；真实轮次由 R1 Budgets.rounds 兜底
-                # 反思：reflector 产 critique（约定 {"passed":bool,"comments":...}）。
-                critique_out = yield _invoke("llm", {"messages": [
-                    {"role": "system", "content": getattr(self.reflector, "prompt", "critique")},
-                    {"role": "user", "content": best},
-                ]})
-                critique = _dict(critique_out)
-                if bool(_get(critique, "passed", False)):
-                    yield _end(best)
-                    return
-                # 修订：按 critique 改进 draft。
-                revise_out = yield _invoke("llm", {"messages": [
-                    {"role": "system", "content": "revise"},
-                    {"role": "user", "content": {"draft": best, "critique": critique}},
-                ]})
-                best = _get(_dict(revise_out), "content", best) or best
-            yield _end(best, "rounds_exhausted")
+            first = _get(_dict((yield _invoke("llm", {"messages": [
+                {"role": "system", "content": "draft"}]}))), "content", "") or ""
+
+            def _step(best: DynamicValue) -> ProgramFn:
+                # feedback 是上一轮产出 dict，取其中的 best 草稿文本（避免 dict 嵌套）。
+                draft = str(_get(_dict(best), "best", best)) if isinstance(best, dict) else str(best)
+                def one_round() -> Program:
+                    def gen() -> Generator[Effect, DynamicValue, None]:
+                        critique = _dict((yield _invoke("llm", {"messages": [
+                            {"role": "system",
+                             "content": getattr(self.reflector, "prompt", "critique")},
+                            {"role": "user", "content": draft},
+                        ]})))
+                        if bool(_get(critique, "passed", False)):
+                            yield Terminate(output={"best": draft, "passed": True})
+                            return
+                        revise_out = yield _invoke("llm", {"messages": [
+                            {"role": "system", "content": "revise"},
+                            {"role": "user", "content": {"draft": best, "critique": critique}},
+                        ]})
+                        yield Terminate(output={
+                            "best": _get(_dict(revise_out), "content", draft) or draft,
+                            "passed": False,
+                        })
+                    return gen()
+                return one_round
+
+            def _done(out: DynamicValue) -> bool:
+                return isinstance(out, dict) and bool(out.get("passed", False))
+
+            result = yield from _run_child(
+                loop_until(_step, done=_done, max_rounds=self.max_rounds)())
+            ctrl = result if isinstance(result, dict) else {}
+            yield _end(ctrl.get("best", first),
+                       "" if bool(ctrl.get("passed", False)) else "rounds_exhausted")
             return None
         return program()
 
@@ -343,29 +410,26 @@ class Router:
         return _report(self.name, tuple(errs), ("llm",))
 
     def compile(self) -> Program:
-        def program() -> Program:
-            # 裂缝修复（D-级联-1）：统一经 intent_as_program 单入口消费意图，
-            # 级联/单级/整体替换三种策略对 Router 一致；不再内联 recognize 解析。
-            # _run_child 拦截桥接器的 Terminate，取 output dict 归一为 IntentResult。
-            raw = yield from _run_child(intent_as_program(self.classifier, text="")())
-            if isinstance(raw, IntentResult):
-                intent = raw
-            else:
-                data = _dict(raw)
-                intent = IntentResult(label=str(_get(data, "label", "")),
-                                      confidence=float(_get(data, "confidence", 0.0)))
-            label, conf = intent.label, intent.confidence
-            target = label if conf >= self.min_confidence and label in self.arms else self.default
-            if target is None:
-                yield _end(None, "no_route")
-                return
-            arm = self.arms[target]
-            # arm 可是 Arch/任意带 compile() 的对象，或直接是 ProgramFn。
-            factory: ProgramFn = arm.compile if hasattr(arm, "compile") else arm  # type: ignore[assignment]
-            out = yield from _run_child(factory())
-            yield _end(out)
-            return None
-        return program()
+        """Router = branch_value(意图源, 决策, arms)，由值驱动分支算子承担路由。"""
+        def source() -> Program:
+            def p() -> Program:
+                raw = yield from _run_child(intent_as_program(self.classifier, text="")())
+                yield _end(raw)
+                return None
+            return p()
+
+        def key(raw: DynamicValue) -> str:
+            intent = raw if isinstance(raw, IntentResult) else IntentResult(
+                label=str(_get(_dict(raw), "label", "")),
+                confidence=float(_get(_dict(raw), "confidence", 0.0)))
+            return (intent.label if intent.confidence >= self.min_confidence
+                    and intent.label in self.arms else str(self.default or ""))
+
+        arms: dict[str, ProgramFn] = {
+            k: cast(ProgramFn, v.compile if hasattr(v, "compile") else v)
+            for k, v in self.arms.items()
+        }
+        return branch_value(source, key, arms, no_route_reason="no_route")()
 
 
 class RouterSkill(Router):
@@ -379,39 +443,59 @@ class RouterSkill(Router):
         super().__init__(classifier, routes, default=default)
 
     def compile(self) -> Program:
-        def program() -> Program:
-            # 裂缝修复（D-级联-1）：与 Router 同，统一经 intent_as_program 单入口。
-            raw = yield from _run_child(intent_as_program(self.classifier, text="")())
-            if isinstance(raw, IntentResult):
-                intent = raw
-            else:
-                data = _dict(raw)
-                intent = IntentResult(label=str(_get(data, "label", "")),
-                                      confidence=float(_get(data, "confidence", 0.0)))
-            route = self.arms.get(intent.label) or self.arms.get(self.default or "")
-            if route is None:
-                yield _end(None, "no_route")
-                return
-            # SkillSpec：先加载技能正文（R5 SkillPort 履约），再执行下游。
-            if isinstance(route, SkillSpec):
-                yield _invoke("skill", {"name": route.name, "part": "body"})
-                downstream = getattr(route, "downstream", None)
-                if downstream is not None:
-                    factory = downstream.compile if isinstance(downstream, Arch) else downstream
-                    out = yield from _run_child(factory())
+        """RouterSkill = branch_value(路由) + seq(skill.body, downstream)，算子承担路由与顺序。"""
+        def source() -> Program:
+            def p() -> Program:
+                raw = yield from _run_child(intent_as_program(self.classifier, text="")())
+                yield _end(raw)
+                return None
+            return p()
+
+        def key(raw: DynamicValue) -> str:
+            intent = raw if isinstance(raw, IntentResult) else IntentResult(
+                label=str(_get(_dict(raw), "label", "")),
+                confidence=float(_get(_dict(raw), "confidence", 0.0)))
+            if intent.confidence < self.min_confidence or intent.label not in self.arms:
+                return str(self.default or "")
+            return intent.label
+
+        def arm_program(route: DynamicValue, intent_label: str) -> ProgramFn:
+            def p() -> Program:
+                def program() -> Program:
+                    if isinstance(route, SkillSpec):
+                        def load_body() -> Program:
+                            def g() -> Program:
+                                yield _invoke("skill", {"name": route.name, "part": "body"})
+                                yield Terminate(output=None)
+                                return None
+                            return g()
+                        downstream = getattr(route, "downstream", None)
+                        if downstream is not None:
+                            def run_down() -> Program:
+                                def g() -> Program:
+                                    factory = (downstream.compile
+                                               if isinstance(downstream, Arch) else downstream)
+                                    out = yield from _run_child(factory())
+                                    yield Terminate(output=out)
+                                    return None
+                                return g()
+                            # seq 真实承担「加载技能正文 → 执行下游」顺序
+                            out = yield from _run_child(seq(load_body, run_down)())
+                            yield _end(out)
+                            return None
+                        yield _end(_get(_dict(route), "name", intent_label))
+                        return None
+                    if isinstance(route, Arch):
+                        out = yield from _run_child(route.compile())
+                    else:
+                        out = yield from _run_child(cast(ProgramFn, route)())
                     yield _end(out)
-                    return
-            elif isinstance(route, Arch):
-                out = yield from _run_child(route.compile())
-                yield _end(out)
-                return
-            else:  # ProgramFn
-                out = yield from _run_child(route())
-                yield _end(out)
-                return
-            yield _end(_get(_dict(route), "name", intent.label))
-            return None
-        return program()
+                    return None
+                return program()
+            return p
+
+        arms = {k: arm_program(v, k) for k, v in self.arms.items()}
+        return branch_value(source, key, arms, no_route_reason="no_route")()
 
 
 class Supervisor:
@@ -436,20 +520,28 @@ class Supervisor:
         return _report(self.name, tuple(errs), ("llm",), {"parallel_children": self.max_children})
 
     def compile(self) -> Program:
+        """Supervisor = par(子 Agent 扇出) + join 聚合，par 承担并行批与按槽回注。"""
+        def spawned(task: DynamicValue) -> ProgramFn:
+            factory = self._child_factory(task)
+            def child() -> Program:
+                def program() -> Program:
+                    out = yield Spawn(program_factory=factory)
+                    yield Terminate(output=out)
+                    return None
+                return program()
+            return child
+
         def program() -> Program:
-            # 拆分任务：LLM 产出 {"tasks": [...]}。
             split_out = yield _invoke("llm", {"messages": [
                 {"role": "system", "content": getattr(self.planner, "prompt", "split")}]})
             tasks = _get(_dict(split_out), "tasks", []) or []
-            tasks = tasks[:self.max_children]  # 并发上限（Budgets.parallel_children 再校验）
+            tasks = tasks[:self.max_children]
             if not tasks:
                 yield _end([], "join_timeout")
                 return
-            # 并行 Spawn 子 Agent：每个子 Program 由 child_spec 构造。
-            spawns = [Spawn(program_factory=self._child_factory(t)) for t in tasks]
-            results = yield spawns  # type: ignore[misc]  # 解释器支持 yield list[Effect]（并行声明），回填 list[data]
-            values = results if isinstance(results, list) else [results]
-            yield _end(self.join.join(list(values)))
+            # par 真实承担 fan-out：子 Spawn 汇成列表一次 yield → R1 并行 → 按槽回注 → 聚合。
+            outs = yield from _run_child(par([spawned(t) for t in tasks], join="all")())
+            yield _end(self.join.join(list(outs)))
             return None
         return program()
 
@@ -484,35 +576,43 @@ class Handoff:
         return _report(self.name, tuple(errs), ("llm",), {"hops": self.max_hops})
 
     def compile(self) -> Program:
-        def program() -> Program:
-            if not self.roles:
+        """Handoff = loop_until(单跳角色)，算子承担跳数循环与接力决策。"""
+        if not self.roles:
+            def empty() -> Program:
                 yield _end(None, "no_route")
-                return
-            role_order = list(self.roles)             # 声明顺序即默认接力顺序
-            role = role_order[0]                       # 起始角色
-            last: DynamicValue = None
-            for _ in range(self.max_hops):  # 防御上限；真实跳数由 R1 Budgets.hops 兜底
-                role_program = self.roles[role]
-                if isinstance(role_program, Arch):
-                    out = yield from _run_child(role_program.compile())
-                elif callable(role_program):
-                    out = yield from _run_child(role_program())
-                else:
-                    # 非 Program 值（如占位对象/角色名）：发一个具名 Invoke 表示交接到达该角色。
-                    out = yield _invoke("llm", {"name": role})
-                last = out
-                # 交接目标从回注读（x-arch.handoff.role / handoff）；无显式目标则按声明顺序接力。
-                nxt = _get(_dict(out), _X.of("handoff", "role")) or _get(_dict(out), "handoff")
-                if nxt is not None and str(nxt) in self.roles:
-                    role = str(nxt)
-                else:
-                    pos = role_order.index(role)
-                    if pos + 1 >= len(role_order):     # 已是末位角色：交接完成
-                        break
-                    role = role_order[pos + 1]
-            yield _end(last, "hops_exhausted" if len(role_order) > self.max_hops else "")
-            return None
-        return program()
+                return None
+            return empty()
+        role_order = list(self.roles)
+        hop: dict[str, DynamicValue] = {"role": role_order[0]}
+        end_reason = "hops_exhausted" if len(role_order) > self.max_hops else ""
+
+        def _step(_feedback: DynamicValue) -> ProgramFn:
+            def one_hop() -> Program:
+                def program() -> Program:
+                    role = str(hop["role"])
+                    rp = self.roles[role]
+                    if isinstance(rp, Arch):
+                        out = yield from _run_child(rp.compile())
+                    elif callable(rp):
+                        out = yield from _run_child(rp())
+                    else:
+                        out = yield _invoke("llm", {"name": role})
+                    nxt = _get(_dict(out), _X.of("handoff", "role")) or _get(_dict(out), "handoff")
+                    if nxt is not None and str(nxt) in self.roles:
+                        hop["role"] = str(nxt)
+                    else:
+                        pos = role_order.index(role)
+                        hop["role"] = role_order[pos + 1] if pos + 1 < len(role_order) else None
+                    yield Terminate(output=out)
+                    return None
+                return program()
+            return one_hop
+
+        def _done(_out: DynamicValue) -> bool:
+            return hop["role"] is None
+
+        return loop_until(_step, done=_done, max_rounds=self.max_hops,
+                          reason_fn=lambda: end_reason)()
 
 
 class Blackboard:
@@ -538,24 +638,42 @@ class Blackboard:
         return _report(self.name, tuple(errs), ("llm",), {"rounds": self.rounds})
 
     def compile(self) -> Program:
-        def program() -> Program:
-            board: dict[str, DynamicValue] = {}
-            for _ in range(self.rounds):  # 防御上限；真实轮次由 R1 Budgets.rounds 兜底
-                # 并行派发子 Agent（每个 agent 一个 Spawn），传当前 board。
-                spawns = [Spawn(program_factory=self._bb_agent(a, board)) for a in self.agents]
-                results = yield spawns  # type: ignore[misc]  # 解释器支持 yield list[Effect]（并行声明）
-                values = results if isinstance(results, list) else [results]
-                # 合并各 agent 的写入（约定回注 {"writes": {...}}）；冲突键按首个胜出仲裁。
-                for value in values:
-                    writes = _dict(_get(_dict(value), "writes", {}))
-                    for key, val in writes.items():
-                        board.setdefault(key, val)
-                board[_X.of("bb", "round")] = int(board.get(_X.of("bb", "round"), 0)) + 1
-            board[_X.of("bb", "board")] = dict(board)
-            yield _end(board)
-            return None
-        return program()
+        """Blackboard = loop_until(轮次) + par(多代理并行派发)，算子承担并行与循环。"""
+        rk = _X.of("bb", "round")
+        bk = _X.of("bb", "board")
 
+        def spawn_arm(agent: Arch, board: Mapping[str, DynamicValue]) -> ProgramFn:
+            def arm() -> Program:
+                def program() -> Program:
+                    result = yield Spawn(program_factory=self._bb_agent(agent, board))
+                    yield Terminate(output=result)
+                    return None
+                return program()
+            return arm
+
+        def _step(feedback: DynamicValue) -> ProgramFn:
+            def one_round() -> Program:
+                def program() -> Program:
+                    board = dict(feedback) if isinstance(feedback, Mapping) else {}
+                    merged = yield from _run_child(
+                        par([spawn_arm(a, board) for a in self.agents], join="all")())
+                    new_board: dict[str, DynamicValue] = dict(board)
+                    # 首写胜出：par 按 agents 声明序保序 → setdefault 即首个胜出仲裁。
+                    for value in (merged if isinstance(merged, list) else [merged]):
+                        writes = _dict(_get(_dict(value), "writes", {}))
+                        for key, val in writes.items():
+                            new_board.setdefault(key, val)
+                    new_board[rk] = int(new_board.get(rk, 0)) + 1
+                    new_board[bk] = dict(new_board)
+                    yield Terminate(output=new_board)
+                    return None
+                return program()
+            return one_round
+
+        def _done(out: DynamicValue) -> bool:
+            return int(_dict(out).get(rk, 0)) >= self.rounds
+
+        return loop_until(_step, done=_done, max_rounds=self.rounds)()
     def _bb_agent(self, agent: Arch, board: Mapping[str, DynamicValue]) -> ProgramFn:
         """按单个 agent 与共享 board 构造子 Program 工厂。"""
         def child() -> Program:
@@ -636,31 +754,48 @@ class Graph:
         return _report(self.name, tuple(errs), ("llm",))
 
     def compile(self) -> Program:
-        def program() -> Program:
-            entry = self._entry()
-            exit_id = next(iter(self._exits)) if self._exits else None
-            if entry is None or exit_id is None:
+        """Graph = loop_until(节点遍历)，算子承担图行走循环与环检测。"""
+        entry = self._entry()
+        exit_id = next(iter(self._exits)) if self._exits else None
+        if entry is None or exit_id is None:
+            def invalid() -> Program:
                 yield _end(None, "graph_invalid")
-                return
-            cur: str | None = entry
-            visited: set[str] = set()
-            state_out: DynamicValue = None
-            for _ in range(max(1, len(self._nodes) + len(self._edges))):  # 防御上限（static_check 已拦截环）
-                if cur is None or cur in visited or cur not in self._nodes:
-                    yield _end(None, "cycle" if cur in visited else "graph_invalid")
-                    return
-                visited.add(cur)
-                # 执行当前节点；exit 节点也执行一次（单节点图 entry==exit 时保证节点被跑）。
-                state_out = yield from _run_child(self._nodes[cur]())
-                if cur == exit_id:
-                    break
-                nxt = self._next(cur, _dict(state_out))
-                if nxt is None or nxt not in self._nodes:
-                    break
-                cur = nxt
-            yield _end(state_out)
-            return None
-        return program()
+                return None
+            return invalid()
+
+        cur: dict[str, DynamicValue] = {"id": entry, "reason": "", "stop": False}
+        visited: set[str] = set()
+        budget = max(1, len(self._nodes) + len(self._edges))
+
+        def _step(_feedback: DynamicValue) -> ProgramFn:
+            def one_node() -> Program:
+                def program() -> Program:
+                    node = cur["id"]
+                    if node is None or node in visited or node not in self._nodes:
+                        cur["reason"] = "cycle" if node in visited else "graph_invalid"
+                        cur["stop"] = True
+                        yield Terminate(output=None)
+                        return None
+                    visited.add(node)
+                    out = yield from _run_child(self._nodes[str(node)]())
+                    if node == exit_id:
+                        cur["stop"] = True
+                    else:
+                        nxt = self._next(str(node), _dict(out))
+                        if nxt is None or nxt not in self._nodes:
+                            cur["stop"] = True
+                        else:
+                            cur["id"] = nxt
+                    yield Terminate(output=out)
+                    return None
+                return program()
+            return one_node
+
+        def _done(_out: DynamicValue) -> bool:
+            return bool(cur["stop"])
+
+        return loop_until(_step, done=_done, max_rounds=budget,
+                          reason_fn=lambda: str(cur["reason"]))()
 
     # ---- 内部纯函数（不进公共 API） ----
     def _entry(self) -> str | None:
