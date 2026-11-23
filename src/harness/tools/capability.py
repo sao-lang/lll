@@ -78,10 +78,11 @@ class ToolsCapability:
         """ToolLayer 外壳（规格 P5）：产出"用工具"的 Program 工厂（内部不改）。"""
         return layer_program("tool", payload={"layer": "tools"})()
 
-    def install(self, reg: Registry) -> None:
-        """把持有的 port 注册进共用 Provider 注册表。
+    def install(self, container: object, reg: Registry) -> None:  # purity-exempt: Capability 协议签名 container 必填，本能力只消费 reg
+        """把持有的 port 注册进共用 Provider 注册表（对齐 Capability 两参协议）。
 
         参数：
+            container: Capability 协议要求传入的装配容器，本能力不消费。
             reg: 共用 Provider 注册表；按 port 名注册 tool/disclosure/mcp/skill。
         """
         # 先装配期自动注册 @tool 待注册项，再注册各 Port；

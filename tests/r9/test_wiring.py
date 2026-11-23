@@ -25,11 +25,11 @@ def test_tools_capability_wiring_with_r9_ports() -> None:
     cap = SecurityCapability(audit=audit, human=ConsoleHumanPort(answerer=lambda q, o: "approve"))
     tools = ToolsCapability(sandbox=cap.sandbox, human=cap.human, audit=cap.audit)
     reg = Registry()
-    tools.install(reg)
+    tools.install(object(), reg)
     registry = reg.resolve("tool")
     registry.register(ToolSpec(name="hw", description="", danger=DangerLevel.HIGH),
                       lambda **kw: "sandbox-ok")
     res = asyncio.run(registry.call(make_call("hw", {}), PortCtx(session_id="s9", run_id="r9")))
     assert res.ok and res.value == "sandbox-ok"
     assert res.meta.get("sandbox") is True
-    assert len(audit.events()) >= 0  # HIGH 不强制审计，但 logger 已注入可用
+    assert len(audit.events()) == 1 and "danger=HIGH" in audit.events()[0].rationale  # HIGH 必写审计

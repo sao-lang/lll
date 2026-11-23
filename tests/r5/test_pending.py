@@ -121,7 +121,7 @@ def test_install_flushes_pending_automatically() -> None:
 
     registry = ToolRegistry()
     cap = ToolsCapability(registry=registry)
-    cap.install(Registry())
+    cap.install(object(), Registry())
     assert "auto_add" in [s.name for s in registry.catalog(level=2)]
     assert pending_tools() == ()
 

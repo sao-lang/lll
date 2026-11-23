@@ -302,9 +302,12 @@ def scan_r5(files: list[Path]) -> list[str]:
                   "except Exception", "DangerLevel"):
         if token not in reg_text:
             violations.append(f"registry.py 缺路由/折叠要素 {token}")
-    # LOW 审计缺席降级标记（四级完整：LOW 不能被整级吞掉）。
-    if "audit_missing" not in reg_text:
-        violations.append("registry.py 缺 LOW 审计降级标记 audit_missing")
+    # 审计全级别覆盖 + 缺席 fail-closed（S3 修复：LOW/HIGH/CRITICAL 审计不可旁路；
+    # 旧 audit_missing 静默降级标记已删除，改以 NO_AUDIT 拒绝，防复辟）。
+    if "_ERR_NO_AUDIT" not in reg_text or "NO_AUDIT" not in reg_text:
+        violations.append("registry.py 缺审计缺席 fail-closed 错误码 NO_AUDIT")
+    if "audit_missing" in reg_text:
+        violations.append("registry.py 复辟已删除的 audit_missing 静默降级语义")
 
     # 披露红线：L1（catalog level=1）不含完整 schema + 超预算拒绝。
     index = tools_dir / "index.py"

@@ -70,7 +70,7 @@ def test_install_registers_all_present_ports(tmp_path: Path) -> None:
     skills = FileSkillProvider(tmp_path)
     cap = ToolsCapability(registry=reg, mcp=mgr, skills=skills)
     provider_reg = Registry()
-    cap.install(provider_reg)
+    cap.install(object(), provider_reg)
     assert provider_reg.resolve("tool") is reg
     assert provider_reg.resolve("disclosure") is cap.index()
     assert provider_reg.resolve("mcp") is mgr
@@ -81,7 +81,7 @@ def test_install_skips_absent_optional_ports() -> None:
     """MCP/Skills 缺席时 install 不注册这两项，仍注册 tool/disclosure。"""
     cap = ToolsCapability()
     provider_reg = Registry()
-    cap.install(provider_reg)
+    cap.install(object(), provider_reg)
     assert set(provider_reg.names()) == {"tool", "disclosure"}
     assert isinstance(provider_reg.resolve("tool"), ToolPort)
     assert isinstance(provider_reg.resolve("disclosure"), DisclosureIndex)

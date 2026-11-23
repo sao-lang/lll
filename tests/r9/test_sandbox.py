@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 
 from compose import DangerLevel, PortCtx, ToolSpec, make_call
-from harness.security import LocalSandbox
+from harness.security import AuditLogger, LocalSandbox
 from harness.tools import ToolRegistry
 
 
@@ -15,7 +15,7 @@ def _ctx() -> PortCtx:
 def test_t03_high_routes_to_sandbox() -> None:
     """HIGH 工具经 ToolRegistry 调用走沙盒（meta.sandbox=True）。"""
     sandbox = LocalSandbox()
-    reg = ToolRegistry(sandbox=sandbox, human=None, audit=None)
+    reg = ToolRegistry(sandbox=sandbox, human=None, audit=AuditLogger())
     reg.register(ToolSpec(name="danger", description="d", danger=DangerLevel.HIGH),
                  lambda **kw: "executed")
     res = asyncio.run(reg.call(make_call("danger", {}), _ctx()))
@@ -25,7 +25,7 @@ def test_t03_high_routes_to_sandbox() -> None:
 
 def test_t03_critical_without_human_denied() -> None:
     """CRITICAL 缺 HumanPort 直接拒绝（fail-closed，不静默放行）。"""
-    reg = ToolRegistry(sandbox=LocalSandbox(), human=None, audit=None)
+    reg = ToolRegistry(sandbox=LocalSandbox(), human=None, audit=AuditLogger())
     reg.register(ToolSpec(name="critical", description="d", danger=DangerLevel.CRITICAL),
                  lambda **kw: "executed")
     res = asyncio.run(reg.call(make_call("critical", {}), _ctx()))

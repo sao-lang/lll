@@ -2,31 +2,34 @@
 """R11 运行期装配：把六项接线真正注入 Runner / ToolRegistry / ModelGateway。
 
 不是"持有对象 + getter"——`assemble()` 构造真实 Runner（store/notify 注入）、
-真实 ToolRegistry（human/audit 注入包装器）、真实 LifecycleBus（供 ModelGateway）。
+真实 ToolRegistry（sandbox/human/audit 注入）、真实 LifecycleBus（供 ModelGateway）。
 全部落在 api(L3)，不改 R1/R5/R9 源码。
+
+B2 修复：装配链唯一——从 SecurityCapability 取三 Port（sandbox/human/audit），
+不再自造 sandbox=None + _NoHuman，profile 装配与运行装配汇成一条链。
 """
 from __future__ import annotations
 
 from collections.abc import Callable
 
-from compose import CallFn, LifecycleBus, PortCtx, Registry
+from compose import CallFn, LifecycleBus, PortCtx, Registry, SandboxPort
 from compose.notify import runner_notifier
 from harness.durability import CheckpointManager
 from harness.model import ModelGateway
 from harness.observability import InMemoryEventStream
-from compose import SandboxPort
-from harness.security import ApprovalFlow, AuditLogger
+from harness.security import ApprovalFlow, AuditLogger, SecurityCapability
 from harness.tools import ToolsCapability, ToolRegistry
-from runtime import DynamicValue, Runner, Session
+from runtime import DynamicValue, InMemoryEventStore, Runner, Session
 
 from .wiring import (
     ApprovingHumanPort,
     CheckpointEventStore,
+    R1AuditEventSink,
     VerifyingAuditPort,
     bind_stream_projection,
 )
 
-__all__ = ["AgentRuntime", "assemble_runtime"]
+__all__ = ["AgentRuntime", "assemble_runtime", "capability_tools"]
 
 
 class AgentRuntime:
@@ -69,42 +72,55 @@ def assemble_runtime(
     stream: InMemoryEventStream | None = None,
     manager: CheckpointManager | None = None,
     tools: ToolRegistry | None = None,
+    security: SecurityCapability | None = None,
+    bus: LifecycleBus | None = None,
     checkpoint_every: int = 1,
 ) -> AgentRuntime:
     """真实装配：构造 Runner/Registry/三 Port 接线的运行期。
 
-    - ①② 未注入 approval/audit 时用默认包装器（CRITICAL 触发 / 审计验链）；
+    - ①② 未注入 approval/audit 时用 SecurityCapability 的真实默认（CRITICAL 触发 /
+      审计验链 + R1 同源落盘）；
     - ③ secret 由 builder.redact 在输出边界消费（不在此重复）；
     - ④ bus 订阅三相位并作为 Runner(notify=runner_notifier(bus)) 注入；
-    - ⑤ CheckpointEventStore 作为 Runner(store=...) 注入；
+      可注入 bus 以复用 builder.project_events() 建的总线（消除 S1 双 bus）；
+    - ⑤ CheckpointEventStore 作为 Runner(store=...) 注入，与 audit sink 共享同一 R1 store；
     - ⑥ CI gate 由 CLI.eval 消费（不在此重复）。
     """
+    sec = security or SecurityCapability()
+    # 单底座：manager 自带 store 时复用它，否则新建；audit sink/checkpoint 共用同一实例。
+    mgr = manager or CheckpointManager(store=InMemoryEventStore())
+    shared_store = mgr.store
     target_stream = stream or InMemoryEventStream()
-    bus = bind_stream_projection(target_stream)
-    approving = approval or ApprovingHumanPort(_NoHuman(), ApprovalFlow())
-    auditing = audit or VerifyingAuditPort(AuditLogger())
-    mgr = manager or CheckpointManager()
-    store = CheckpointEventStore(mgr)
+    active_bus = bus or bind_stream_projection(target_stream)
 
-    # ①② 真实注入 ToolRegistry 的构造参数（R5 源码不改）。
-    wired_tools = tools or ToolRegistry(sandbox=None, human=approving, audit=auditing)
+    approving = approval or ApprovingHumanPort(sec.human, sec.approval)
+    audit_sink = R1AuditEventSink(shared_store)
+    auditing = audit or VerifyingAuditPort(AuditLogger(sink=audit_sink))
+    store = CheckpointEventStore(mgr, inner=shared_store)
 
-    runner = Runner(call, store=store, notify=runner_notifier(bus),
+    # ①② B2 修复：真实注入 SecurityCapability 的 sandbox/human/audit（消除 sandbox=None 断链）。
+    wired_tools = tools or ToolRegistry(
+        sandbox=sec.sandbox, human=approving, audit=auditing,
+    )
+
+    runner = Runner(call, store=store, notify=runner_notifier(active_bus),
                     checkpoint_every=checkpoint_every)
-    return AgentRuntime(runner, bus, wired_tools, approving, auditing, store, target_stream)
+    return AgentRuntime(runner, active_bus, wired_tools, approving, auditing, store, target_stream)
 
 
-class _NoHuman:
-    """缺 HumanPort 时的 fail-closed 占位：只返回 deny，不冒充人类。"""
-    name = "no_human"
+def capability_tools(
+    approval: ApprovingHumanPort, audit: VerifyingAuditPort,
+    *, sandbox: SandboxPort | None = None,
+) -> ToolsCapability:
+    """用已接线的三 Port 构造 ToolsCapability（生产装配入口）。
 
-    async def ask(self, question: str, options: list[str] | None,
-                  ctx: PortCtx) -> str:
-        """一律 deny（fail-closed，不静默放行）。"""
-        return "deny"
+    Args:
+        approval: 审批包装器。
+        audit: 审计包装器。
+        sandbox: SandboxPort 实现；None 时用 LocalSandbox 默认（生产真执行）。
+    """
+    from harness.security import LocalSandbox
 
-
-def capability_tools(approval: ApprovingHumanPort, audit: VerifyingAuditPort) -> ToolsCapability:
-    """用已接线的三 Port 构造 ToolsCapability（生产装配入口）。"""
-    reg = ToolRegistry(sandbox=None, human=approval, audit=audit)
+    reg = ToolRegistry(sandbox=sandbox or LocalSandbox(allow_sync=True),
+                       human=approval, audit=audit)
     return ToolsCapability(registry=reg)

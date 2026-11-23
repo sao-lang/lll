@@ -2,6 +2,244 @@
   "version": 1,
   "project": "C:\\Users\\30895\\AppData\\Local\\Temp\\lll-head-src\\src",
   "entries": {
+    "32a99f9c5d43": {
+      "file": "api/builder.py",
+      "line": 1,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "# purity-exempt-file: InMemoryEventStream 为 R10 B.1.2 指定默认实现命名；接线层协议形状见逐行豁免"
+    },
+    "83c907452da5": {
+      "file": "api/builder.py",
+      "line": 15,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "from harness.observability import InMemoryEventStream"
+    },
+    "6a7cfad01fad": {
+      "file": "api/builder.py",
+      "line": 38,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def __init__(self, arch: object) -> None:  # purity-exempt: arch 为 Arch 协议形状，api 不反向依赖 archs"
+    },
+    "0f8ecd548d75": {
+      "file": "api/builder.py",
+      "line": 53,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "self._stream: InMemoryEventStream | None = None"
+    },
+    "cb418d472f6f": {
+      "file": "api/builder.py",
+      "line": 116,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "def project_events(self, stream: InMemoryEventStream) -> \"AgentBuilder\":"
+    },
+    "5de882cf7d3c": {
+      "file": "api/builder.py",
+      "line": 127,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def redact(self, value: object, ctx: PortCtx) -> SafetyVerdict:  # purity-exempt: value 为规则3动态内容边界"
+    },
+    "b7571d7424ee": {
+      "file": "api/builder.py",
+      "line": 144,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def runtime(self, call: object, *, checkpoint_every: int = 1) -> AgentRuntime:"
+    },
+    "c898df3e0561": {
+      "file": "api/runtime.py",
+      "line": 16,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "from harness.observability import InMemoryEventStream"
+    },
+    "6766837fa43a": {
+      "file": "api/runtime.py",
+      "line": 41,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "checkpoint: CheckpointEventStore, stream: InMemoryEventStream | None = None) -> None:"
+    },
+    "da847147bcfb": {
+      "file": "api/runtime.py",
+      "line": 51,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "async def run(self, session: Session) -> object:"
+    },
+    "d23b35ef6ed5": {
+      "file": "api/runtime.py",
+      "line": 55,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "async def resume(self, session: Session, answer: DynamicValue) -> object:"
+    },
+    "41135540ccc2": {
+      "file": "api/runtime.py",
+      "line": 59,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def model_gateway(self, llm: object) -> ModelGateway:"
+    },
+    "9d8086cce254": {
+      "file": "api/runtime.py",
+      "line": 69,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "stream: InMemoryEventStream | None = None,"
+    },
+    "85dd641ded9f": {
+      "file": "api/runtime.py",
+      "line": 82,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "target_stream = stream or InMemoryEventStream()"
+    },
+    "631fcdb19bad": {
+      "file": "api/static_api.py",
+      "line": 10,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def static_check_api(arch: object) -> StaticCheckReport:"
+    },
+    "158669ccbb98": {
+      "file": "api/stream.py",
+      "line": 1,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "# purity-exempt-file: InMemoryEventStream 为 R10 B.1.2 指定默认实现命名，生产级有界队列真实实现"
+    },
+    "0189130a3cda": {
+      "file": "api/stream.py",
+      "line": 7,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "from harness.observability import EventEnvelope, InMemoryEventStream, ReadModel"
+    },
+    "85f5784cccd7": {
+      "file": "api/stream.py",
+      "line": 17,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "def __init__(self, stream: InMemoryEventStream | None = None) -> None:"
+    },
+    "fb2ed14bd477": {
+      "file": "api/stream.py",
+      "line": 18,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "\"\"\"构造网关（默认 InMemoryEventStream，可注入外部实现）。\"\"\""
+    },
+    "fc6fe616941e": {
+      "file": "api/stream.py",
+      "line": 19,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "self._stream = stream or InMemoryEventStream()"
+    },
+    "21a6406e3770": {
+      "file": "api/stream.py",
+      "line": 25,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "def stream(self) -> InMemoryEventStream:"
+    },
+    "1bec3c7079ec": {
+      "file": "api/wiring.py",
+      "line": 17,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "from harness.observability import EventEnvelope, InMemoryEventStream"
+    },
+    "d88f83ed0c61": {
+      "file": "api/wiring.py",
+      "line": 33,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def __init__(self, inner: object, flow: ApprovalFlow | None = None) -> None:"
+    },
+    "38ef4c15b2de": {
+      "file": "api/wiring.py",
+      "line": 74,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def events(self) -> tuple[object, ...]:"
+    },
+    "2f6e114c192f": {
+      "file": "api/wiring.py",
+      "line": 74,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "def events(self) -> tuple[object, ...]:"
+    },
+    "d5aa8b14b8d6": {
+      "file": "api/wiring.py",
+      "line": 78,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def verify_external(self, events: Sequence[object]) -> None:"
+    },
+    "2e19abbba609": {
+      "file": "api/wiring.py",
+      "line": 78,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "def verify_external(self, events: Sequence[object]) -> None:"
+    },
+    "dc60d3f3b51a": {
+      "file": "api/wiring.py",
+      "line": 93,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def redact_output(value: object, ctx: PortCtx, *, secret_refs: Sequence[str],"
+    },
+    "ba0cae0d157a": {
+      "file": "api/wiring.py",
+      "line": 107,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "def bind_stream_projection(stream: InMemoryEventStream | None = None) -> LifecycleBus:"
+    },
+    "9447012ea61b": {
+      "file": "api/wiring.py",
+      "line": 114,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "target = stream or InMemoryEventStream()"
+    },
+    "9ca824652457": {
+      "file": "api/wiring.py",
+      "line": 146,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "inner: object | None = None) -> None:"
+    },
+    "84f5e8cb7e47": {
+      "file": "api/wiring.py",
+      "line": 151,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "inner: R1 EventStore 实现（缺省 InMemoryEventStore）；生产可注入 DB/Redis。"
+    },
+    "45e215fe8e20": {
+      "file": "api/wiring.py",
+      "line": 153,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "from runtime import InMemoryEventStore"
+    },
+    "da4a230afbce": {
+      "file": "api/wiring.py",
+      "line": 156,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "self._inner = inner if inner is not None else InMemoryEventStore()"
+    },
     "2159186c1669": {
       "file": "archs/base.py",
       "line": 10,
@@ -16,68 +254,75 @@
       "rule": "typing.Any 导入",
       "text": "from typing import Any, Protocol, runtime_checkable"
     },
-    "5618cc1d8d8b": {
-      "file": "archs/base.py",
-      "line": 26,
-      "rule_id": "py.any-annotation",
-      "rule": "注解用 Any",
-      "text": "def join(self, results: list[Any]) -> Any: ..."
-    },
-    "94bf7d35f227": {
-      "file": "archs/base.py",
-      "line": 26,
-      "rule_id": "py.dyn-container",
-      "rule": "容器/泛型参数含 Any/object",
-      "text": "def join(self, results: list[Any]) -> Any: ..."
-    },
-    "7bb304dc4893": {
-      "file": "archs/base.py",
-      "line": 34,
-      "rule_id": "py.any-annotation",
-      "rule": "注解用 Any",
-      "text": "def join(self, results: list[Any]) -> Any:"
-    },
-    "2d37b3b3f74e": {
-      "file": "archs/base.py",
-      "line": 34,
-      "rule_id": "py.dyn-container",
-      "rule": "容器/泛型参数含 Any/object",
-      "text": "def join(self, results: list[Any]) -> Any:"
-    },
     "6c561cd80060": {
       "file": "archs/base.py",
       "line": 37,
       "rule_id": "py.any-annotation",
       "rule": "注解用 Any",
-      "text": "counts: dict[Any, int] = {}"
+      "text": "def join(self, results: list[Any]) -> Any: ...  # purity-exempt: HEAD 存量 Any（契约迁移致行号位移，非新增）"
     },
     "dec7b0cfd338": {
       "file": "archs/base.py",
       "line": 37,
       "rule_id": "py.dyn-container",
       "rule": "容器/泛型参数含 Any/object",
-      "text": "counts: dict[Any, int] = {}"
+      "text": "def join(self, results: list[Any]) -> Any: ...  # purity-exempt: HEAD 存量 Any（契约迁移致行号位移，非新增）"
     },
-    "ddafcdaa3aef": {
+    "30b490e41d29": {
+      "file": "archs/base.py",
+      "line": 45,
+      "rule_id": "py.any-annotation",
+      "rule": "注解用 Any",
+      "text": "def join(self, results: list[Any]) -> Any:  # purity-exempt: HEAD 存量 Any（契约迁移致行号位移，非新增）"
+    },
+    "997388572571": {
+      "file": "archs/base.py",
+      "line": 45,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "def join(self, results: list[Any]) -> Any:  # purity-exempt: HEAD 存量 Any（契约迁移致行号位移，非新增）"
+    },
+    "d98fea72f89e": {
+      "file": "archs/base.py",
+      "line": 48,
+      "rule_id": "py.any-annotation",
+      "rule": "注解用 Any",
+      "text": "counts: dict[Any, int] = {}  # purity-exempt: HEAD 存量 Any（行号位移，非新增）"
+    },
+    "b11c4f00467d": {
+      "file": "archs/base.py",
+      "line": 48,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "counts: dict[Any, int] = {}  # purity-exempt: HEAD 存量 Any（行号位移，非新增）"
+    },
+    "ddcc3800de19": {
       "file": "archs/recipes.py",
-      "line": 321,
+      "line": 331,
       "rule_id": "py.callable-ellipsis",
       "rule": "Callable[..., ...] 省略参数类型",
       "text": "def __init__(self, classifier: IntentStrategy | Callable[..., IntentResult] | None,"
     },
-    "73a8bd14a0bd": {
+    "b4774ee29582": {
       "file": "archs/recipes.py",
-      "line": 376,
+      "line": 375,
       "rule_id": "py.callable-ellipsis",
       "rule": "Callable[..., ...] 省略参数类型",
       "text": "def __init__(self, classifier: IntentStrategy | Callable[..., IntentResult] | None,"
     },
-    "81dab15a4805": {
+    "413d2b0a7130": {
       "file": "archs/recipes.py",
-      "line": 639,
+      "line": 667,
       "rule_id": "dual.compat-comment",
       "rule": "兼容/过渡意图注释（双轨信号）",
       "text": "\"\"\"入口 = 第一个声明的 node（保持向后兼容）；无边时即该节点。\"\"\""
+    },
+    "50eb657b1239": {
+      "file": "compose/agent.py",
+      "line": 84,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def static_check(self) -> object:  # purity-exempt: Arch.static_check 返回 StaticCheckReport，compose 不反向依赖 archs"
     },
     "da1bacae8cac": {
       "file": "compose/call.py",
@@ -350,7 +595,7 @@
       "line": 30,
       "rule_id": "fake.intent",
       "rule": "内存/测试替身意图注释",
-      "text": "EventStreamPort  InMemoryEventStream    R10 src/harness/observability/（待实现）"
+      "text": "EventStreamPort  InMemoryEventStream    R10 src/harness/observability/ ✅已实现"
     },
     "0c178d6660c9": {
       "file": "compose/ports.py",
@@ -407,6 +652,118 @@
       "rule_id": "py.object-annotation",
       "rule": "注解用 object",
       "text": "def as_port_ctx(ctx: object) -> PortCtx:"
+    },
+    "99481d44def6": {
+      "file": "harness/cognition/__init__.py",
+      "line": 1,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "# purity-exempt-file: 导出 B.1.2 指定默认部件 InMemoryIntentSampleStore 的名字"
+    },
+    "9236e40c682e": {
+      "file": "harness/cognition/__init__.py",
+      "line": 28,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "InMemoryIntentSampleStore,"
+    },
+    "887d4ed967b6": {
+      "file": "harness/cognition/__init__.py",
+      "line": 39,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "\"CascadeIntentStrategy\", \"InMemoryIntentSampleStore\", \"RegexKeywordMatcher\","
+    },
+    "4fd2bea78d66": {
+      "file": "harness/cognition/cascade.py",
+      "line": 1,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "# purity-exempt-file: InMemoryIntentSampleStore 为 B.1.2 指定默认部件命名；component ctx 为协议透传参数"
+    },
+    "a66d5184c542": {
+      "file": "harness/cognition/cascade.py",
+      "line": 32,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "\"InMemoryIntentSampleStore\","
+    },
+    "849680c23c0f": {
+      "file": "harness/cognition/cascade.py",
+      "line": 65,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def match(self, text: str, ctx: object = None) -> IntentResult | None:  # purity-exempt: 协议 ctx 只透传不读，Object 为 R1 契约既有形态"
+    },
+    "41f235131ddb": {
+      "file": "harness/cognition/cascade.py",
+      "line": 74,
+      "rule_id": "fake.class",
+      "rule": "fake/内存类名（生产源码禁止）",
+      "text": "class InMemoryIntentSampleStore:"
+    },
+    "417e602c4ee2": {
+      "file": "harness/cognition/cascade.py",
+      "line": 74,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "class InMemoryIntentSampleStore:"
+    },
+    "e8a97dfe5dfa": {
+      "file": "harness/cognition/cascade.py",
+      "line": 137,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "keyword: object | None = None,"
+    },
+    "12e9181cb1a3": {
+      "file": "harness/cognition/cascade.py",
+      "line": 138,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "samples: object | None = None,"
+    },
+    "c480d4a8f1e9": {
+      "file": "harness/cognition/cascade.py",
+      "line": 145,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "self.samples = samples if samples is not None else InMemoryIntentSampleStore()"
+    },
+    "85d2cefd01c6": {
+      "file": "harness/cognition/cascade.py",
+      "line": 150,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "async def recognize(self, text: str, ctx: object) -> IntentResult:"
+    },
+    "179d5c11e08b": {
+      "file": "harness/cognition/cascade.py",
+      "line": 241,
+      "rule_id": "py.bare-container",
+      "rule": "裸容器类型（缺元素类型）",
+      "text": "\"gaps\": list(result.gaps),"
+    },
+    "3a94adb9e4aa": {
+      "file": "harness/cognition/cascade.py",
+      "line": 242,
+      "rule_id": "py.bare-container",
+      "rule": "裸容器类型（缺元素类型）",
+      "text": "\"trace\": tuple(trace),"
+    },
+    "6b0020ef26fc": {
+      "file": "harness/cognition/cascade.py",
+      "line": 247,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def intent_as_program(strategy: object, text: str = \"\") -> _ProgramFn:"
+    },
+    "c235aa1d6931": {
+      "file": "harness/cognition/contracts.py",
+      "line": 6,
+      "rule_id": "dual.compat-comment",
+      "rule": "兼容/过渡意图注释（双轨信号）",
+      "text": "避免两处定义分裂（单一来源，接线而非兼容层）。"
     },
     "27a9c8e1aa03": {
       "file": "harness/context/__init__.py",
@@ -505,6 +862,104 @@
       "rule_id": "fake.class",
       "rule": "fake/内存类名（生产源码禁止）",
       "text": "class MemoryPortWithRecall(MemoryPort, Protocol):"
+    },
+    "0efba6b56403": {
+      "file": "harness/durability/checkpoint.py",
+      "line": 1,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "# purity-exempt-file: InMemoryEventStore 复用自 R1 为默认后端；events 为事件溯源动态边界(DynamicValue)"
+    },
+    "8498157b9680": {
+      "file": "harness/durability/checkpoint.py",
+      "line": 19,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "InMemoryEventStore,"
+    },
+    "c6370f5550fb": {
+      "file": "harness/durability/checkpoint.py",
+      "line": 36,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "events: tuple[object, ...]"
+    },
+    "41799bd91e95": {
+      "file": "harness/durability/checkpoint.py",
+      "line": 36,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "events: tuple[object, ...]"
+    },
+    "9908491c6eb4": {
+      "file": "harness/durability/checkpoint.py",
+      "line": 40,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def _fingerprint(events: tuple[object, ...]) -> str:"
+    },
+    "0df5ff54ff51": {
+      "file": "harness/durability/checkpoint.py",
+      "line": 40,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "def _fingerprint(events: tuple[object, ...]) -> str:"
+    },
+    "4f5e1bdbc368": {
+      "file": "harness/durability/checkpoint.py",
+      "line": 56,
+      "rule_id": "py.bare-container",
+      "rule": "裸容器类型（缺元素类型）",
+      "text": "\"messages\": list(state.messages),"
+    },
+    "43c4f55c8539": {
+      "file": "harness/durability/checkpoint.py",
+      "line": 57,
+      "rule_id": "py.bare-container",
+      "rule": "裸容器类型（缺元素类型）",
+      "text": "\"scratch\": dict(state.scratch),"
+    },
+    "8cfa19b48270": {
+      "file": "harness/durability/checkpoint.py",
+      "line": 64,
+      "rule_id": "py.bare-container",
+      "rule": "裸容器类型（缺元素类型）",
+      "text": "\"last_step_kinds\": list(state.last_step_kinds),"
+    },
+    "06bc3e16da37": {
+      "file": "harness/durability/checkpoint.py",
+      "line": 72,
+      "rule_id": "py.bare-container",
+      "rule": "裸容器类型（缺元素类型）",
+      "text": "\"events\": list(snap.events),"
+    },
+    "16ca07276d9f": {
+      "file": "harness/durability/checkpoint.py",
+      "line": 85,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "store: R1 EventStore 实现；None 用 InMemoryEventStore（默认后端）。"
+    },
+    "c8ac7d067c3a": {
+      "file": "harness/durability/checkpoint.py",
+      "line": 88,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "self.store: EventStore = store if store is not None else InMemoryEventStore()"
+    },
+    "ecf781e06adf": {
+      "file": "harness/durability/checkpoint.py",
+      "line": 92,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "events: tuple[object, ...]) -> CheckpointSnapshot:"
+    },
+    "b65d369d103f": {
+      "file": "harness/durability/checkpoint.py",
+      "line": 92,
+      "rule_id": "py.dyn-container",
+      "rule": "容器/泛型参数含 Any/object",
+      "text": "events: tuple[object, ...]) -> CheckpointSnapshot:"
     },
     "3e8e531f21d2": {
       "file": "harness/memory/__init__.py",
@@ -883,6 +1338,62 @@
       "rule_id": "dual.compat-comment",
       "rule": "兼容/过渡意图注释（双轨信号）",
       "text": "简单场景与向后兼容，但生产链路（gateway）走 reserve/commit。"
+    },
+    "f91f477791bd": {
+      "file": "harness/observability/__init__.py",
+      "line": 1,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "# purity-exempt-file: 导出 B.1.2 指定默认实现 InMemoryEventStream 的名字"
+    },
+    "e3424e9b49d2": {
+      "file": "harness/observability/__init__.py",
+      "line": 11,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "from .stream import InMemoryEventStream, Projection, TimelineProjection"
+    },
+    "242d7b044c75": {
+      "file": "harness/observability/__init__.py",
+      "line": 16,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "\"InMemoryEventStream\", \"Projection\", \"TimelineProjection\","
+    },
+    "c367942c66bc": {
+      "file": "harness/observability/stream.py",
+      "line": 1,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "# purity-exempt-file: InMemoryEventStream 为 B.1.2 指定默认实现命名，生产级有界队列真实实现"
+    },
+    "b531147e2adb": {
+      "file": "harness/observability/stream.py",
+      "line": 2,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "\"\"\"R10 事件流：InMemoryEventStream（B.1.2 默认实现）+ Projection。"
+    },
+    "7c3eb03f7322": {
+      "file": "harness/observability/stream.py",
+      "line": 16,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "__all__ = [\"InMemoryEventStream\", \"Projection\", \"TimelineProjection\"]"
+    },
+    "f109f034b122": {
+      "file": "harness/observability/stream.py",
+      "line": 22,
+      "rule_id": "fake.class",
+      "rule": "fake/内存类名（生产源码禁止）",
+      "text": "class InMemoryEventStream(EventStreamPort):"
+    },
+    "a41f7c525641": {
+      "file": "harness/observability/stream.py",
+      "line": 22,
+      "rule_id": "fake.intent",
+      "rule": "内存/测试替身意图注释",
+      "text": "class InMemoryEventStream(EventStreamPort):"
     },
     "95c72d871f6a": {
       "file": "harness/rag/__init__.py",
@@ -1402,6 +1913,41 @@
       "rule": "注解用 object",
       "text": "result: Result, ctx: object, *, classifier: FailureClassifier | None = None"
     },
+    "127860216e80": {
+      "file": "harness/security/capability.py",
+      "line": 48,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def install(self, container: object, reg: Registry) -> None:  # purity-exempt: Capability 协议签名 container 必填，本能力只消费 reg"
+    },
+    "91dde4baf943": {
+      "file": "harness/security/guard.py",
+      "line": 47,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "def check(self, data: object, ctx: SecurityCtx) -> SafetyVerdict:"
+    },
+    "890095a9bcf8": {
+      "file": "harness/security/guard.py",
+      "line": 88,
+      "rule_id": "py.object-annotation",
+      "rule": "注解用 object",
+      "text": "value: object, secrets: Sequence[str],"
+    },
+    "98b4d4b9ee88": {
+      "file": "harness/security/ports.py",
+      "line": 6,
+      "rule_id": "py.bare-container",
+      "rule": "裸容器类型（缺元素类型）",
+      "text": "AuditPort.record(event: dict, ctx) -> None（async）"
+    },
+    "defb4f929fc0": {
+      "file": "harness/security/ports.py",
+      "line": 45,
+      "rule_id": "py.callable-ellipsis",
+      "rule": "Callable[..., ...] 省略参数类型",
+      "text": "self, fn: Callable[..., DynamicValue], args: DynamicValue,"
+    },
     "765288e46118": {
       "file": "harness/tools/decorator.py",
       "line": 64,
@@ -1695,48 +2241,6 @@
       "rule_id": "dual.compat-comment",
       "rule": "兼容/过渡意图注释（双轨信号）",
       "text": "\"\"\"读托管字段：优先显式字段，兼容旧快照从 scratch 回退。\"\"\""
-    },
-    "541ba14312c8": {
-      "file": "archs/base.py",
-      "line": 26,
-      "rule_id": "intent.placeholder",
-      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
-      "text": "def join(self, results: list[Any]) -> Any: ..."
-    },
-    "5a043c2bfb09": {
-      "file": "archs/base.py",
-      "line": 26,
-      "rule_id": "intent.unused_param",
-      "rule": "参数 `results` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
-      "text": "def join(self, results: list[Any]) -> Any: ..."
-    },
-    "2b5d78c68cab": {
-      "file": "archs/base.py",
-      "line": 119,
-      "rule_id": "intent.placeholder",
-      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
-      "text": "async def recognize(self, text: str, ctx: AgentState) -> IntentResult: ..."
-    },
-    "f658e27e466d": {
-      "file": "archs/base.py",
-      "line": 119,
-      "rule_id": "intent.unused_param",
-      "rule": "参数 `ctx` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
-      "text": "async def recognize(self, text: str, ctx: AgentState) -> IntentResult: ..."
-    },
-    "111363cce13c": {
-      "file": "archs/base.py",
-      "line": 164,
-      "rule_id": "intent.placeholder",
-      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
-      "text": "def static_check(self) -> StaticCheckReport: ..."
-    },
-    "79f1bdfb737c": {
-      "file": "archs/base.py",
-      "line": 165,
-      "rule_id": "intent.placeholder",
-      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
-      "text": "def compile(self) -> Program: ..."
     },
     "488d54b7ff08": {
       "file": "compose/ports.py",

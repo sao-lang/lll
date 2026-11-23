@@ -9,14 +9,21 @@
 from __future__ import annotations
 
 import asyncio
-import itertools
-from collections.abc import Sequence
+import time
+from collections.abc import Callable, Sequence
 
-from compose import DangerLevel, LifecycleBus, LifecyclePhase, Notice, PortCtx
+from compose import AuditStore, DangerLevel, LifecycleBus, LifecyclePhase, Notice, PortCtx
 from harness.durability import CheckpointManager, CheckpointSnapshot
 from harness.observability import EventEnvelope, InMemoryEventStream
-from harness.security import ApprovalFlow, AuditLogger, RuleGuardrail, SafetyVerdict, verify_hash_chain
-from runtime import DynamicValue, JsonSnapshot
+from harness.security import (
+    ApprovalFlow,
+    AuditEvent,
+    AuditLogger,
+    RuleGuardrail,
+    SafetyVerdict,
+    verify_hash_chain,
+)
+from runtime import DynamicValue, EventStore, JsonSnapshot
 
 
 STREAM_TOPIC = "trace"
@@ -42,8 +49,16 @@ class ApprovingHumanPort:
 
     async def ask(self, question: str, options: list[str] | None, ctx: PortCtx,
                   *, danger: DangerLevel | None = None) -> str:
-        """先 should_approve，再限时等待；任何超时/异常一律 deny（fail-closed）。"""
-        level = danger if danger is not None else DangerLevel.CRITICAL
+        """先 should_approve，再限时等待；任何超时/异常一律 deny（fail-closed）。
+
+        danger 显式入参优先；未传时读 ctx.meta["danger"]（R5 ToolRegistry 路由写入），
+        两者都无才回退 CRITICAL（最严格默认，fail-closed）。
+        """
+        if danger is not None:
+            level = danger
+        else:
+            from_meta = ctx.meta.get("danger")
+            level = DangerLevel.coerce(from_meta) if from_meta is not None else DangerLevel.CRITICAL
         if not self._flow.should_approve(level):
             return self._flow.decide_timeout()
         try:
@@ -54,6 +69,80 @@ class ApprovingHumanPort:
         except (TimeoutError, asyncio.TimeoutError):
             return self._flow.decide_timeout()
         return str(answer)
+
+_AUDIT_KEY_PREFIX = "__audit__:"
+
+
+class R1AuditEventSink(AuditStore):
+    """审计同源底座：把审计事件以 R1 JsonSnapshot 形态写入共享 R1 EventStore。
+
+    依赖只向下（api → runtime 协议）；审计链哈希由 AuditLogger 生成，本 sink 只做
+    append-only 持久化（读旧快照→追加→写回），不新造事件日志底座。replay 从同一
+    store 读回并重建 AuditEvent 序列 → 同源可回放（兑现 R9 §11 承诺）。
+    """
+    name = "r1_audit_event_sink"
+
+    def __init__(self, store: EventStore) -> None:
+        """构造审计 sink。
+
+        Args:
+            store: 与 Runner(checkpoint) 共享的 R1 EventStore 实例。
+        """
+        self.store = store
+
+    def key_of(self, session_id: str) -> str:
+        """审计保留 session 键（与业务 session 隔离，避免污染事件日志）。"""
+        return f"{_AUDIT_KEY_PREFIX}{session_id}"
+
+    async def append(self, event: dict[str, DynamicValue]) -> None:
+        """追加一条审计事件到该 session 的 R1 快照（append-only）。"""
+        sid = str(event.get("session_id", "") or "")
+        key = self.key_of(sid)
+        snap = await self.store.load(key)
+        events = list(snap.get("events") or ()) if snap is not None else []
+        events.append(dict(event))
+        await self.store.save(key, self._snapshot(key, events))
+
+    @staticmethod
+    def _snapshot(key: str, events: list[DynamicValue]) -> JsonSnapshot:
+        """构造 R1 JsonSnapshot（state 为空、events 为审计事件、fingerprint 稳定）。"""
+        import hashlib
+        from typing import cast
+
+        from runtime import AgentState, StateSnapshot, canonical
+        from runtime.types import _plain
+
+        return cast(JsonSnapshot, {
+            "session_id": key,
+            "version": "audit-1.0",
+            "state": cast(StateSnapshot, _plain(AgentState())),
+            "events": events,
+            "fingerprint": hashlib.sha256(canonical(events).encode("utf-8")).hexdigest(),
+        })
+
+
+async def replay_audit_events(sink: R1AuditEventSink, session_id: str) -> tuple[AuditEvent, ...]:
+    """从 R1 EventStore 回放审计事件，重建 AuditEvent 序列（同源可回放）。"""
+    snap = await sink.store.load(sink.key_of(session_id))
+    if snap is None:
+        return ()
+    rebuilt: list[AuditEvent] = []
+    for raw in snap.get("events") or ():
+        if not isinstance(raw, dict):
+            continue
+        data_touched = raw.get("data_touched") or ()
+        rebuilt.append(AuditEvent(
+            who=str(raw.get("who", "") or ""),
+            when=int(raw.get("when", 0) or 0),
+            action=str(raw.get("action", "") or ""),
+            cost=float(raw.get("cost", 0.0) or 0.0),
+            data_touched=tuple(str(x) for x in data_touched),
+            rationale=str(raw.get("rationale", "") or ""),
+            prev_hash=str(raw.get("prev_hash", "") or ""),
+            hash=str(raw.get("hash", "") or ""),
+        ))
+    return tuple(rebuilt)
+
 
 class VerifyingAuditPort:
     """② 审计哈希链接线：包装 AuditLogger，每次 record 后验链。
@@ -104,25 +193,37 @@ def redact_output(value: object, ctx: PortCtx, *, secret_refs: Sequence[str],
     return RuleGuardrail().check(value, sec_ctx)
 
 
-def bind_stream_projection(stream: InMemoryEventStream | None = None) -> LifecycleBus:
+def bind_stream_projection(
+    stream: InMemoryEventStream | None = None,
+    *,
+    clock: Callable[[], float] | None = None,
+) -> LifecycleBus:
     """④ 事件流投影接线：LifecycleBus 订阅三相位 → publish EventEnvelope。
 
-    同步 NoticeFn：相位→topic 映射，seq 由重启计数提供（Notice 无 seq/ts）。
+    ts 来自注入 clock（真实墙钟，注入假时钟可精确断言；绝不造假 float(n-1)）；
+    seq 优先取 Notice.seq（R1 Event.seq 的只读投影，由通知源携带），缺席时回退
+    payload["seq"]，再退到本进程单调源（显式标注合成，不再冒充 R1 序号）。
     返回 bus 供装配期同时注入 Runner(notify=runner_notifier(bus)) 与
     ModelGateway(bus=bus)；after_model 不经 Runner，必须经网关。
     """
     target = stream or InMemoryEventStream()
     bus = LifecycleBus()
-    seq = itertools.count(1)
+    wall_clock = clock or time.time
+    fallback = 0
     watched = (LifecyclePhase.AFTER_MODEL, LifecyclePhase.AFTER_TOOL,
                LifecyclePhase.SESSION_END)
 
     def publish_notice(notice: Notice) -> None:
-        """把只读 Notice 投影为 EventEnvelope 发布到 <phase> topic。"""
-        # 单 topic（EventStream 精确匹配无通配），相位放 type 字段可续读。
-        n = next(seq)
+        """把只读 Notice 投影为 EventEnvelope 发布到单一 topic。"""
+        nonlocal fallback
+        seq = notice.seq
+        if seq <= 0:
+            seq = int(notice.payload.get("seq", 0) or 0)  # 通知源未填 DTO 字段时兼容 payload 投影
+        if seq <= 0:
+            fallback += 1
+            seq = fallback
         target.publish(EventEnvelope(
-            seq=n, topic=STREAM_TOPIC, ts=float(n - 1),
+            seq=seq, topic=STREAM_TOPIC, ts=wall_clock(),
             type=notice.phase.value,
             data={"session_id": notice.session_id, "port": notice.port,
                   **dict(notice.payload)},
@@ -143,31 +244,31 @@ class CheckpointEventStore:
     name = "checkpoint_event_store"
 
     def __init__(self, manager: CheckpointManager | None = None,
-                 inner: object | None = None) -> None:
-        """构造适配器。
+                 inner: EventStore | None = None) -> None:
+        """构造适配器（消除双写：manager 与 inner 共享同一 R1 EventStore）。
 
         Args:
-            manager: R10 CheckpointManager（缺省用 R1 EventStore 默认后端）。
+            manager: R10 CheckpointManager（缺省基于注入 inner 构造）。
             inner: R1 EventStore 实现（缺省 InMemoryEventStore）；生产可注入 DB/Redis。
         """
         from runtime import InMemoryEventStore
 
-        self._mgr = manager or CheckpointManager()
-        self._inner = inner if inner is not None else InMemoryEventStore()
+        self.inner = inner if inner is not None else InMemoryEventStore()
+        self._mgr = manager or CheckpointManager(store=self.inner)
 
     async def save(self, session_id: str, snapshot: JsonSnapshot) -> None:
         """保存：真委托内层 EventStore（R1 形态）+ mgr.save（R10 形态）。"""
         from runtime import AgentState
         from runtime.types import restore_state
 
-        await self._inner.save(session_id, snapshot)  # type: ignore[attr-defined]
+        await self.inner.save(session_id, snapshot)
         state = restore_state(snapshot.get("state")) if "state" in snapshot else AgentState()
         dto = self._mgr.snapshot(session_id, state, tuple(snapshot.get("events") or ()))
         await self._mgr.save(replace_dto_fingerprint(dto, str(snapshot.get("fingerprint", ""))))
 
     async def load(self, session_id: str) -> JsonSnapshot | None:
-        """加载：真委托内层 EventStore（非本地 dict 桩）。"""
-        return await self._inner.load(session_id)  # type: ignore[attr-defined,no-any-return]
+        """加载：真委托共享的 R1 EventStore（非本地 dict 桩）。"""
+        return await self.inner.load(session_id)
 
     def manager(self) -> CheckpointManager:
         """返回被消费的 CheckpointManager（供装配期核对/回放）。"""

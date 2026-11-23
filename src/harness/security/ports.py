@@ -12,10 +12,11 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Callable
 from typing import TextIO
 
-from compose import AuditPort, HumanPort, PortCtx, SandboxPort
+from compose import AuditPort, AuditStore, HumanPort, PortCtx, SandboxPort
 from runtime import DynamicValue
 
 from .types import AuditEvent
@@ -59,29 +60,44 @@ class LocalSandbox(SandboxPort):
 
 
 class AuditLogger(AuditPort):
-    """AuditPort 默认实现：append-only 内存审计 + SHA-256 哈希链。
+    """AuditPort 默认实现：append-only 审计 + SHA-256 哈希链。
 
     record 接 dict（源码签名），内部封为 AuditEvent 并接入前序 hash；
-    events() 返回不可变快照供回放/校验。
+    events() 返回不可变快照供回放/校验。可选 sink（AuditStore）把同一事件
+    委托给外部底座（R11 注入 R1 EventStore 适配器）；内存链仍是热缓存与验链载体，
+    sink 在场时事件以 JsonSnapshot 形态落底座，可跨进程回放（同源可回放）。
     """
     name = "audit_logger"
 
-    def __init__(self) -> None:
-        """初始化空审计链。"""
+    def __init__(self, *, sink: AuditStore | None = None) -> None:
+        """初始化空审计链。
+
+        Args:
+            sink: 审计落盘后端；None 时仅内存链（供单测/无底座场景）。
+        """
         self._events: list[AuditEvent] = []
+        self._sink = sink
 
     async def record(self, event: dict[str, DynamicValue], ctx: PortCtx) -> None:
-        """追加一条审计事件（hash 链，不可旁路）。"""
+        """追加一条审计事件（hash 链，不可旁路）；有 sink 则同源落底座。"""
         prev = self._events[-1].hash if self._events else ""
         entry = AuditEvent(
             who=str(event.get("who", "") or getattr(ctx, "session_id", "")),
-            when=int(event.get("when", 0) or 0),
+            when=int(event.get("when", 0) or time.time()),
             action=str(event.get("action", "")),
             cost=float(event.get("cost", 0.0) or 0.0),
             data_touched=tuple(str(x) for x in (event.get("data_touched") or ())),
             rationale=str(event.get("rationale", "") or ""),
         ).sealed(prev)
         self._events.append(entry)
+        if self._sink is not None:
+            await self._sink.append({
+                "session_id": str(getattr(ctx, "session_id", "") or ""),
+                "who": entry.who, "when": entry.when, "action": entry.action,
+                "cost": entry.cost, "data_touched": list(entry.data_touched),
+                "rationale": entry.rationale, "prev_hash": entry.prev_hash,
+                "hash": entry.hash,
+            })
 
     def events(self) -> tuple[AuditEvent, ...]:
         """返回 append-only 快照（tuple 不可变）。"""

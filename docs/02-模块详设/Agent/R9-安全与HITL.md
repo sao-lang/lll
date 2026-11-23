@@ -196,7 +196,7 @@ class ApprovalFlow:
 **四项既定决策（实现已遵循）**：
 1. **确定性默认**：规则护栏 + 默认三端口实现开箱即用，不依赖外部系统。
 2. **单检测器复用**：注入检测统一复用 `harness.skills.KeywordInjectionDetector`，R9 不重复实现检测器。
-3. **R1 EventStore 复用**：审计与事件日志同源可回放，不另建事件日志底座。
+3. **R1 EventStore 复用**：审计事件经 `R1AuditEventSink` 以 R1 `JsonSnapshot` 落共享 EventStore 保留 session，`replay_audit_events` 同源回放，不另建事件日志底座（2026-11-23 落地）。LOW/HIGH/CRITICAL 全级别审计 + 字段填充，审计缺席 fail-closed。
 4. **全量落地**：三默认实现 + 审批流 + 能力注册一次性交付，B.1.2 清单已勾销。
 
 ---

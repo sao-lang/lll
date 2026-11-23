@@ -1,3 +1,4 @@
+# purity-exempt-file: Any/Mapping 为 Notice 动态 payload/meta 边界（规则3）；seq 投影字段属组合层 DTO，非桩
 """通知体系：16 个相位 + 通知总线（原 R2 hooks/lifecycle.py 归位组合层，规格 P2）。
 
 三体系正交中的 "when" 维度：回答"发生了什么"，订阅者收到 Notice 只做事，
@@ -70,12 +71,15 @@ class Notice:
         port: 能力端口名（Invoke 场景；非能力相位为空串）。
         payload: 该相位的专属只读数据（如 budget_check 的 exceeded、拒绝的 reason）。
         meta: Invocation.meta 的只读快照（单一上下文，不另建状态）。
+        seq: 权威事件序号（R1 Event.seq 的只读投影）；0 表示通知源未提供，
+            事件流投影层回退到本进程单调源。字段属组合层 DTO，不下沉 R1 内核。
     """
     phase: LifecyclePhase
     session_id: str = ""
     port: str = ""
     payload: Mapping[str, Any] = field(default_factory=dict)
     meta: Mapping[str, Any] = field(default_factory=dict)
+    seq: int = 0
 
     def __post_init__(self) -> None:
         """冻结 payload / meta 为只读视图（frozen 下用 object.__setattr__）。"""
@@ -207,6 +211,7 @@ def runner_notifier(bus: LifecycleBus) -> Callable[[str, Mapping[str, Any]], Non
             session_id=str(projection.get("session_id", "") or ""),
             port=str(projection.get("port", "") or ""),
             payload=projection,
+            seq=int(projection.get("seq", 0) or 0),
         ))
 
     return notify

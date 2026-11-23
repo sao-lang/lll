@@ -157,6 +157,8 @@ class AgentBuilder:
             audit=self._audit,
             stream=self._stream,
             manager=self._checkpoint_store.manager() if self._checkpoint_store else None,
+            security=self._security,
+            bus=self._stream_bus,  # S1 修复：Runner.notify 与 stream_bus getter 复用同一 bus
             checkpoint_every=checkpoint_every,
         )
 

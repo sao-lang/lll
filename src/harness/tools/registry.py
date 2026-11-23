@@ -29,6 +29,7 @@ _ERR_INVALID_ARGS = "INVALID_ARGS"
 _ERR_NO_SANDBOX = "NO_SANDBOX"
 _ERR_NO_HUMAN = "NO_HUMAN"
 _ERR_APPROVAL_DENIED = "APPROVAL_DENIED"
+_ERR_NO_AUDIT = "NO_AUDIT"
 _ERR_TOOL_ERROR = "TOOL_ERROR"
 _APPROVE = "approve"
 _OPT_DENY = "deny"
@@ -204,45 +205,61 @@ class ToolRegistry:
                 if key not in allowed:
                     return finish(ok=False, error=_ERR_INVALID_ARGS)
 
+        # 审计事件单一字段契约（B1 修复）：写入方与 AuditLogger 消费方共用一套具名字段，
+        # danger/tool/call_id/source 等语义并入 rationale，避免"链有效但内容空壳"。
+        async def record_audit(*, approved: bool, sandboxed: bool) -> None:
+            if self._audit is None:  # fail-closed：非 SAFE 工具审计缺席即拒绝。
+                return
+            await self._audit.record({
+                "who": ctx.session_id,
+                "when": int(time.time()),
+                "action": f"tool.{level.value.lower()}.call",
+                "cost": 0.0,
+                "data_touched": (call.name, call.call_id),
+                "rationale": (f"danger={level.value};source={spec.source};"
+                              f"tool={call.name};call_id={call.call_id};"
+                              f"approved={approved};sandbox={sandboxed}"),
+            }, ctx)
+
         try:
             if level is DangerLevel.SAFE:
                 # SAFE：无副作用顾虑，直接执行（同步函数经 _maybe_await 归一）。
                 return finish(await self._maybe_await(fn(**call.args)))
+            if self._audit is None:
+                # LOW/HIGH/CRITICAL 全部要求审计（R9 §5 审计覆盖率 100%）。
+                return finish(ok=False, error=_ERR_NO_AUDIT)
             if level is DangerLevel.LOW:
-                # LOW：先记审计再直执行；审计缺席降级执行但显式标记，不静默放行。
-                if self._audit is not None:
-                    await self._audit.record(
-                        {
-                            "danger": level.value,
-                            "source": spec.source,
-                            "tool": call.name,
-                            "call_id": call.call_id,
-                        },
-                        ctx,
-                    )
-                else:
-                    meta["audit_missing"] = True
+                # LOW：先记审计再直执行。
+                await record_audit(approved=False, sandboxed=False)
                 return finish(await self._maybe_await(fn(**call.args)))
             if level is DangerLevel.HIGH:
                 # HIGH：必须沙盒；缺席即拒绝，绝不降级为直执行。
                 if self._sandbox is None:
+                    await record_audit(approved=False, sandboxed=False)
                     return finish(ok=False, error=_ERR_NO_SANDBOX)
                 out = await self._sandbox.run(fn, call.args, ctx)
                 meta["sandbox"] = True
+                await record_audit(approved=False, sandboxed=True)
                 return finish(out)
-            # CRITICAL：审批 + 沙盒两道门缺一不可。
+            # CRITICAL：审批 + 沙盒两道门缺一不可；每条决策出口都写审计。
             if self._human is None:
+                await record_audit(approved=False, sandboxed=False)
                 return finish(ok=False, error=_ERR_NO_HUMAN)
             question = f"Approve execution of tool {call.name} (call_id={call.call_id})?"
+            # S4：把 danger 透传给审批包装器（经 ctx.meta，兼容 HumanPort 三参签名）。
+            ctx.meta["danger"] = level.value
             answer = await self._human.ask(question, [_APPROVE, _OPT_DENY], ctx)
             if answer.strip().lower() != _APPROVE:
                 # 右侧是模块常量（Name），不是字符串字面量比较（规则 5）。
+                await record_audit(approved=False, sandboxed=False)
                 return finish(ok=False, error=_ERR_APPROVAL_DENIED)
             if self._sandbox is None:
+                await record_audit(approved=True, sandboxed=False)
                 return finish(ok=False, error=_ERR_NO_SANDBOX)
             out = await self._sandbox.run(fn, call.args, ctx)
             meta["approved"] = True
             meta["sandbox"] = True
+            await record_audit(approved=True, sandboxed=True)
             return finish(out)
         except Exception as exc:
             # 工具/沙盒/审计/审批任一异常都折叠为失败信封，不抛穿到调用方。

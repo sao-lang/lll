@@ -36,38 +36,41 @@ def test_safe_executes_directly(ctx: PortCtx) -> None:
 
 
 def test_low_audits_then_direct(ctx: PortCtx, audit: FakeAudit) -> None:
-    """LOW：先记审计再直执行；审计事件带 danger/source。"""
+    """LOW：先记审计再直执行；审计事件 rationale 带 danger/source（单一字段契约）。"""
     registry = ToolRegistry(audit=audit)
     fn = _fn(DangerLevel.LOW)
     registry.register(fn.spec, fn)
     result = _call(registry, ctx)
     assert result.ok and result.value == "direct"
     assert len(audit.events) == 1
-    assert audit.events[0]["danger"] == "LOW"
+    ev = audit.events[0]
+    assert ev["action"] == "tool.low.call"
+    assert "danger=LOW" in ev["rationale"] and "source=local" in ev["rationale"]
 
 
-def test_low_without_audit_degrades_with_warning(ctx: PortCtx) -> None:
-    """LOW 审计缺席：降级直执行并在 meta 标记 audit_missing（不拒绝、不静默）。"""
+def test_low_without_audit_fails_closed(ctx: PortCtx) -> None:
+    """LOW 审计缺席：fail-closed 拒绝执行（S3 修复，不再静默降级放行）。"""
     registry = ToolRegistry()
     fn = _fn(DangerLevel.LOW)
     registry.register(fn.spec, fn)
     result = _call(registry, ctx)
-    assert result.ok and result.meta.get("audit_missing") is True
+    assert not result.ok and result.error == "NO_AUDIT"
 
 
-def test_high_uses_sandbox(ctx: PortCtx, sandbox: FakeSandbox) -> None:
-    """HIGH：经 SandboxPort 执行，meta 标 sandbox=True。"""
-    registry = ToolRegistry(sandbox=sandbox)
+def test_high_uses_sandbox(ctx: PortCtx, sandbox: FakeSandbox, audit: FakeAudit) -> None:
+    """HIGH：经 SandboxPort 执行，meta 标 sandbox=True；审计三级别覆盖。"""
+    registry = ToolRegistry(sandbox=sandbox, audit=audit)
     fn = _fn(DangerLevel.HIGH)
     registry.register(fn.spec, fn)
     result = _call(registry, ctx)
     assert result.ok and sandbox.calls == ["run"]
     assert result.meta["sandbox"] is True
+    assert len(audit.events) == 1 and "danger=HIGH" in audit.events[0]["rationale"]
 
 
-def test_high_without_sandbox_refuses(ctx: PortCtx) -> None:
+def test_high_without_sandbox_refuses(ctx: PortCtx, audit: FakeAudit) -> None:
     """HIGH 沙盒缺席：拒绝执行（不抛穿），error 标 NO_SANDBOX。"""
-    registry = ToolRegistry()
+    registry = ToolRegistry(audit=audit)
     fn = _fn(DangerLevel.HIGH)
     registry.register(fn.spec, fn)
     result = _call(registry, ctx)
@@ -75,40 +78,46 @@ def test_high_without_sandbox_refuses(ctx: PortCtx) -> None:
 
 
 def test_critical_approval_then_sandbox(
-    ctx: PortCtx, human: FakeHuman, sandbox: FakeSandbox,
+    ctx: PortCtx, human: FakeHuman, sandbox: FakeSandbox, audit: FakeAudit,
 ) -> None:
-    """CRITICAL：先人工审批再沙盒执行，两 Port 都被真实调用。"""
-    registry = ToolRegistry(human=human, sandbox=sandbox)
+    """CRITICAL：审批→沙盒→审计三道门全走，审计记 approved/sandbox 语义。"""
+    registry = ToolRegistry(human=human, sandbox=sandbox, audit=audit)
     fn = _fn(DangerLevel.CRITICAL)
     registry.register(fn.spec, fn)
     result = _call(registry, ctx)
     assert result.ok and len(human.questions) == 1 and sandbox.calls == ["run"]
     assert result.meta["approved"] is True and result.meta["sandbox"] is True
+    assert len(audit.events) == 1 and "approved=True" in audit.events[0]["rationale"]
 
 
 def test_critical_denied_approval_skips_sandbox(
-    ctx: PortCtx, sandbox: FakeSandbox,
+    ctx: PortCtx, sandbox: FakeSandbox, audit: FakeAudit,
 ) -> None:
-    """CRITICAL 审批拒绝：不进沙盒，error 标 APPROVAL_DENIED。"""
-    registry = ToolRegistry(human=FakeHuman(answer="deny"), sandbox=sandbox)
+    """CRITICAL 审批拒绝：不进沙盒，error 标 APPROVAL_DENIED，审计仍记拒绝决策。"""
+    registry = ToolRegistry(human=FakeHuman(answer="deny"), sandbox=sandbox, audit=audit)
     fn = _fn(DangerLevel.CRITICAL)
     registry.register(fn.spec, fn)
     result = _call(registry, ctx)
     assert not result.ok and result.error == "APPROVAL_DENIED" and sandbox.calls == []
+    assert len(audit.events) == 1
 
 
-def test_critical_without_human_refuses(ctx: PortCtx, sandbox: FakeSandbox) -> None:
+def test_critical_without_human_refuses(
+    ctx: PortCtx, sandbox: FakeSandbox, audit: FakeAudit,
+) -> None:
     """CRITICAL 缺 HumanPort：拒绝（NO_HUMAN），即便沙盒在场。"""
-    registry = ToolRegistry(sandbox=sandbox)
+    registry = ToolRegistry(sandbox=sandbox, audit=audit)
     fn = _fn(DangerLevel.CRITICAL)
     registry.register(fn.spec, fn)
     result = _call(registry, ctx)
     assert not result.ok and result.error == "NO_HUMAN"
 
 
-def test_call_danger_cannot_downgrade(ctx: PortCtx, sandbox: FakeSandbox) -> None:
+def test_call_danger_cannot_downgrade(
+    ctx: PortCtx, sandbox: FakeSandbox, audit: FakeAudit,
+) -> None:
     """安全：调用方伪造 danger=SAFE 不能降级已注册的高危工具（以注册 spec 为准）。"""
-    registry = ToolRegistry(sandbox=sandbox)
+    registry = ToolRegistry(sandbox=sandbox, audit=audit)
     fn = _fn(DangerLevel.HIGH)
     registry.register(fn.spec, fn)
     forged = make_call("run", {}, danger=DangerLevel.SAFE)

@@ -17,7 +17,7 @@
 **不做**：沙盒实现细节（R9 提供 SandboxPort，R5 只做路由）；R9 三 Port 的实现本体。
 
 > **权威 danger 四级路由语义**（R9 §5 / 总设计 §R9.5，R5 照此实现，不得改写）：
-> `SAFE`=直接执行 / `LOW`=AuditPort.record 审计后直执行 / `HIGH`=SandboxPort 沙盒执行 / `CRITICAL`=HumanPort.ask 审批通过后再 SandboxPort。
+> `SAFE`=直接执行 / `LOW`=AuditPort.record 审计后直执行 / `HIGH`=SandboxPort 沙盒执行 / `CRITICAL`=HumanPort.ask 审批通过后再 SandboxPort；LOW/HIGH/CRITICAL 全写审计（覆盖率 100%），审计缺席 fail-closed（NO_AUDIT），HIGH/CRITICAL 决策出口均写审计。
 > 外部 danger 一律经 `DangerLevel.coerce()` 归一，未知值/None **显式回退到最严格的 CRITICAL（fail closed）**，绝不回退 SAFE。
 
 ## 2. 设计架构
@@ -128,9 +128,9 @@ class ToolRegistry:                      # ToolPort 默认实现
 
 # ---- R9 依赖的四级路由（构造注入 + 缺席即拒绝）----
 # SAFE     → 直接执行
-# LOW      → AuditPort.record 审计后直执行；audit 缺席 → 降级直执行并在 meta 标 audit_missing=True
-# HIGH     → SandboxPort 沙盒执行；sandbox 缺席 → 返回 ToolResult 失败（不抛穿）
-# CRITICAL → HumanPort.ask 审批通过 → SandboxPort 沙盒执行；human 或 sandbox 缺席 → 返回 ToolResult 失败
+# LOW      → AuditPort.record 审计后直执行；audit 缺席 → fail-closed 返回 NO_AUDIT（不再静默降级）
+# HIGH     → AuditPort.record 审计 + SandboxPort 沙盒执行；sandbox 缺席 → 返回 ToolResult 失败（不抛穿）
+# CRITICAL → AuditPort.record 审计 + HumanPort.ask 审批通过 → SandboxPort 沙盒执行；human/sandbox 缺席 → 返回 ToolResult 失败；danger 经 ctx.meta 透传审批包装器
 
 # ---- MCP：以 R2 MCPPort 为准（list_tools/call_tool 均带 ctx）----
 class MCPPort(Protocol):                 # R2 protocols.py 协议

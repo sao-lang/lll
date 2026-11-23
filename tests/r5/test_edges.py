@@ -102,7 +102,7 @@ def test_static_check_clean_with_ports_present() -> None:
 
 def test_critical_approved_but_no_sandbox_refuses(ctx: PortCtx) -> None:
     """CRITICAL 审批通过但沙盒缺席：仍拒绝（NO_SANDBOX），两道门缺一不可。"""
-    registry = ToolRegistry(human=FakeHuman(answer="approve"))
+    registry = ToolRegistry(human=FakeHuman(answer="approve"), audit=FakeAudit())
     t = _tool(DangerLevel.CRITICAL)
     registry.register(t.spec, t)  # type: ignore[arg-type]
     result = asyncio.run(registry.call(make_call("run", {}), ctx))
