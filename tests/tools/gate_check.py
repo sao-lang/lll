@@ -150,7 +150,7 @@ MODULES = {
             "Reinjector", "DefaultReinjector", "TokenCounter", "DefaultTokenCounter",
             "estimate_tokens", "MemoryScope", "ScopeResolver", "make_item_id",
             # D4/D5 新增方案（落盘策略 + KV cache 一等可观测指标）
-            "OffloadPolicy", "DEFAULT_OFFLOAD_THRESHOLD", "CacheTelemetry",
+            "CacheTelemetry",
         ],
         "behavior": [
             "test_types.py", "test_assembly.py", "test_compaction.py",

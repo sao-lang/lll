@@ -95,7 +95,7 @@ class TestFourPitsOnExecutorHost:
         async def ok_core(inv: CallContext) -> Result:
             return Result.success("ok")
 
-        executor = ResilienceCapability(rate_limit=rl).install(ok_core)
+        executor = ResilienceCapability(rate_limit=rl).wrap(ok_core)
         result = asyncio.run(executor.run_invocation(ctx))
         assert result.ok  # 降级类放行（与 tests/r3/test_degrade.py 一致）
         fault = ctx.fault()
@@ -121,7 +121,7 @@ class TestCallStateTypedTarget:
             calls.append(target)
             return Result.success(target)
 
-        executor = ResilienceCapability(rate_limit=limit, degradation=degradation).install(core)
+        executor = ResilienceCapability(rate_limit=limit, degradation=degradation).wrap(core)
         meta: dict = {}
         ctx = _Ctx(meta=meta)
         inv = CallContext(
@@ -149,7 +149,7 @@ class TestCallStateTypedTarget:
             called.append("core")
             return Result.success("fabricated")
 
-        executor = ResilienceCapability(rate_limit=limit, degradation=degradation).install(core)
+        executor = ResilienceCapability(rate_limit=limit, degradation=degradation).wrap(core)
         # failed_target 由真实 RateLimit 许可派生为注册名 "backup"（B2，非手工自证）
         meta: dict = {}
         inv = CallContext(
@@ -203,7 +203,7 @@ class TestR37RealRetrySource:
 
         retry = RetryPolicy(max_attempts=2, base_delay=0.001, jitter="none")
         degradation = Degradation(_ladder(), available={"primary", "backup"})
-        executor = ResilienceCapability(retry=retry, degradation=degradation).install(core)
+        executor = ResilienceCapability(retry=retry, degradation=degradation).wrap(core)
         inv = CallContext(
             effect=Invoke(port="llm", payload={"model": "primary"}),
             ctx=object(), session=type("S", (), {"session_id": "r37"})(), meta={},

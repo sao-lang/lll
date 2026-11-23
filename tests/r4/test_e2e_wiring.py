@@ -76,7 +76,7 @@ class TestFullChainWiring:
         degradation = Degradation(_ladder(), available={"primary", "backup"})
         executor = ResilienceCapability(
             rate_limit=_limit(), degradation=degradation,
-        ).install(cap.gateway().as_call())
+        ).wrap(cap.gateway().as_call())
         result = _run(executor, "e2e-degrade")
         assert result.output == "backup"
         assert backup.calls == 1 and primary.calls == 0
@@ -89,7 +89,7 @@ class TestFullChainWiring:
         degradation = Degradation(_ladder(), available=set())  # 无可用 → REFUSE
         executor = ResilienceCapability(
             rate_limit=_limit(), degradation=degradation,
-        ).install(cap.gateway().as_call())
+        ).wrap(cap.gateway().as_call())
         result = _run(executor, "e2e-refuse")
         assert primary.calls == 0
         # REFUSE 折叠为失败 Result（code=REFUSED），零后端调用、绝不编造答案。
@@ -99,7 +99,7 @@ class TestFullChainWiring:
     def test_backend_error_folds_into_failure_result(self) -> None:
         """后端 error 响应折叠为失败 Result（不伪装成功）。"""
         cap = ModelCapability(llm=FakeLLM("primary", fail="500:boom"))
-        executor = ResilienceCapability().install(cap.gateway().as_call())
+        executor = ResilienceCapability().wrap(cap.gateway().as_call())
         result = _run(executor, "e3")
         first = result.events[0].results[0]
         assert not first.ok and "500" in str(first.error)
@@ -109,7 +109,7 @@ class TestFullChainWiring:
         primary = FakeLLM("primary", fail="500:boom")
         cap = ModelCapability(llm=primary)
         retry = RetryPolicy(max_attempts=3, base_delay=0.001, jitter="none", idempotency_required=False)
-        executor = ResilienceCapability(retry=retry).install(cap.gateway().as_call())
+        executor = ResilienceCapability(retry=retry).wrap(cap.gateway().as_call())
         result = _run(executor, "e1")
         err = result.events[0].results[0].error
         assert err is None or "PORT_CRASHED" not in str(err)
@@ -142,7 +142,7 @@ class TestFullChainWiring:
             calls.append(1)
             return Result.success({"ok": True})
 
-        executor = ResilienceCapability(idempotency=idem).install(core)
+        executor = ResilienceCapability(idempotency=idem).wrap(core)
         first = asyncio.run(executor.run_invocation(make_ctx(eff)))
         second = asyncio.run(executor.run_invocation(make_ctx(eff)))
         assert first.ok and len(calls) == 1
@@ -167,7 +167,7 @@ class TestFullChainWiring:
         bus.on(LifecyclePhase.BEFORE_MODEL, lambda n: seen.append(n.phase.value))
         bus.on(LifecyclePhase.AFTER_MODEL, lambda n: seen.append(n.phase.value))
         cap = ModelCapability(llm=FakeLLM("primary"), bus=bus)
-        executor = ResilienceCapability().install(cap.gateway().as_call())
+        executor = ResilienceCapability().wrap(cap.gateway().as_call())
         _run(executor, "e2e-notify")
         assert "before_model" in seen and "after_model" in seen
 
@@ -175,8 +175,8 @@ class TestFullChainWiring:
         """同一网关复用：第二次缓存命中，后端只调一次。"""
         primary = FakeLLM("primary")
         gw = ModelCapability(llm=primary).gateway()
-        executor1 = ResilienceCapability().install(gw.as_call())
-        executor2 = ResilienceCapability().install(gw.as_call())
+        executor1 = ResilienceCapability().wrap(gw.as_call())
+        executor2 = ResilienceCapability().wrap(gw.as_call())
         r1 = _run(executor1, "cache-1")
         r2 = _run(executor2, "cache-2")
         assert r1.output == "primary" and r2.output == "primary"

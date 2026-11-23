@@ -27,7 +27,7 @@ from compose.notify import NoticeFn
 from runtime import AgentState, Budgets, CallFn, DynamicValue, Effect, EventStore, Invoke, Program, Result, RunResult, Session
 
 from .runtime import AgentRuntime
-from harness.observability import InMemoryEventStream
+from harness.observability import InMemoryEventStream, Trace
 
 from .runtime import assemble_runtime
 
@@ -216,6 +216,13 @@ class Agent:
         self._hooks: list[tuple[LifecyclePhase, NoticeFn, str]] = []
         self._port_handlers: dict[str, Callable[[Effect, DynamicValue], Awaitable[Result]]] = {}
         self._installed: dict[str, Provider] = {}  # 幂等按对象身份：同名但换对象要重装（Round4 S3）
+        self._history: list[dict[str, str]] = []  # 跨 say 对话历史（user/assistant 对）
+        self._history_pending = False  # 本次 run 是否还需注入历史（只注首轮 LLM 调用）
+        self._pending_session: object | None = None  # HITL 挂起会话（resume 唯一合法入口）
+        self._pending_input = ""  # 挂起轮的原 say 输入（续跑完成后补写记忆/历史）
+        self._trace: "Trace | None" = None  # 自动链路追踪（懒建，跨 say 共用）
+        self._hooks_bus_id = 0  # hooks 已重放到的 bus 世代（id）
+        self._hooks_applied_count = 0  # 当前 bus 上已重放的 hook 数（增量幂等）
 
     @property
     def stream(self) -> InMemoryEventStream:
@@ -224,7 +231,8 @@ class Agent:
         同源回退：runtime 已装配（say 之后访问）时返回 rt.stream——装配时
         self._stream 尚为 None 会让 assemble_runtime 自建实例，懒建一个新实例
         会造成两实例不同源、事件永远收不到（死注入变体）。全程单实例同源。
-        用户目标：agent.stream 直接可读；想外接自己的 sink 时用 use(自己的 sink 能力)。
+        用户目标：agent.stream 直接可读；外接 sink 用 stream= 注入自定义
+        EventStreamPort 实现（协议 runtime_checkable），或 agent.on 订阅相位。
         """
         if self._stream is None:
             rt_stream = getattr(self.runtime, "stream", None) if self.runtime else None
@@ -248,6 +256,31 @@ class Agent:
         不是兼容双轨，只是用户-facing 的命名。链式返回 self 支持连续 use()。
         """
         return self.capability(cap)
+
+    @property
+    def history(self) -> tuple[dict[str, str], ...]:
+        """跨 say 对话历史（只读快照）：每轮 say 追加 user/assistant 问答对。
+
+        与 MemoryCapability 长期记忆正交：这里是逐轮原文上下文（短期连续性），
+        记忆是提炼写入（长期偏好）。
+        """
+        return tuple(self._history)
+
+    @property
+    def trace(self) -> "Trace":
+        """自动链路追踪（一等公开属性）：llm/tool 调用自动产 span。
+
+        同一 agent 共用同一 trace_id（跨 say 累积）；span 由装配层 call wrapper
+        自动埋点（llm/tool 分支），用户无需手动 with trace.span(...)。
+        """
+        if self._trace is None:
+            from harness.observability import Trace as _Trace
+            self._trace = _Trace(trace_id=f"{self._session_id}-{id(self):x}")
+        return self._trace
+
+    def clear_history(self) -> None:
+        """清空对话历史（新话题）；不影响长期记忆。"""
+        self._history.clear()
 
     def on(self, phase: LifecyclePhase | str, fn: NoticeFn, *, name: str = "") -> "Agent":
         """订阅 lifecycle 相位（一等 hook API）：say() 前注册，装配期真订阅本次运行的 bus。
@@ -371,20 +404,60 @@ class Agent:
                     pass
 
     def _derive_call(self, tool_handler: CallFn) -> CallFn:
-        """构造统一 call：llm→dispatch，tool→四级路由，其余→注入的 port handler。"""
+        """构造统一 call：llm→dispatch，tool→四级路由，其余→注入的 port handler。
+
+        llm 链：gateway.as_dispatch 为中心调用；注入 ResilienceCapability 时以
+        res_cap.wrap(core).as_call() 真包装（timeout/retry/breaker/... 九策略
+        作用于每次模型调用），bus 在调用期延迟 attach（装配期 rt.bus 尚不存在）。
+        """
         cap = self._caps.get("model")
-        dispatch = cast(CallFn | None, getattr(cap, "dispatch", lambda: None)()) if cap else None
+        gateway = getattr(cap, "gateway", lambda: None)() if cap else None
+        dispatch: CallFn | None = None
+        if gateway is not None:
+            from compose.context import Invocation as _Invocation
+            raw = cast(CallFn, gateway.as_dispatch())
+
+            async def core(inv: _Invocation) -> Result:
+                bus = getattr(self.runtime, "bus", None) if self.runtime else None
+                if bus is not None:
+                    gateway.attach_bus(bus)
+                try:
+                    return await raw(inv.effect, inv.ctx)
+                except Exception as exc:  # noqa: BLE001
+                    # 后端异常折叠为失败值（SERVER_ERROR：可重试、计熔断）——
+                    # 重试/降级策略消费失败值语义；网关设计是异常原样抛回。
+                    return Result.failure(
+                        "SERVER_ERROR", f"{type(exc).__name__}: {exc}")
+
+            res_cap = self._caps.get("resilience")
+            wrap = getattr(res_cap, "wrap", None)
+            if callable(wrap):
+                executor = wrap(core)
+                dispatch = executor.as_call()
+            else:
+                async def gateway_dispatch(effect: Effect, ctx: DynamicValue) -> Result:
+                    bus = getattr(self.runtime, "bus", None) if self.runtime else None
+                    if bus is not None:
+                        gateway.attach_bus(bus)
+                    return await raw(effect, ctx)
+                dispatch = cast(CallFn, gateway_dispatch)
+        else:
+            dispatch = cast(CallFn | None, getattr(cap, "dispatch", lambda: None)()) if cap else None
 
         async def call(effect: Effect, ctx: DynamicValue) -> Result:
             if not isinstance(effect, Invoke):
                 return Result.failure("INVALID_EFFECT", "facade call only handles Invoke")
             port = effect.port
             if port == "tool":
-                return await tool_handler(effect, ctx)
+                # 自动埋点：tool 调用自动产 span（Trace CM 同步入栈，异步体安全）
+                name = str((effect.payload or {}).get("name") or "tool")
+                with self.trace.span(f"tool:{name}", component="tool"):
+                    return await tool_handler(effect, ctx)
             if port == "llm":
                 if dispatch is None:
                     return Result.failure("PORT_MISSING", "no model capability injected")
-                return await self._call_llm(effect, ctx, dispatch)
+                with self.trace.span("llm", component="llm"):
+                    return await self._call_llm(effect, ctx, dispatch)
             # 其余 port：查注入的 handler（Blk-2：任意 port 可注入，不再只认 llm/tool）
             handler = self._port_handlers.get(port)
             if handler is not None:
@@ -425,7 +498,7 @@ class Agent:
                 m["content"] = f"{m.get('content', '')}\n{memory_text}".strip()
                 messages = [*messages[:sys_idx], m, *messages[sys_idx + 1:]]
         clean = Invoke(port="llm", payload={
-            "messages": messages,
+            "messages": self._inject_history(messages),
             "model": effect.payload.get("model") or "",
             "tools": effect.payload.get("tools") or [],
         })
@@ -445,6 +518,23 @@ class Agent:
                 return Result(result.ok, data, usage, result.error)
         return Result(result.ok, data, result.usage, result.error)
 
+    def _inject_history(self, messages: list[dict[str, object]]) -> list[dict[str, object]]:
+        """跨 say 连续性：把历史问答对前置注入本轮首轮 LLM 调用（每 run 一次）。
+
+        插入点：第一条 user 消息之前（system/记忆之后）——本轮 tool 循环的后续
+        消息自带上文，不重复注入。
+        """
+        if not self._history or not self._history_pending:
+            return messages
+        self._history_pending = False
+        out = [dict(m) for m in messages]
+        first_user = next((i for i, m in enumerate(out)
+                           if m.get("role") == "user"), None)
+        if first_user is None:
+            return messages
+        injected: list[dict[str, object]] = [dict(m) for m in self._history]
+        return [*out[:first_user], *injected, *out[first_user:]]
+
     async def _arun(self) -> DynamicValue:
         """内部执行：单次装配 → Runner.run → 取 output（全程语义级）。
 
@@ -452,6 +542,7 @@ class Agent:
         都在**同一次装配**中完成——tools/audit/sandbox/store/bus 全同源（Round3 审计断裂修复）。
         """
         self._install_caps()
+        self._history_pending = True  # 新 run：允许首轮 LLM 调用注入历史
         from harness.tools import ToolRegistry, clear_pending, pending_tools
         tools_snapshot = list(self._tools)
         facade = self
@@ -489,8 +580,7 @@ class Agent:
         self.runtime = rt
         # lifecycle hooks 真接线：say() 前收集的订阅装配期重放到本次运行的 bus——
         # 与事件投影同一 bus（runner_notifier/gateway 都从它 emit），先于 run 注册。
-        for hook_phase, hook_fn, hook_name in self._hooks:
-            rt.bus.on(hook_phase, hook_fn, name=hook_name)
+        self._replay_hooks()
         session = Session(
             session_id=self._session_id,
             program_factory=self._arch.compile,
@@ -498,7 +588,28 @@ class Agent:
         )
         result = await rt.runner.run(session)
         self.last_run = result
+        # HITL：挂起时保存活会话（resume 的唯一合法入口），不下发假答案。
+        if str(getattr(result, "status", "")) == "suspended":
+            self._pending_session = session
         return result.output
+
+    def _replay_hooks(self) -> None:
+        """把收集的 hooks 增量重放到当前 bus（幂等）。
+
+        bus 每次 say() 装配全新实例，按 bus 世代重置计数；同 bus 上按已重放
+        数量增量追加——resume 等非装配路径调用时只补 say 之后新加的 hook，
+        不产生重复订阅。
+        """
+        rt = self.runtime
+        if rt is None or not self._hooks:
+            return
+        bus_id = id(rt.bus)
+        if bus_id != self._hooks_bus_id:
+            self._hooks_bus_id = bus_id
+            self._hooks_applied_count = 0
+        for hook_phase, hook_fn, hook_name in self._hooks[self._hooks_applied_count:]:
+            rt.bus.on(hook_phase, hook_fn, name=hook_name)
+        self._hooks_applied_count = len(self._hooks)
 
     async def asay(self, text: str) -> str:
         """异步语义入口：输入经 ContextVar 按调用链绑定（并发安全）。
@@ -510,6 +621,22 @@ class Agent:
         mem_cap = next(
             (c for c in self._caps.values() if isinstance(c, MemoryCapability)), None)
         ctx = PortCtx(session_id=self._session_id, run_id="facade-run")
+        # guardrail 输入链（fail-closed）：注入 SecurityCapability 时输入先过护栏。
+        # deny/ask 一律阻断（ask 无门面输入审批语义，按最严处置）；redact 以脱敏
+        # 文本作为实际输入继续。拒绝时不调 LLM、不写记忆。
+        from harness.security import SecurityCapability, SecurityCtx
+        sec_cap = self._caps.get("security")
+        guard = (getattr(sec_cap, "guardrail", None)
+                 if isinstance(sec_cap, SecurityCapability) else None)
+        if guard is not None:
+            sec_ctx = SecurityCtx.from_port_ctx(ctx, source="input", direction="input")
+            verdict = guard.check(text, sec_ctx)
+            action = str(getattr(verdict, "action", "allow"))
+            if action == "deny" or action == "ask":
+                rule = str(getattr(verdict, "rule", "") or "-")
+                return f"[blocked] 输入被护栏拒绝（rule={rule}）"
+            if action == "redact":
+                text = str(getattr(verdict, "redacted", text))
         with bind_input(text):
             if mem_cap is not None:
                 recalled = await mem_cap.recall_before(text, ctx)
@@ -520,9 +647,56 @@ class Agent:
                     _memory_context.reset(token)
             else:
                 answer = _extract_answer(await self._arun())
+        # HITL：挂起不下发假答案、不写记忆/历史——等待 agent.resume 续跑。
+        if str(getattr(self.last_run, "status", "")) == "suspended":
+            self._pending_input = text
+            return "[wait_human] 已挂起等待人工输入：调用 agent.resume(你的答复) 续跑"
         if mem_cap is not None:
             mem_cap.write_after(text, answer, ctx)
+        # 对话历史追加（连续性主线）：原文问答对，与长期记忆提炼写入正交。
+        self._history.append({"role": "user", "content": text})
+        self._history.append({"role": "assistant", "content": answer})
         return answer
+
+    async def aresume(self, answer: str) -> str:
+        """异步续跑入口：answer 回填挂起会话（wait_human → resumed），跑完出结果。
+
+        完成后与 say 对称：写回长期记忆、追加对话历史；若再次挂起（多级审批）
+        保持 _pending_session，可继续 resume。
+        """
+        from harness.context import MemoryCapability
+        rt = self.runtime
+        session = self._pending_session
+        if rt is None or not isinstance(session, Session):
+            raise RuntimeError("无挂起会话可续跑（agent.resume 仅在 say 挂起后可用）")
+        ctx = PortCtx(session_id=self._session_id, run_id="facade-resume")
+        self._history_pending = True
+        self._replay_hooks()  # say 之后新加的 hook 也要收到 resumed/终态相位
+        result = cast(RunResult, await rt.resume(session, answer))
+        self.last_run = result
+        if str(getattr(result, "status", "")) == "suspended":
+            return "[wait_human] 再次挂起：继续调用 agent.resume(你的答复)"
+        self._pending_session = None
+        out = _extract_answer(result.output)
+        text = self._pending_input
+        self._pending_input = ""
+        mem_cap = next(
+            (c for c in self._caps.values() if isinstance(c, MemoryCapability)), None)
+        if mem_cap is not None:
+            mem_cap.write_after(text, out, ctx)
+        self._history.append({"role": "user", "content": text})
+        self._history.append({"role": "assistant", "content": out})
+        return out
+
+    def resume(self, answer: str) -> str:
+        """同步续跑入口：HITL 闭环（say 挂起 → resume → 最终结果）。"""
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(self.aresume(answer))
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(lambda: asyncio.run(self.aresume(answer))).result()
 
     def say(self, text: str) -> str:
         """同步语义入口：running loop 中走独立线程，只返回白名单文本。"""

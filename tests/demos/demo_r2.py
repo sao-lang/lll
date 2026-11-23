@@ -39,7 +39,7 @@ async def main() -> None:
         order.append("port")
         return Result.success({"content": "answer"})
 
-    executor = ResilienceCapability(extra_plugins=(tracing,)).install(  # type: ignore[arg-type]
+    executor = ResilienceCapability(extra_plugins=(tracing,)).wrap(  # type: ignore[arg-type]
         core, registry=reg, bus=bus,
     )
     assert executor.registry is reg
@@ -62,7 +62,7 @@ async def main() -> None:
         called.append(1)
         return Result.success("should-not-run")
 
-    blocked = ResilienceCapability(killswitch=kill).install(blocked_core, bus=bus)
+    blocked = ResilienceCapability(killswitch=kill).wrap(blocked_core, bus=bus)
     denied = await blocked.run_invocation(inv)
     assert not denied.ok and called == []
     assert seen == ["invoke_rejected"]

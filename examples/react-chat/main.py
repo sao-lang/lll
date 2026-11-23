@@ -25,10 +25,10 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from api import Agent, verify_audit_chain  # noqa: E402
-from api.wiring import STREAM_TOPIC  # noqa: E402
-from archs import ReAct  # noqa: E402
-from compose import (  # noqa: E402
+from api import Agent, verify_audit_chain
+from api.wiring import STREAM_TOPIC
+from archs import ReAct
+from compose import (
     DangerLevel,
     LifecyclePhase,
     LLMRequest,
@@ -37,12 +37,13 @@ from compose import (  # noqa: E402
     ToolCall,
     Usage,
 )
-from harness.context import MemoryCapability  # noqa: E402
-from harness.model import CostGuard, ModelCapability  # noqa: E402
-from harness.observability import TimelineProjection  # noqa: E402
-from harness.security import SecurityCapability  # noqa: E402
-from harness.tools import tool  # noqa: E402
-from runtime import Budgets  # noqa: E402
+from harness.context import MemoryCapability
+from harness.model import CostGuard, ModelCapability
+from harness.observability import TimelineProjection
+from harness.resilience import ResilienceCapability, Timeout
+from harness.security import SecurityCapability
+from harness.tools import tool
+from runtime import Budgets
 
 # ---------------------------------------------------------------- 配置
 PROMPT = os.getenv("CHAT_PROMPT", "用 get_weather 查一下深圳的天气，然后用一句话告诉我。")
@@ -140,12 +141,16 @@ async def main() -> None:
     agent = Agent(arch, session_id=SESSION_ID, system=SYSTEM_PROMPT,
                   budgets=Budgets(max_turns=5, max_tokens=4000, max_cost_usd=MAX_COST_USD))
     agent.use(ModelCapability(llm=llm, cost_guard=cost_guard))
-    agent.use(SecurityCapability())   # 沙盒/审计/审批默认实现，插拔即生效
+    agent.use(SecurityCapability())   # 沙盒/审计/审批默认实现 + say 输入过 guardrail
     agent.use(mem_cap)                # say() 自动 recall（前）+ 自动写回（后）
+    agent.use(ResilienceCapability(timeout=Timeout(timeout=30.0)))
+    # ↑ 可靠性九策略真包装 llm 链（timeout/retry/breaker/限流/舱位/幂等/降级/看门狗/killswitch）
 
     # lifecycle hook 一等订阅：say 前注册，装配期真订阅本次运行的 bus。
     # Notice 只读投影（phase/port/payload/meta），异常被总线就地隔离（通知语义）。
     hook_log: list[str] = []
+    agent.on(LifecyclePhase.BEFORE_MODEL,
+             lambda n: hook_log.append(f"{n.phase.value}"))
     agent.on(LifecyclePhase.AFTER_TOOL,
              lambda n: hook_log.append(f"{n.phase.value}:{n.port}"))
     agent.on(LifecyclePhase.SESSION_END,
@@ -160,8 +165,8 @@ async def main() -> None:
         f"static_check: ok={check.ok}（ports={len(check.ports_required)}）",
         f"say() 返回: {answer[:200]}",
         f"run.status={run.status}, reason={run.reason or '-'}",
-        f"R1 预算消耗: turns={run.state.budgets.used_turns}, "
-        f"tokens={run.state.budgets.used_tokens}, cost=${run.state.budgets.used_cost_usd:.6f}",
+        (f"R1 预算消耗: turns={run.state.budgets.used_turns}, "
+        f"tokens={run.state.budgets.used_tokens}, cost=${run.state.budgets.used_cost_usd:.6f}"),
     ])
 
     # ---- ⑤ 注入生效证据（不是登记名字）----
@@ -172,31 +177,33 @@ async def main() -> None:
     schema = get_weather.spec.parameters_schema
     report.add("⑤ 注入生效证据", [
         f"@tool schema 推导: {schema}（city:str → string，required 自动）",
-        f"system= 一等参数: 首轮 LLM 消息 roles="
-        f"{[m.get('role') for m in llm.calls[0]] if isinstance(llm, _FakeLLM) and llm.calls else '（真实 LLM 由框架 _call_llm 前置）'}",
+        (f"system= 一等参数: 首轮 LLM 消息 roles="
+        f"{[m.get('role') for m in llm.calls[0]] if isinstance(llm, _FakeLLM) and llm.calls else '（真实 LLM 由框架 _call_llm 前置）'}"),
         f"记忆自动召回: 命中注入={'是' if mem_recalled else '否（本次输入未命中预置记忆）'}",
         f"记忆自动写回: say 前 {mem_before} 条 → say 后 {mem_after} 条"
         + ("（+1 问答对自动入库）" if mem_after > mem_before else "（写回应发生，属异常）"),
     ])
 
-    # ---- ⑥ 可观测：agent.stream 内置事件流 + 时间线投影 ----
+    # ---- ⑥ 可观测：agent.stream 内置事件流 + TimelineProjection + 自动 trace ----
     envelopes = [e async for e in agent.stream.subscribe(STREAM_TOPIC)]
     timeline = TimelineProjection().project(envelopes)
-    report.add("⑥ 可观测（agent.stream 内置）", [
+    report.add("⑥ 可观测（agent.stream + agent.trace 内置）", [
         f"事件流 topic={STREAM_TOPIC}：{len(envelopes)} 条（自动发布，无需 StreamGateway）",
         *[f"  seq={e.seq} type={e.type} synthetic={e.data.get('seq_synthetic', False)}"
           for e in envelopes],
         f"TimelineProjection: {timeline.data}",
+        (f"agent.trace 自动 span: {len(agent.trace.spans())} 条 "
+        f"({sorted({s.component for s in agent.trace.spans()})})——llm/tool 调用自动埋点"),
     ])
 
     # ---- ⑦ 治理诊断：审计同源链 ----
     rt = agent.runtime
     audit_count = len(rt.audit.events()) if rt is not None else 0
     report.add("⑦ 治理诊断（只读）", [
-        f"审计链: {audit_count} 条，verify={verify_audit_chain(rt.audit) if rt is not None else '-'}"
-        "（LOW 工具直执行但必写审计）",
-        "SecurityCapability 默认实现: LocalSandbox + AuditLogger + ApprovalFlow"
-        "（CRITICAL 工具才触发审批）",
+        (f"审计链: {audit_count} 条，verify={verify_audit_chain(rt.audit) if rt is not None else '-'}"
+        "（LOW 工具直执行但必写审计）"),
+        ("SecurityCapability 默认实现: LocalSandbox + AuditLogger + ApprovalFlow"
+        "（CRITICAL 工具才触发审批）"),
     ])
 
     # ---- ⑧ Lifecycle hook（agent.on）----
@@ -207,11 +214,11 @@ async def main() -> None:
 
     # ---- 诚实边界 ----
     report.add("诚实边界（框架现状，不美化）", [
-        "· say() 只返回白名单文本；last_run/runtime 是只读诊断，不泄漏内部消息",
-        "· 记忆/事件流/审计默认进程内内存实现，无跨进程持久化与外部导出器",
-        "· 事件流投影自动发布（本链可见 after_tool/session_end）；after_model 事件仅在"
-        "网关走 bus 分发路径时发布（已知边界）；trace span 仍需显式埋点",
+        "· say() 只返回白名单文本；last_run/runtime/trace 是只读诊断，不泄漏内部消息",
+        "· 记忆/事件流/审计/trace 默认进程内内存实现，无跨进程持久化与外部导出器",
+        "· 外接 sink：stream= 注入自定义 EventStreamPort；或 agent.on 订阅 16 相位",
         "· LocalSandbox 线程隔离非 OS 强沙箱；本 demo 用 LOW 工具未触发审批",
+        "· HITL 闭环：gate 算子挂起后 agent.resume(答复) 续跑（本 demo 工具为 LOW 不触发）",
         "· 记忆召回是哈希向量+词面混合（默认 HashEmbedder，离线确定性）；生产注入真实 embedder",
     ])
 

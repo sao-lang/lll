@@ -1,4 +1,4 @@
-"""R3 能力装配测试：ResilienceCapability.install(core) 产出具名领域执行器。
+"""R3 能力装配测试：ResilienceCapability.wrap(core) 产出具名领域执行器。
 
 插件保留一等身份（name + 实例状态 + 构造注入），install 按领域把策略注入
 ReliabilityExecutor 的具名字段；缺席即跳过，无角色分派与槽位列表。
@@ -46,7 +46,7 @@ class TestCapabilityAssembly:
         """opt-in：不传插件 → 零策略；core 仍可执行。"""
         cap = ResilienceCapability()
         assert cap.plugins() == ()
-        ex = cap.install(_ok_core("x"))
+        ex = cap.wrap(_ok_core("x"))
         assert (ex._kill_switch, ex._watchdog, ex._idempotency, ex._rate_limit,
                 ex._bulkhead, ex._breaker, ex._retry, ex._timeout, ex._degradation) == (None,) * 9
         result = asyncio.run(ex.run_invocation(make_ctx()))
@@ -58,7 +58,7 @@ class TestCapabilityAssembly:
         retry = RetryPolicy()
         cap = ResilienceCapability(killswitch=kill, retry=retry)
         assert _names(cap.plugins()) == ["r3_killswitch", "r3_retry"]
-        ex = cap.install(_ok_core("x"))
+        ex = cap.wrap(_ok_core("x"))
         assert ex._kill_switch is kill and ex._retry is retry
         assert ex._degradation is None and ex._breaker is None
 
@@ -78,7 +78,7 @@ class TestCapabilityAssembly:
             rate_limit=limit, bulkhead=bulkhead, breaker=breaker,
             retry=retry, timeout=timeout, degradation=deg,
         )
-        ex = cap.install(_ok_core("x"))
+        ex = cap.wrap(_ok_core("x"))
         assert isinstance(ex, ReliabilityExecutor)
         assert ex.registry is None
         assert set(_names(cap.plugins())) == {
@@ -100,7 +100,7 @@ class TestCapabilityAssembly:
             called.append(1)
             return Result.success("should-not-run")
 
-        ex = ResilienceCapability(killswitch=kill).install(core)
+        ex = ResilienceCapability(killswitch=kill).wrap(core)
         result = asyncio.run(ex.run_invocation(make_ctx()))
         assert not result.ok and result.error is not None
         assert result.error.code == "INVOKE_REJECTED"
@@ -116,7 +116,7 @@ class TestCustomPlugins:
 
         custom = CustomDegradation(_ladder())
         cap = ResilienceCapability(degradation=custom)
-        ex = cap.install(_ok_core("x"))
+        ex = cap.wrap(_ok_core("x"))
         assert _names(cap.plugins()) == ["custom_degrade"]
         assert ex._degradation is custom
 
@@ -141,7 +141,7 @@ class TestExtraPlugins:
 
         cap = ResilienceCapability(extra_plugins=(transform,))  # type: ignore[arg-type]
         assert transform in cap.plugins()
-        ex = cap.install(_ok_core("x"))
+        ex = cap.wrap(_ok_core("x"))
         result = asyncio.run(ex.run_invocation(make_ctx()))
         assert result.ok and calls == ["before", "after"]
 
@@ -172,7 +172,7 @@ class TestExecutorBreakerDomain:
         for _ in range(3):
             asyncio.run(cb.record(err_result("500"), dim))
         inv = make_ctx(Invoke(port="llm", payload={"model": "primary"}))
-        ex = ResilienceCapability(breaker=cb).install(_ok_core("x"))
+        ex = ResilienceCapability(breaker=cb).wrap(_ok_core("x"))
         result = asyncio.run(ex.run_invocation(inv))
         fault = inv.fault()
         assert result.ok
@@ -182,7 +182,7 @@ class TestExecutorBreakerDomain:
     def test_observe_records_success_result(self) -> None:
         """调用成功后熔断记数：无失败。"""
         cb = CircuitBreaker(minimum_samples=3)
-        ex = ResilienceCapability(breaker=cb).install(_ok_core())
+        ex = ResilienceCapability(breaker=cb).wrap(_ok_core())
         result = asyncio.run(ex.run_invocation(make_ctx()))
         assert result.ok
         assert asyncio.run(cb.state(())).failures == 0
@@ -194,7 +194,7 @@ class TestExecutorBreakerDomain:
         async def boom(i: object) -> Result:
             raise RuntimeError("boom")
 
-        ex = ResilienceCapability(breaker=cb).install(boom)
+        ex = ResilienceCapability(breaker=cb).wrap(boom)
         with pytest.raises(RuntimeError, match="boom"):
             asyncio.run(ex.run_invocation(make_ctx()))
         assert asyncio.run(cb.state(())).failures == 1
@@ -215,7 +215,7 @@ class TestDomainComposition:
             calls.append(1)
             return Result.success("ok") if len(calls) >= 2 else Result.failure("500", "transient")
 
-        ex = cap.install(core)
+        ex = cap.wrap(core)
         inv = make_ctx()
         result = asyncio.run(ex.run_invocation(inv))
         assert result.ok and result.data == "ok"

@@ -38,7 +38,7 @@ def _executor() -> ReliabilityExecutor:
     async def core(inv: object) -> Result:
         return Result.success("x")
 
-    return ResilienceCapability().install(core)
+    return ResilienceCapability().wrap(core)
 
 
 class TestRegistryAssembly:

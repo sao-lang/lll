@@ -420,7 +420,7 @@ def test_executor_as_call_runs_through_runner():
         resp = yield Invoke(port="llm", payload={"messages": []})
         yield Terminate(output=resp.get("content") if isinstance(resp, dict) else "?")
 
-    executor = ResilienceCapability().install(core)
+    executor = ResilienceCapability().wrap(core)
     runner = Runner(call=executor.as_call())
     result = asyncio.run(
         runner.run(Session(session_id="r2-exec", program_factory=program))
@@ -439,7 +439,7 @@ def test_executor_killswitch_rejects_before_core():
         return Result.success("never")
 
     ks = KillSwitch(flag_store={"kill:global": True})
-    executor = ResilienceCapability(killswitch=ks).install(
+    executor = ResilienceCapability(killswitch=ks).wrap(
         core, notify=lambda phase, payload: notices.append(phase)
     )
     result = asyncio.run(executor.run_invocation(_inv()))
@@ -458,7 +458,7 @@ def test_executor_idempotency_blocks_duplicate_side_effect():
 
     executor = ResilienceCapability(
         idempotency=Idempotency(store={}, clock=lambda: 0.0)
-    ).install(core)
+    ).wrap(core)
     first = asyncio.run(executor.run_invocation(_inv(idem="K-R2")))
     second = asyncio.run(executor.run_invocation(_inv(idem="K-R2")))
     assert first.ok and first.data == "ok"
@@ -480,7 +480,7 @@ def test_executor_rate_limit_degrade_reroutes_to_backup():
     degradation = Degradation(_ladder(), available={"primary", "backup"})
     executor = ResilienceCapability(
         rate_limit=limit, degradation=degradation
-    ).install(core)
+    ).wrap(core)
     inv = _inv()
     result = asyncio.run(executor.run_invocation(inv))
     assert result.ok and result.data == "backup"
@@ -505,7 +505,7 @@ def test_executor_retry_exhaustion_reduces_to_backup():
     retry_policy = RetryPolicy(max_attempts=2, base_delay=0.001, jitter="none")
     executor = ResilienceCapability(
         retry=retry_policy, degradation=Degradation(_ladder(), available={"primary", "backup"})
-    ).install(core)
+    ).wrap(core)
     result = asyncio.run(executor.run_invocation(_inv()))
     assert result.ok and result.data == "backup"
     assert calls.count("primary") == 2
@@ -530,7 +530,7 @@ def test_executor_functional_transformer_extends_core():
 
     cap = ResilienceCapability(extra_plugins=(tag("t1"), tag("t2")))
     assert len(cap.plugins()) == 2  # 仅函数式变换器，无角色实例
-    executor = cap.install(core)
+    executor = cap.wrap(core)
     result = asyncio.run(executor.run_invocation(_inv()))
     assert result.ok and result.data == "ok"
     assert order == ["t2", "t1", "core"]

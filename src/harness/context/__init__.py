@@ -9,7 +9,6 @@ from .capability import MemoryCapability
 from .compaction import CompactionPolicy, DefaultCompactionPolicy, count_tokens
 from .manager import ContextMemoryManager
 from .observability import CacheTelemetry
-from .offload_policy import DEFAULT_OFFLOAD_THRESHOLD, OffloadPolicy
 from .offloader import (
     BLOB_HANDLE_SCHEME,
     BlobPort,
@@ -54,7 +53,7 @@ __all__ = [
     "ScopeResolver",
     "make_item_id",
     "ContextMemoryManager", "MemoryCapability",
-    "CacheTelemetry", "OffloadPolicy", "DEFAULT_OFFLOAD_THRESHOLD",
+    "CacheTelemetry",
     "BlobPort",
     "Offloader",
     "InMemoryBlobStore",  # purity-exempt: 生产默认后端导出名（存量，行号位移）

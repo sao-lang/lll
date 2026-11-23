@@ -122,7 +122,9 @@ class Trace:
 
     @contextmanager
     def span(self, name: str, *, component: str = "") -> Iterator[TraceSpan]:
-        """开启嵌套 span：自动接 parent_id，退出后恢复父级。"""
+        """开启嵌套 span：自动接 parent_id，退出后恢复父级并记录真实耗时。"""
+        import time
+        from dataclasses import replace
         span_id = f"{self.trace_id}-{next(self._ids)}"
         span = TraceSpan(trace_id=self.trace_id, span_id=span_id,
                          name=name, parent_id=self._parent, component=component)
@@ -130,9 +132,12 @@ class Trace:
         previous = self._parent
         self._parent = span_id
         self._stack.append(span)
+        start = time.perf_counter()
         try:
             yield span
         finally:
+            ended = replace(span, duration_ms=(time.perf_counter() - start) * 1000.0)
+            self.telemetry._replace(ended)
             self._stack.pop()
             self._parent = previous
 

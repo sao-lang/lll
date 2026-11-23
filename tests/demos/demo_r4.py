@@ -64,7 +64,7 @@ async def main() -> None:
     # 健康：primary
     primary = FakeLLM("primary")
     cap = ModelCapability(llm=primary)
-    r = await _run(ResilienceCapability().install(cap.gateway().as_call()), "healthy")
+    r = await _run(ResilienceCapability().wrap(cap.gateway().as_call()), "healthy")
     assert r.output == "primary" and primary.calls == 1
 
     # 降级：切 backup
@@ -72,7 +72,7 @@ async def main() -> None:
     cap2 = ModelCapability(llm=primary2)
     cap2.add_backend("backup", backup)
     deg = Degradation(_ladder(), available={"primary", "backup"})
-    c2 = ResilienceCapability(rate_limit=_limit(), degradation=deg).install(cap2.gateway().as_call())
+    c2 = ResilienceCapability(rate_limit=_limit(), degradation=deg).wrap(cap2.gateway().as_call())
     r2 = await _run(c2, "degrade")
     assert r2.output == "backup" and backup.calls == 1 and primary2.calls == 0
 
@@ -81,7 +81,7 @@ async def main() -> None:
     cap3 = ModelCapability(llm=primary3)
     cap3.add_backend("backup", FakeLLM("backup"))
     deg3 = Degradation(_ladder(), available=set())
-    c3 = ResilienceCapability(rate_limit=_limit(), degradation=deg3).install(cap3.gateway().as_call())
+    c3 = ResilienceCapability(rate_limit=_limit(), degradation=deg3).wrap(cap3.gateway().as_call())
     r3 = await _run(c3, "refuse")
     assert primary3.calls == 0 and not r3.events[0].results[0].ok
     assert r3.events[0].results[0].error.code == "REFUSED"

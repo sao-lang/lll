@@ -25,9 +25,11 @@ agent = Agent(ReAct([get_weather], llm="deepseek-chat", max_turns=2),
 agent.use(ModelCapability(llm=llm, cost_guard=CostGuard(max_cost_usd=0.05)))
 agent.use(SecurityCapability())   # 沙盒/审计/审批默认实现
 agent.use(MemoryCapability())     # say 自动召回（前）+ 自动写回（后）
+agent.use(ResilienceCapability(timeout=Timeout(timeout=30.0)))  # 九策略真包装 llm 链
 agent.on(LifecyclePhase.AFTER_TOOL, lambda n: print(n.phase, n.port))  # lifecycle hook
 answer = agent.say("用 get_weather 查一下深圳的天气")
-# agent.stream — 内置事件流，say 后直接订阅
+# agent.stream — 内置事件流；agent.trace — 自动 llm/tool span
+# HITL：gate 算子挂起后 agent.resume("yes") 续跑
 ```
 
 ## 自动编排了什么（旧 demo 里的胶水，现在全是框架内部）

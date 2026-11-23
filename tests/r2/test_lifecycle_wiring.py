@@ -50,7 +50,7 @@ class TestLifecycleWiring:
         llm = _FakeLLM("m")
         async def core(inv: Invocation) -> Result:
             return Result.success({"content": "ok", "tool_calls": []})
-        executor = ResilienceCapability().install(core)
+        executor = ResilienceCapability().wrap(core)
         runner = Runner(call=executor.as_call(), notify=runner_notifier(bus))
         asyncio.run(runner.run(Session(session_id="lc-1", program_factory=_program)))
         assert set(seen) >= {"session_start", "user_prompt", "state_fold", "session_end"}, seen
@@ -64,7 +64,7 @@ class TestLifecycleWiring:
 
         async def core(inv: Invocation) -> Result:
             return Result.success({"ok": True, "value": "x"})
-        executor = ResilienceCapability().install(core)
+        executor = ResilienceCapability().wrap(core)
         runner = Runner(call=executor.as_call(), notify=runner_notifier(bus))
         asyncio.run(runner.run(Session(session_id="lc-2", program_factory=lambda: _program(tool=True))))
         assert "before_tool" in seen and "after_tool" in seen, seen

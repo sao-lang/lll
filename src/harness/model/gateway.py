@@ -121,6 +121,16 @@ class ModelGateway:
         """装配核对用：网关解析降级目标所用的注册表（与共用容器同源）。"""
         return self._registry
 
+    def attach_bus(self, bus: LifecycleBus) -> None:
+        """装配期总线共享（幂等）：把 lifecycle 总线接进网关通知通道。
+
+        为何存在：门面每次 say() 装配出全新 bus，而 ModelCapability.dispatch()
+        自建 gateway 时构造参数 bus 缺省 None——不共享则 before_model/after_model
+        永远 0 发射（hook 与事件流都看不到模型事件）。同总线才同真相。
+        """
+        if self._bus is not bus:
+            self._bus = bus
+
     def _notify_model(self, phase: LifecyclePhase, request: LLMRequest, ctx: PortCtx,
                       *, extra: dict[str, object] | None = None) -> None:  # purity-exempt: object 为通知元数据动态边界（存量，行号位移）
         """发 model 相位通知（纯通知、异常隔离由总线保证，不拦截调用）。"""

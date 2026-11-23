@@ -33,6 +33,7 @@ context 模块只干一件事：**在把消息送给模型之前，把有限的�
 | `CompactionPolicy` / `DefaultCompactionPolicy` | compaction.py | 压缩链（协议 + 默认实现） |
 | `Reinjector` / `DefaultReinjector` | reinjector.py | 重注入链（协议 + 默认实现） |
 | `BlobPort` / `InMemoryBlobStore` / `Offloader` / `DefaultOffloader` | offloader.py | 卸载存储协议 + 默认实现 |
+> **【变更·2026-11-24】** `OffloadPolicy` 已删除（死类零残留）；阅读时跳过对应小节，卸载链路直接看 `Offloader/BlobPort`。
 | `OffloadPolicy` | offload_policy.py | 卸载阈值策略（截断被否决） |
 | `CacheTelemetry` | observability.py | KV cache 命中率一等观测 DTO |
 | `ContextMemoryManager` | manager.py | 编排器，7 依赖显式注入 |

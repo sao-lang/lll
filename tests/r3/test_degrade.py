@@ -123,7 +123,7 @@ class TestRateLimit:
         rl = RateLimit(rate=60, burst=1, on_exceed="degrade", clock=lambda: 0.0)
         assert rl.acquire() is RatePermit.ADMIT  # 耗尽令牌
         inv = make_ctx(Invoke(port="llm", payload={"model": "primary"}))
-        ex = ResilienceCapability(rate_limit=rl).install(_ok_core())
+        ex = ResilienceCapability(rate_limit=rl).wrap(_ok_core())
         result = asyncio.run(ex.run_invocation(inv))
         fault = inv.fault()
         assert result.ok  # 降级类放行
@@ -135,7 +135,7 @@ class TestRateLimit:
         rl = RateLimit(rate=60, burst=1, on_exceed="reject", clock=lambda: 0.0)
         assert rl.acquire() is RatePermit.ADMIT
         inv = make_ctx()
-        ex = ResilienceCapability(rate_limit=rl).install(_ok_core())
+        ex = ResilienceCapability(rate_limit=rl).wrap(_ok_core())
         result = asyncio.run(ex.run_invocation(inv))
         assert not result.ok and result.error is not None
         assert result.error.code == "INVOKE_REJECTED"
@@ -186,7 +186,7 @@ class TestIdempotency:
             calls.append(1)
             return Result.success("ok")
 
-        ex = ResilienceCapability(idempotency=idem).install(core)
+        ex = ResilienceCapability(idempotency=idem).wrap(core)
         first = asyncio.run(ex.run_invocation(make_ctx(eff)))
         second = asyncio.run(ex.run_invocation(make_ctx(eff)))
         assert first.ok and len(calls) == 1
@@ -224,7 +224,7 @@ class TestWatchdog:
     def test_abab_detect(self) -> None:
         """A-B-A-B 交替 → 执行器终止拒绝（观测标识由 Invoke.port 派生）。"""
         wd = Watchdog(window=6, repeat_k=2, detect_abab=True, kinds={"tool", "llm"})
-        ex = ResilienceCapability(watchdog=wd).install(_ok_core())
+        ex = ResilienceCapability(watchdog=wd).wrap(_ok_core())
         results = [asyncio.run(ex.run_invocation(make_ctx(eff)))
                    for eff in (TOOL_EFFECT, EFFECT, TOOL_EFFECT, EFFECT)]
         assert all(r.ok for r in results[:3])
@@ -235,7 +235,7 @@ class TestWatchdog:
     def test_repeat_detect(self) -> None:
         """同一 kind 连续重复 k 次 → 执行器终止拒绝。"""
         wd = Watchdog(window=10, repeat_k=3, detect_abab=True, kinds={"tool"})
-        ex = ResilienceCapability(watchdog=wd).install(_ok_core())
+        ex = ResilienceCapability(watchdog=wd).wrap(_ok_core())
         results = [asyncio.run(ex.run_invocation(make_ctx(TOOL_EFFECT))) for _ in range(3)]
         assert all(r.ok for r in results[:2])
         assert not results[2].ok and results[2].error is not None
@@ -249,7 +249,7 @@ class TestKillSwitch:
         store.set("kill:session", True)
         ks = KillSwitch(flag_store=store, scope="session")
         assert ks.is_tripped("s-r3") is True
-        ex = ResilienceCapability(killswitch=ks).install(_ok_core())
+        ex = ResilienceCapability(killswitch=ks).wrap(_ok_core())
         result = asyncio.run(ex.run_invocation(make_ctx()))
         assert not result.ok and result.error is not None
         assert result.error.code == "INVOKE_REJECTED"
@@ -258,5 +258,5 @@ class TestKillSwitch:
         store = _DictStore()
         ks = KillSwitch(flag_store=store, scope="session")
         assert ks.is_tripped("s-r3") is False
-        ex = ResilienceCapability(killswitch=ks).install(_ok_core())
+        ex = ResilienceCapability(killswitch=ks).wrap(_ok_core())
         assert asyncio.run(ex.run_invocation(make_ctx())).ok

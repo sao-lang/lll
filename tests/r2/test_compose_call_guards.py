@@ -425,7 +425,7 @@ def test_executor_degradation_writes_dtos_and_reroutes():
     degradation = Degradation(_ladder(), available={"primary", "backup"})
     executor = ResilienceCapability(
         rate_limit=limit, degradation=degradation
-    ).install(core)
+    ).wrap(core)
     inv = _inv()
     result = asyncio.run(executor.run_invocation(inv))
     assert result.ok and result.data == "backup"
@@ -446,7 +446,7 @@ def test_executor_refuses_when_ladder_exhausted():
 
     retry = RetryPolicy(max_attempts=1, base_delay=0.001, jitter="none")
     degradation = Degradation(_ladder(), available={"primary", "backup"})
-    executor = ResilienceCapability(retry=retry, degradation=degradation).install(core)
+    executor = ResilienceCapability(retry=retry, degradation=degradation).wrap(core)
     result = asyncio.run(executor.run_invocation(_inv()))
     assert not result.ok and result.error is not None and result.error.code == "REFUSED"
     assert calls.count("primary") == 1 and calls.count("backup") == 1
@@ -465,7 +465,7 @@ def test_call_state_and_executor_share_same_meta():
         seen.append("core")
         return Result.success("done")
 
-    executor = ResilienceCapability().install(core)
+    executor = ResilienceCapability().wrap(core)
     asyncio.run(executor.run_invocation(inv))
     assert seen == ["core"]
     assert state.fault() == FaultRecord(reason="rate_limited", failed_target="primary")

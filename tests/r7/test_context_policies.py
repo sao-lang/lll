@@ -1,74 +1,10 @@
-"""R7 新增方案测试：
-- 方案 D4：大 tool 结果落盘而非截断（OffloadPolicy 阈值判定 + 否决截断）。
-- 方案 D5：KV cache 命中率作为一等可观测指标（CacheTelemetry）。
+"""R7 测试：KV cache 命中率作为一等可观测指标（CacheTelemetry）。
+
+（OffloadPolicy 已按源码零残留纪律删除：生产代码 0 消费点，B10 决议"删死壳或接线"）
 """
 from __future__ import annotations
 
-import asyncio
-
 import pytest
-
-from runtime import DynamicValue
-
-
-# ---------- 方案 D4：大结果落盘而非截断 ----------
-def test_offload_policy_defers_small_value_without_touching_blob() -> None:
-    """低于阈值的小结果原样返回，不落盘（避免无谓句柄开销）。"""
-    from harness.context.offload_policy import DEFAULT_OFFLOAD_THRESHOLD, OffloadPolicy
-    from harness.context.offloader import BlobPort, InMemoryBlobStore
-
-    class SpyStore(InMemoryBlobStore):
-        puts = 0
-
-        async def put(self, value: DynamicValue) -> str:  # type: ignore[override]
-            self.puts += 1
-            return await super().put(value)
-
-    async def run() -> None:
-        store = SpyStore()
-        policy = OffloadPolicy(threshold=DEFAULT_OFFLOAD_THRESHOLD)
-        result = await policy.apply("small", store)
-        # 小值原样返回（非 store:// 句柄），且未写 blob
-        assert not str(result).startswith("store://")
-        assert store.puts == 0
-
-    asyncio.run(run())
-
-
-def test_offload_policy_offloads_large_value_to_blob() -> None:
-    """超阈值的大结果落盘，返回可读句柄（不截断）。"""
-    from harness.context.offload_policy import OffloadPolicy
-    from harness.context.offloader import InMemoryBlobStore
-
-    async def run() -> None:
-        store = InMemoryBlobStore()
-        policy = OffloadPolicy(threshold=10)
-        big = "x" * 100
-        handle = await policy.apply(big, store)
-        assert str(handle).startswith("store://")
-        # 关键：落盘后内容完整可读，未被截断
-        assert await store.get(str(handle)) == big
-
-    asyncio.run(run())
-
-
-def test_offload_policy_rejects_truncate_mode() -> None:
-    """方案红线：截断模式被显式否决，构造即 ValueError（不留兼容层）。"""
-    from harness.context.offload_policy import OffloadPolicy
-
-    with pytest.raises(ValueError, match="truncate"):
-        OffloadPolicy(threshold=10, mode="truncate")  # type: ignore[arg-type]
-
-
-def test_offload_policy_threshold_must_be_positive() -> None:
-    """阈值须为正（fail-closed），0/负数拒绝。"""
-    from harness.context.offload_policy import OffloadPolicy
-
-    with pytest.raises(ValueError):
-        OffloadPolicy(threshold=0)
-    with pytest.raises(ValueError):
-        OffloadPolicy(threshold=-1)
-
 
 # ---------- 方案 D5：KV cache 命中率一等可观测指标 ----------
 def test_cache_telemetry_hit_rate() -> None:

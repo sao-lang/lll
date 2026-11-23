@@ -66,7 +66,7 @@ def _run_with_limit(limit: RateLimit) -> tuple[object, _FakeLLM2, _FakeLLM2]:
     degradation = Degradation(_ladder(), available={"primary", "backup"})
     reliability = ResilienceCapability(
         rate_limit=limit, degradation=degradation,
-    ).install(gw.as_call())
+    ).wrap(gw.as_call())
     runner = Runner(call=reliability.as_call())
     result = asyncio.run(runner.run(Session(session_id="r3-e2e", program_factory=_program)))
     return result, primary, backup
@@ -88,7 +88,7 @@ class TestDegradeE2E:
         backup = _FakeLLM2("backup")
         cap = ModelCapability(llm=primary)
         cap.add_backend("backup", backup)
-        reliability = ResilienceCapability(rate_limit=limit, degradation=degradation).install(
+        reliability = ResilienceCapability(rate_limit=limit, degradation=degradation).wrap(
             cap.gateway().as_call())
         meta: dict = {}
         ctx = type("Ctx", (), {"session_id": "s", "meta": meta})()
@@ -139,7 +139,7 @@ def _run_with_real_retry() -> tuple[object, _ErrorLLM, _ErrorLLM]:
     degradation = Degradation(_ladder(), available={"primary", "backup"})
     reliability = ResilienceCapability(
         retry=retry, degradation=degradation,
-    ).install(gw.as_call())
+    ).wrap(gw.as_call())
     runner = Runner(call=reliability.as_call())
     result = asyncio.run(runner.run(Session(session_id="r3-real-retry", program_factory=_program)))
     return result, primary, backup
@@ -165,7 +165,7 @@ class TestDegradeE2ERealRetry:
         degradation = Degradation(_ladder(), available={"primary", "backup"})
         reliability = ResilienceCapability(
             retry=retry, degradation=degradation,
-        ).install(cap.gateway().as_call())
+        ).wrap(cap.gateway().as_call())
         runner = Runner(call=reliability.as_call())
         result = asyncio.run(runner.run(Session(session_id="r3-real-refuse", program_factory=_program)))
         first = result.events[0].results[0]
@@ -190,7 +190,7 @@ def test_core_exception_degrades_to_backup() -> None:
         return Result.success("backup-ok")
 
     degradation = Degradation(_ladder(), available={"primary", "backup"})
-    reliability = ResilienceCapability(degradation=degradation).install(core)
+    reliability = ResilienceCapability(degradation=degradation).wrap(core)
     inv = Invocation(
         effect=Invoke(port="llm", payload={"model": "primary"}),
         ctx=type("Ctx", (), {"session_id": "s", "meta": {}})(),
@@ -220,7 +220,7 @@ def test_degrade_with_idempotency_not_self_blocked() -> None:
 
     reliability = ResilienceCapability(
         idempotency=idem, retry=retry, degradation=deg,
-    ).install(core)
+    ).wrap(core)
     inv = Invocation(
         effect=Invoke(port="llm", payload={"model": "primary"}, idempotency_key="K-DEGRADE"),
         ctx=type("Ctx", (), {"session_id": "s", "meta": {}})(),

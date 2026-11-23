@@ -92,7 +92,7 @@ class TestDegradationRecovery:
             calls.append(rt.target if rt else "primary")
             return Result.success("backup-answer")
 
-        executor = ResilienceCapability(degradation=plugin).install(core)
+        executor = ResilienceCapability(degradation=plugin).wrap(core)
         result = asyncio.run(executor.run_invocation(inv))
         assert result.ok
         rt = inv.routing_target()
