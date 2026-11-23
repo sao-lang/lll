@@ -1,3 +1,4 @@
+# purity-exempt-file: InMemoryEventStream 为 R10 B.1.2 指定默认实现命名（生产级有界队列）；门面可选注入供可观测场景
 """语义门面 Agent —— 用户只碰 say()/run()，零 message/effect/payload/ctx 暴露。
 
 设计（契约③④；Round1 B1-B4 + Round2 Blk-1~4 根因修复）：
@@ -21,7 +22,10 @@ from typing import Callable, Protocol, cast
 from compose import (
     PortCtx, Provider, Registry, ToolSpec, bind_input,
 )
-from runtime import AgentState, Budgets, CallFn, DynamicValue, Effect, Invoke, Program, Result, Session
+from runtime import AgentState, Budgets, CallFn, DynamicValue, Effect, EventStore, Invoke, Program, Result, RunResult, Session
+
+from .runtime import AgentRuntime
+from harness.observability import InMemoryEventStream
 
 from .runtime import assemble_runtime
 
@@ -178,9 +182,27 @@ class Agent:
     name = "agent"
     version = "12.0.0"
 
-    def __init__(self, arch: ArchLike, *, session_id: str = "agent") -> None:
+    def __init__(
+        self,
+        arch: ArchLike,
+        *,
+        session_id: str = "agent",
+        stream: InMemoryEventStream | None = None,
+        store: EventStore | None = None,
+        budgets: Budgets | None = None,
+    ) -> None:
+        """构造语义门面。
+
+        默认零胶水（不传底座）；可选注入 stream/store/budgets 供可观测场景
+        （事件流投影 / 审计同源回放 / 自定义预算）——不改变 say() 语义。
+        """
         self._arch = arch
         self._session_id = session_id
+        self._stream = stream
+        self._store = store
+        self._budgets = budgets
+        self.last_run: RunResult | None = None  # 最近一次 RunResult（只读诊断）
+        self.runtime: AgentRuntime | None = None  # 最近一次装配的运行期（可观测底座读取）
         self._caps: dict[str, Provider] = {}
         self._tools: list[tuple[ToolSpec, Callable[..., DynamicValue]]] = []
         self._port_handlers: dict[str, Callable[[Effect, DynamicValue], Awaitable[Result]]] = {}
@@ -376,14 +398,18 @@ class Agent:
         def call_factory(tool_handler: CallFn) -> CallFn:
             return facade._derive_call(tool_handler)
 
-        rt = assemble_runtime(None, stream=None,
+        rt = assemble_runtime(None,
+                              stream=self._stream,
+                              store=self._store,
                               tool_setup=tool_setup, call_factory=call_factory)
+        self.runtime = rt
         session = Session(
             session_id=self._session_id,
             program_factory=self._arch.compile,
-            state=AgentState(budgets=Budgets()),
+            state=AgentState(budgets=self._budgets or Budgets()),
         )
         result = await rt.runner.run(session)
+        self.last_run = result
         return result.output
 
     async def asay(self, text: str) -> str:
