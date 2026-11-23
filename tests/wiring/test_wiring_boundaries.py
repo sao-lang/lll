@@ -25,8 +25,8 @@ def test_gate_w4_cognition_capability_has_no_program_bridge() -> None:
     assert "build" not in methods, "能力包暴露 build()——Program 编排不是能力包职责"
 
 
-def test_gate_w4_router_takes_strategy_not_capability() -> None:
-    """架构构造器收策略对象：Router(classifier=cap.strategy) 真跑通。"""
+def test_gate_w4_router_takes_capability_package() -> None:
+    """主线：用户注入能力包，架构收能力包（桥接层负责解包到策略）。"""
     from archs import ReAct, Router
     from compose import ToolSpec
     from harness.cognition import CascadeIntentStrategy, RegexKeywordMatcher
@@ -35,7 +35,7 @@ def test_gate_w4_router_takes_strategy_not_capability() -> None:
 
     cap = CognitionCapability(strategy=CascadeIntentStrategy(
         keyword=RegexKeywordMatcher({"天气": "weather"})))
-    arch = Router(classifier=cap.strategy,  # ← 策略，不是能力包
+    arch = Router(classifier=cap,  # ← 注入能力包（用户主线）
                   arms={"weather": ReAct([ToolSpec(name="t")], llm="fake")},
                   default="weather")
 
@@ -46,7 +46,7 @@ def test_gate_w4_router_takes_strategy_not_capability() -> None:
 
     res = __import__("asyncio").run(Runner(call).run(Session(
         session_id="gate-w4", program_factory=arch.compile, state=AgentState())))
-    assert res.status == "done" and calls, "Router 用策略对象跑不通"
+    assert res.status == "done" and calls, "Router 用能力包跑不通（桥梁应解包到策略）"
 
 
 def test_gate_w4_whole_strategy_replacement_is_honored() -> None:
@@ -92,7 +92,7 @@ def test_gate_w5_reflection_capability_has_no_loop() -> None:
     assert not ({"loop_until", "Invoke", "Effect"} & imported), "反思能力包含循环/Effect"
 
 
-def test_gate_w5_reflection_arch_takes_strategy_not_capability() -> None:
+def test_gate_w5_reflection_arch_takes_capability_package() -> None:
     from archs import Reflection
     from harness.cognition import ReflectStrategy, Critique
     from harness.cognition.reflection_capability import ReflectionCapability
@@ -107,14 +107,14 @@ def test_gate_w5_reflection_arch_takes_strategy_not_capability() -> None:
 
     reflector = R()
     cap = ReflectionCapability(reflector=reflector)
-    arch = Reflection(reflector=cap.reflector)  # ← 策略，不是能力包
+    arch = Reflection(reflector=cap)  # ← 注入能力包（用户主线）
 
     async def call(effect, ctx):  # type: ignore[no-untyped-def]
         return Result.success({"content": "ok", "tool_calls": []})
 
     res = __import__("asyncio").run(Runner(call).run(Session(
         session_id="gate-w5", program_factory=arch.compile, state=AgentState())))
-    assert res.status == "done" and reflector.calls >= 1
+    assert res.status == "done" and reflector.calls >= 1, "Reflection 用能力包跑不通"
 
 
 # ---------------- G-W3 记忆链：来源对话、注入 system、内部部件不漏出门面 ----------------
@@ -211,3 +211,44 @@ def test_gate_r1_no_capability_imports_arch_bridge() -> None:
                 assert not ({"intent_as_program", "loop_until"} & names), (
                     f"{path.name} import 架构桥梁")
                 assert not mods.startswith("archs"), f"{path.name} import archs"
+
+
+# ---------------- G-W7 用户自定义能力包（框架主线）----------------
+def test_gate_w7_custom_capability_provider_reaches_execution() -> None:
+    """用户自封装能力包：注册自定义 Port provider，真进执行链（不是死对象）。"""
+    from api import Agent
+    from archs import ReAct
+    from compose import ToolSpec
+    from runtime import Invoke, Result
+
+    from runtime.types import Effect
+
+    calls: list[str] = []
+
+    class MyProvider:
+        name = "my_eval"
+        op = "score"  # 用户自封装 provider 声明入口方法名
+        async def score(self, case_id: str, output: object, ctx: object) -> float:
+            calls.append(case_id)
+            return 1.0
+
+    class MyCapability:
+        name = "my_cap"
+        version = "1.0"
+        requires: tuple[str, ...] = ()
+        def __init__(self, provider: MyProvider) -> None:
+            self.provider = provider
+        def install(self, container: object, reg: object) -> None:
+            reg.register("eval", self.provider)  # type: ignore[attr-defined]
+
+    provider = MyProvider()
+    agent = Agent(ReAct([ToolSpec(name="t")], llm="fake"), session_id="w7")
+    agent.use(MyCapability(provider))
+    # 装配期 install 后，自定义 eval provider 必须能被解析到执行链 handler
+    asyncio = __import__("asyncio")
+    asyncio.run(agent._arun())
+    handler = agent._port_handlers.get("eval")
+    assert handler is not None, "自定义能力包的 provider 未进执行链 handler 表"
+    result = asyncio.run(handler(Invoke(port="eval").with_payload(
+        case_id="c1", output="x"), object()))
+    assert result.ok and calls == ["c1"], "自定义 provider 未被真调用"

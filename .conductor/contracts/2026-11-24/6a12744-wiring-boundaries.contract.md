@@ -38,7 +38,7 @@
 |---|---|---|---|
 | 门面 api/ | 语义入口 say/resume/evaluate/recognize_intent；装配唯一真相源 | 能力包 use()、stream/store（有真实消费） | 模块内部算法部件 |
 | 组合层 compose/ | 算子、Port 协议、before_model 等相位 | 算子/协议实现 | 具体后端 |
-| 架构层 archs/ | 编排策略（Router/Reflection/ReAct） | **策略对象**（IntentStrategy/ReflectStrategy） | 能力包本身 |
+| 架构层 archs/ | 编排策略（Router/Reflection/ReAct） | **能力包**（内部由桥梁解包策略） | 直接塞裸策略绕开能力包 |
 | 能力包层 harness/*/capability | 持有策略/组合根、install 注册、门面钩子 | 策略、组合根、后端实例 | 架构桥梁(Program) |
 | 模块内部 | 算法部件（assembler/compaction/blob/token_counter/index） | 模块构造参数/with_ | 门面入口 |
 
@@ -49,12 +49,13 @@
 - G-W1 MCP 同源：`ToolsCapability(registry=reg)` + `MCPManager(reg, transport)` + `Agent` 执行链 `wired_tools` 同一实例；`connect()` 后 `mcp__*` tools 对 LLM 可见（tool_calls 真执行）。
 - G-W2 披露：before_model 相位触发 `disclose()`，L1/L2/L3 结构正确；门面不新增独立 disclosure 入口。
 - G-W3 记忆链：`MemoryCapability(manager=with MyStore)` → say → 自定义 store 收到 ingest（对话原文）且 recall 注入 system；内部 6 部件不得出现在 Agent 构造参数。
-- G-W4 意图边界：`CognitionCapability` 无 `build()`、不 import `intent_as_program`；`Router(classifier=cap.strategy)` 可跑；整包替换与部件替换两级都可测。
-- G-W5 反思边界：`Reflection(reflector=cap.reflector)` 可跑；能力包无循环逻辑。
+- G-W4 意图边界：`CognitionCapability` 无 `build()`、不 import `intent_as_program`；`Router(classifier=cap)` 可跑（桥梁解包）；整包替换与部件替换两级都可测。
+- G-W5 反思边界：`Reflection(reflector=cap)` 可跑；能力包无循环逻辑。
 - G-W6 影子构造：注入 audit/telemetry/guardrail 后，执行链不再 new 同类对象（行为断言，不是 grep）。
+- G-W7 自定义能力包：用户自封装 capability + provider（声明 `op`）→ 注册 provider 真进执行链 handler 并可调用。
 - G-R1 静态红线：能力包禁止 import `intent_as_program`/`archs`；门面构造参数禁止出现内部算法部件名（AST 可查，低误报）。
 
 ## §4 修复顺序（门禁红之后）
-1. 先修结构耦合（C4 能力包桥梁、C1 三 registry 同源）——它们决定后续修复是否返工。
+1. 先修结构耦合（C4 能力包桥梁归桥接层、C1 三 registry 同源）——它们决定后续修复是否返工。
 2. 再修死注入（audit / telemetry / disclosure 触发点）——每条以行为门禁为验收。
 3. 不改本来正确的链（C3 记忆链），只加保护测试。

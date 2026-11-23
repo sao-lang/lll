@@ -1,67 +1,60 @@
-"""R11 认知能力包：意图识别策略的可插拔装配（use() / 架构 / 组合 API 三路）。
+"""R11 认知能力包：意图策略持有者（不是架构桥梁）。
 
-本包不做识别逻辑（在 CascadeIntentStrategy 等实现），只做：
-- 履约 Capability 协议（name/version/requires/install）；
-- 把注入策略注册进通用 Registry（意图策略为一等 provider）；
-- 提供 recognize/build 转调，供门面与 Router 架构消费。
+接线边界（契约 6a12744 §1 C4）：
+- 能力包 = 策略持有 + install 注册 + recognize 转调；
+- **不持有 intent_as_program、不暴露 build()**——Program 桥梁留给 archs.Router
+  直接用 cap.strategy（架构构造器收策略对象，不收能力包）。
+- 整包替换：传任意 IntentStrategy（recognize 协议），框架不包装级联。
+- 部件替换：默认 CascadeIntentStrategy 内部换 keyword/samples/cheap/primary。
 """
 from __future__ import annotations
-
-from typing import Protocol, runtime_checkable
 
 from runtime import AgentState
 from compose import Registry
 
 from .contracts import IntentResult, IntentStrategy
-from .cascade import CascadeIntentStrategy, intent_as_program
+from .cascade import CascadeIntentStrategy
 
 __all__ = ["CognitionCapability"]
 
 
 class CognitionCapability:
-    """认知能力包：持有 IntentStrategy（缺省四级级联），三路可组装。"""
+    """认知能力包：持有 IntentStrategy，门面语义入口直接消费策略。"""
 
     name = "cognition"
-    version = "1.0.0"
+    version = "2.0.0"
     requires: tuple[str, ...] = ()
 
     def __init__(self, *, strategy: IntentStrategy | CascadeIntentStrategy | None = None) -> None:
-        """构造：缺省 CascadeIntentStrategy（本地确定性，可离线跑）。"""
+        """构造：缺省四级级联策略（本地确定性，可离线跑）。"""
         self.strategy = strategy if strategy is not None else CascadeIntentStrategy()
 
     async def recognize(self, text: str, ctx: AgentState | None = None) -> IntentResult:
-        """异步识别：优先策略 recognize()，其余经 intent_as_program 统一桥。"""
-        recognize = getattr(self.strategy, "recognize", None)
-        if callable(recognize):
-            result = await recognize(text, ctx)
-            if isinstance(result, IntentResult):
-                return result
-            return IntentResult(label=str(getattr(result, "label", "unknown")),
-                                confidence=float(getattr(result, "confidence", 0.0)))
-        # 纯 Callable 策略：intent_as_program 桥（同步适配）
-        program = intent_as_program(self.strategy, text)
-        gen = program()
-        try:
-            effect = next(gen)
-            # 仅接受 Terminate 输出（无 IO 的同步策略）；有 IO 请用 recognize 协议
-            from runtime import Terminate
-            if isinstance(effect, Terminate):
-                out = dict(effect.output or {})
-                return IntentResult(label=str(out.get("label", "unknown")),
-                                    confidence=float(out.get("confidence", 0.0)))
-        except StopIteration:
-            pass
-        return IntentResult(label="unknown", confidence=0.0)
+        """转调策略 recognize()——整包替换语义，框架不包装级联。
 
-    def build(self, text: str = ""):  # type: ignore[no-untyped-def]
-        """Program 路径：委托策略 build() 或统一桥（Router 经 intent_as_program 消费）。"""
-        build = getattr(self.strategy, "build", None)
-        if callable(build):
-            return build(text)
-        return intent_as_program(self.strategy, text)()
+        fail-closed：策略不履约 recognize 协议时明确报错，不伪造 unknown 结果，
+        也不偷偷套 Program 桥梁（那是架构层职责）。
+        """
+        recognize = getattr(self.strategy, "recognize", None)
+        if not callable(recognize):
+            raise TypeError(
+                f"意图策略 {type(self.strategy).__name__} 未履约 IntentStrategy.recognize")
+        result = await recognize(text, ctx)
+        if isinstance(result, IntentResult):
+            return result
+        # 鸭子形态归一（允许返回等价 DTO，不伪造缺失字段）
+        if hasattr(result, "label"):
+            return IntentResult(
+                label=str(result.label),
+                confidence=float(getattr(result, "confidence", 0.0)),
+                gaps=tuple(getattr(result, "gaps", ())),
+                trace=tuple(getattr(result, "trace", ())),
+            )
+        raise TypeError(f"意图策略返回非法结果：{type(result).__name__}")
 
     def install(self, container: object | None = None,  # purity-exempt: container 为 Capability 协议签名（未消费）
                 reg: Registry | None = None) -> None:
         """Capability 协议：注册策略为一等 provider（名 'intent'）。"""
+        _ = container  # 协议入参：策略经 recognize 消费，不持有容器
         if reg is not None:
-            reg.register("intent", self)
+            reg.register("intent", self.strategy)

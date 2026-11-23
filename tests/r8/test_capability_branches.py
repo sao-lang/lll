@@ -26,20 +26,17 @@ def test_capability_recognize_delegates_to_whole_strategy() -> None:
     assert result.trace == ("whole",)
 
 
-def test_capability_build_falls_back_to_intent_as_program() -> None:
-    """无 build 的策略：build() 走 intent_as_program 桥（真产 Terminate）。"""
+def test_capability_has_no_program_bridge() -> None:
+    """能力包不该有 build()——Program 桥梁归架构层（契约 6a12744 C4）。"""
     cap = CognitionCapability(strategy=_WholeStrategy())  # type: ignore[arg-type]
-    gen = cap.build("输入")
-    effect = next(gen)
-    assert isinstance(effect, Terminate)
-    assert (effect.output or {}).get("label") == "whole_hit"
+    assert not hasattr(cap, "build"), "能力包暴露了架构桥梁 build()"
 
 
 def test_capability_install_registers_intent_provider() -> None:
     cap = CognitionCapability()
     reg = Registry()
     cap.install(None, reg)
-    assert cap is reg.resolve("intent"), "install 注册能力包本身为一等 provider"
+    assert cap.strategy is reg.resolve("intent"), "install 注册策略为一等 provider"
 
 
 def test_reflection_capability_default_reflector_and_install() -> None:

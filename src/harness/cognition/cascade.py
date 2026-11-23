@@ -294,6 +294,13 @@ def intent_as_program(strategy: object, text: str = "") -> _ProgramFn:
     Returns:
         ProgramFn（每次调用产新 generator，满足 D-8）。
     """
+    # 能力包解包（用户主线：注入的是能力包，能力包是策略+工具的容器）：
+    # 桥梁层识别 .strategy，架构/门面无需知道能力包内部形态。能力包自身
+    # 不持有 build()——Program 桥梁的职责始终在本函数，不下沉到能力包。
+    inner = getattr(strategy, "strategy", None)
+    if inner is not None and inner is not strategy:
+        return intent_as_program(inner, text)
+
     build = getattr(strategy, "build", None)
     if callable(build):
         def from_build() -> _ProgramGen:

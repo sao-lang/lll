@@ -95,7 +95,7 @@ def test_red_cognition_capability_in_router_arch() -> None:
     result = asyncio.run(Runner(call).run(Session(session_id="router-cap",
                          program_factory=arch.compile, state=AgentState())))
     assert result.status == "done"
-    assert cheap.calls >= 1, "Router 未消费能力包里的注入策略"
+    assert cheap.calls >= 1, "Router 未消费注入的能力包"
 
 
 def test_red_intent_task_tier_reaches_gateway() -> None:

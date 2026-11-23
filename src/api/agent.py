@@ -338,7 +338,11 @@ class Agent:
         async def handler(effect: Effect, ctx: DynamicValue) -> Result:
             port = str(getattr(effect, "port", ""))
             payload = dict(getattr(effect, "payload", {}) or {})
-            op = str(payload.get("op") or "call")
+            # op 解析优先级：Effect 显式 op > provider 自声明 op > port 同名方法 > call。
+            # 用户自封装能力包时，provider 可用 `op` 属性声明入口方法名（如 eval→score），
+            # 不必被框架硬编码的 "call" 绑死（G-W7）。
+            op = str(payload.get("op") or getattr(provider, "op", "")
+                     or (port if callable(getattr(provider, port, None)) else "call"))
             fn = getattr(provider, op, None)
             if not callable(fn):
                 return Result.failure("PORT_OP_MISSING", f"{port}.{op} provider op absent")

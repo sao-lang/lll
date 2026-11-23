@@ -9,7 +9,7 @@ CircuitBreaker.permit / Degradation.select ...），执行器用显式代码按�
     前置放行 → 预算内中心调用（超时/重试/舱位）→ 熔断记数 → 失败降级选级 + 重路由
 
 这些是可靠性领域固有语义，不是 AOP 的五层横切角色。装配由
-``ResilienceCapability.install()`` 用 opt-in 构造注入完成，产出可信注入 R1 的
+``ResilienceCapability.wrap()`` 用 opt-in 构造注入完成，产出可信注入 R1 的
 CallFn；缺席的策略即跳过，无需占位实现。
 
 四坑（B1 session 隔离 / B2 failed_target 注册名 / R3-6 永久剔除 / R3-7 fault

@@ -63,7 +63,7 @@ def test_red_reflection_arch_uses_capability_reflector() -> None:
     res = asyncio.run(Runner(call).run(Session(
         session_id="reflect-cap", program_factory=arch.compile, state=AgentState())))
     assert res.status == "done"
-    assert reflector.calls, "Reflection 架构未消费能力包的 reflector"
+    assert reflector.calls, "Reflection 架构未消费注入的能力包"
 
 
 class _LLM:

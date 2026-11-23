@@ -12,22 +12,43 @@
 """
 from __future__ import annotations
 
-from typing import Callable
-
-from compose.program import (
-    JoinMode, ProgramFn, branch, fallback, gate, loop, loop_until,
-    map_effect, map_state, par, race, retry, seq,
-)
-from runtime import DynamicValue, Program
+from collections.abc import Callable
 
 from archs.base import Arch, StaticCheckIssue, StaticCheckReport
+from compose.program import (
+    JoinMode,
+    ProgramFn,
+    branch,
+    fallback,
+    gate,
+    loop,
+    loop_until,
+    map_effect,
+    map_state,
+    par,
+    race,
+    retry,
+    seq,
+)
+from runtime import Program
 
 __all__ = [
-    # FP 组合算子（原样重导出，ProgramFn→ProgramFn 纯变换）
-    "seq", "par", "branch", "race", "loop", "loop_until", "map_state",
-    "map_effect", "fallback", "gate", "retry", "JoinMode", "ProgramFn",
+    "JoinMode",
+    "ProgramFn",
+    "branch",
     # 架构封装助手
     "custom_arch",
+    "fallback",
+    "gate",
+    "loop",
+    "loop_until",
+    "map_effect",
+    "map_state",
+    "par",
+    "race",
+    "retry",
+    # FP 组合算子（原样重导出，ProgramFn→ProgramFn 纯变换）
+    "seq",
 ]
 
 
