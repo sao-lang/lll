@@ -99,6 +99,14 @@ class AuditLogger(AuditPort):
                 "hash": entry.hash,
             })
 
+    def bind_sink(self, sink: AuditStore) -> None:
+        """装配期绑定审计落盘后端（外部注入审计器也能接入同源底座）。
+
+        只绑定一次：已有 sink 时不覆盖（调用方自带的后端优先），避免静默改写其选择。
+        """
+        if self._sink is None:
+            self._sink = sink
+
     def events(self) -> tuple[AuditEvent, ...]:
         """返回 append-only 快照（tuple 不可变）。"""
         return tuple(self._events)

@@ -27,7 +27,16 @@ from harness.model import ModelGateway
 from harness.observability import InMemoryEventStream
 from harness.security import ApprovalFlow, AuditLogger, SecurityCapability
 from harness.tools import ToolsCapability, ToolRegistry
-from runtime import DynamicValue, Effect, InMemoryEventStore, Invoke, Result, Runner, Session
+from runtime import (
+    DynamicValue,
+    Effect,
+    EventStore,
+    InMemoryEventStore,
+    Invoke,
+    Result,
+    Runner,
+    Session,
+)
 
 from .wiring import (
     ApprovingHumanPort,
@@ -123,6 +132,8 @@ def assemble_runtime(
     tools: ToolRegistry | None = None,
     security: SecurityCapability | None = None,
     bus: LifecycleBus | None = None,
+    store: EventStore | None = None,
+    sink: R1AuditEventSink | None = None,
     checkpoint_every: int = 1,
 ) -> AgentRuntime:
     """真实装配：构造 Runner/Registry/三 Port 接线的运行期。
@@ -137,16 +148,23 @@ def assemble_runtime(
     """
     sec = security or SecurityCapability()
     # 单底座：manager 自带 store 时复用它，否则新建；audit sink/checkpoint 共用同一实例。
-    mgr = manager or CheckpointManager(store=InMemoryEventStore())
-    shared_store = mgr.store
+    # 单底座：显式 store > manager 自带 store > 新建；audit sink/checkpoint 共用同一实例。
+    mgr = manager or CheckpointManager(store=store or InMemoryEventStore())
+    shared_store = store if store is not None else mgr.store
+    mgr.store = shared_store
     target_stream = stream or InMemoryEventStream()
     seq_tracker = R1SeqTracker()
     active_bus = bus or bind_stream_projection(target_stream, seq_source=seq_tracker)
 
     approving = approval or ApprovingHumanPort(sec.human, sec.approval)
-    audit_sink = R1AuditEventSink(shared_store)
-    auditing = audit or VerifyingAuditPort(AuditLogger(sink=audit_sink))
-    store = CheckpointEventStore(mgr, inner=shared_store, seq_tracker=seq_tracker)
+    audit_sink = sink or R1AuditEventSink(shared_store)
+    if audit is not None:
+        # 外部注入审计也同源：装配期把同一 sink 绑到其 inner（已有 sink 不覆盖）。
+        audit.bind_sink(audit_sink)
+        auditing = audit
+    else:
+        auditing = VerifyingAuditPort(AuditLogger(sink=audit_sink))
+    checkpoint_store = CheckpointEventStore(mgr, inner=shared_store, seq_tracker=seq_tracker)
 
     # ①② B2 修复：真实注入 SecurityCapability 的 sandbox/human/audit（消除 sandbox=None 断链）。
     wired_tools = tools or ToolRegistry(
@@ -166,9 +184,9 @@ def assemble_runtime(
         return Result.failure("PORT_MISSING", f"no default handler for port: {effect.port}")
 
     active_call = call if call is not None else default_call
-    runner = Runner(active_call, store=store, notify=runner_notifier(active_bus),
+    runner = Runner(active_call, store=checkpoint_store, notify=runner_notifier(active_bus),
                     checkpoint_every=checkpoint_every)
-    return AgentRuntime(runner, active_bus, wired_tools, approving, auditing, store,
+    return AgentRuntime(runner, active_bus, wired_tools, approving, auditing, checkpoint_store,
                         target_stream, seq_tracker=seq_tracker)
 
 

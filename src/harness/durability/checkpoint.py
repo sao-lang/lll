@@ -20,6 +20,7 @@ from runtime import (
     JsonSnapshot,
     replay_events,
 )
+from runtime.types import revive
 
 __all__ = ["CheckpointSnapshot", "CheckpointManager", "replay_snapshot"]
 
@@ -118,5 +119,11 @@ class CheckpointManager:
 
 
 def replay_snapshot(snap: CheckpointSnapshot) -> AgentState:
-    """从快照的 events 回放终态（复用 R1 replay_events，不重造 fold）。"""
-    return replay_events(snap.events, snap.state)
+    """从快照的 events 回放终态（复用 R1 replay_events，不重造 fold）。
+
+    events 在 CheckpointManager.load() 里是 R1 JsonSnapshot 还原的 plain dict，
+    R1 replay_events 读 `event.effects` 属性会崩。这里用 R1 的 revive() 把 dict
+    递归还原为可属性访问的 Replayed 代理——复活在 R10 适配层做，R1 零改动。
+    """
+    revived = tuple(revive(e) for e in snap.events)
+    return replay_events(revived, snap.state)

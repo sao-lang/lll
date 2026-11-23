@@ -199,6 +199,11 @@ class VerifyingAuditPort:
         """不可变事件快照（供回放/核对）。"""
         return self._inner.events()
 
+    def bind_sink(self, sink: AuditStore) -> None:
+        """装配期把同源 sink 绑到 inner AuditLogger（外部注入审计也同源）。"""
+        if isinstance(self._inner, AuditLogger):
+            self._inner.bind_sink(sink)
+
     def verify_external(self, events: Sequence[object]) -> None:
         """校验给定事件序列；断链 ValueError（供外部注入篡改检测）。"""
         if not verify_hash_chain(events):  # type: ignore[arg-type]
