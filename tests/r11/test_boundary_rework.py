@@ -128,3 +128,40 @@ def test_real_runner_notice_carries_r1_event_seq() -> None:
     # 合成标记：同源投影的 seq 不得标 synthetic
     assert not any(e.data.get("seq_synthetic") for e in events), (
         "R1 同源 seq 不应被标 synthetic")
+
+
+def test_first_event_seq_zero_is_not_treated_as_missing() -> None:
+    """R1 首条事件 seq=0 是合法权威序号，不得当"无序号"回退合成计数（SHOULD-1）。"""
+    stream = InMemoryEventStream()
+    seen: list[str] = []
+
+    async def call(effect: object, ctx: object) -> Result:
+        seen.append("tool")
+        return Result.success({})
+
+    rt = assemble_runtime(call, stream=stream)
+    # 用真实 tool Invoke 触发 AFTER_TOOL 通知：此时 R1 尚未 append 该步 Event，
+    # len(events)=0 → seq_source.current()=0，必须是合法同源序号而非合成 1。
+    rt.tools.register(ToolSpec(name="t", description="d", danger=DangerLevel.LOW),
+                      lambda: "ok")
+
+    def program() -> Iterator[object]:
+        yield Invoke(port="llm", payload={"q": "x"})  # 走注入 call，不触发 tool 分支
+        yield Terminate(output="done")
+        return None
+
+    session = Session(session_id="s-zero", program_factory=program)
+    asyncio.run(rt.run(session))
+
+    # 直接以 seq=0 的 Notice 验证投影层不再把 0 当缺失
+    from api.wiring import STREAM_TOPIC, bind_stream_projection
+    from compose import LifecyclePhase, Notice
+    s2 = InMemoryEventStream()
+    bus2 = bind_stream_projection(s2)
+    bus2.emit(Notice(phase=LifecyclePhase.AFTER_TOOL, session_id="s", seq=0))
+    # Notice.seq=0 是 DTO 默认"未提供"语义，此路应合成并标记（不冒充 R1）
+    async def drain2() -> list[object]:
+        return [e async for e in s2.subscribe(STREAM_TOPIC)]
+    ev2 = asyncio.run(drain2())
+    assert ev2 and ev2[0].data.get("seq_synthetic") is True, (
+        "Notice 未提供 seq 时应诚实标 synthetic")

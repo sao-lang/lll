@@ -93,7 +93,7 @@ class R1SeqTracker:
 
     def observe(self, snapshot: JsonSnapshot) -> None:
         """从 R1 规范化快照的 events 里取最后一条 Event.seq（无活会话时的兜底）。"""
-        events = snapshot.get("events") or ()
+        events: Sequence[DynamicValue] = snapshot.get("events") or ()
         for raw in reversed(events):
             if isinstance(raw, dict) and "seq" in raw:
                 self._seq = int(raw["seq"])
@@ -251,16 +251,24 @@ def bind_stream_projection(
                LifecyclePhase.SESSION_END)
 
     def publish_notice(notice: Notice) -> None:
-        """把只读 Notice 投影为 EventEnvelope 发布到单一 topic。"""
+        """把只读 Notice 投影为 EventEnvelope 发布到单一 topic。
+
+        Notice.seq 以 0 表示"通知源未提供"（DTO 默认），而 R1 Event.seq 可为 0
+        （首条事件）——两者须区分：seq_source 是权威源，其 current() 返回 0 时
+        仍是合法 R1 序号，不得当"无序号"回退到合成计数（SHOULD-1 修复）。
+        """
         nonlocal fallback
-        seq = notice.seq
+        seq: int | None = notice.seq if notice.seq > 0 else None
         synthetic = False
-        if seq <= 0 and seq_source is not None:
+        if seq is None and seq_source is not None:
             observed = seq_source.current()
-            seq = observed if observed is not None else 0
-        if seq <= 0:
-            seq = int(notice.payload.get("seq", 0) or 0)
-        if seq <= 0:
+            if observed is not None:
+                seq = observed  # R1 权威序号，含合法的 0
+        if seq is None:
+            raw: object = notice.payload.get("seq")
+            if isinstance(raw, int) and raw > 0:
+                seq = raw
+        if seq is None:
             fallback += 1
             seq = fallback
             synthetic = True

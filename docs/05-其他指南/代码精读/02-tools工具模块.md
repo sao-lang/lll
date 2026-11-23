@@ -831,8 +831,7 @@
   - 第 222 行 `)` 调用结束。
 
 - **第 223 行** `else:`
-- **第 224 行** `meta["audit_missing"] = True`
-  **审计缺席时降级执行但显式标记**：不拒绝执行（LOW 风险可控），但在 meta 里标记 `audit_missing=True`，让下游审计系统知道这次调用没留痕。不是「静默放行」——有标记可追查。
+- **审计缺席 fail-closed（2026-11-23 修复）**：LOW/HIGH/CRITICAL 均要求 AuditPort；缺席返回 `NO_AUDIT` 拒绝执行，不再降级标记。旧的"缺席降级 + meta 标记"语义已删除（S3 修复）。
 
 - **第 225 行** `return finish(await self._maybe_await(fn(**call.args)))`
   审计后直接执行（不经沙盒）。
@@ -1773,7 +1772,7 @@ ToolCall → 未注册? → NOT_FOUND
          → 参数校验(有 properties 键才做 extra=forbid, 第198行)
          → 四级路由:
              SAFE     → 直接执行(第210行)
-             LOW      → 审计(缺席标 audit_missing)后执行(第211-225行)
+             LOW      → 审计(缺席 fail-closed NO_AUDIT)后执行
              HIGH     → 无沙盒 NO_SANDBOX; 有则 sandbox.run(第226-232行)
              CRITICAL → 无人工 NO_HUMAN; 审批非 approve→APPROVAL_DENIED;
                         再查沙盒→sandbox.run(第233-246行)

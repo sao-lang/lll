@@ -944,7 +944,7 @@ flowchart TD
         F["ToolCall.danger 经 DangerLevel.coerce 归一<br/>未知值→CRITICAL"] --> V["参数校验 extra=forbid"]
         V --> DR{"DangerLevel 四级路由"}
         DR -->|SAFE| EX["直接执行"]
-        DR -->|LOW| AU["AuditPort.record 审计<br/>缺席→降级直执行 + meta.audit_missing"]
+        DR -->|LOW| AU["AuditPort.record 审计<br/>缺席→fail-closed NO_AUDIT"]
         DR -->|HIGH| SB{"SandboxPort 在场?"}
         DR -->|CRITICAL| AP{"HumanPort 与 SandboxPort 均在场?"}
         AU --> EX
@@ -1034,7 +1034,7 @@ class InjectionDetector(Protocol):
 | ToolSpec.name | 全局唯一；MCP 为 `mcp__<server>__<tool>`；用户工具 `x-*` 前缀 |
 | ToolSpec.danger | `DangerLevel`，装配期必填；经 `coerce()` 归一，未知→CRITICAL（fail closed） |
 | ToolSpec.source | local/mcp/skill，审计用 |
-| ToolResult.meta | danger/source/sandbox/duration_ms/approved/retryable/audit_missing |
+| ToolResult.meta | danger/source/sandbox/duration_ms/approved/retryable/seq_synthetic |
 | DisclosurePacket | L1/L2/L3/token_cost，披露成本进 trace |
 | SkillManifest | name/version/description/triggers（定义于 R2 dto.py） |
 | InjectionVerdict | clean/injected；技能与 WebFetchTool 抓取正文的注入检测结果 |
@@ -1053,7 +1053,7 @@ class InjectionDetector(Protocol):
 | 正文注入检测 | InjectionDetector（R5 本地） | KeywordInjectionDetector | 技能/WebFetch 正文必过 |
 | 沙盒（R9） | SandboxPort | 构造注入，缺席即拒绝 | HIGH/CRITICAL 缺 sandbox → ToolResult 失败 |
 | 审批（R9） | HumanPort | 构造注入，缺席即拒绝 | CRITICAL 缺 human → ToolResult 失败 |
-| 审计（R9） | AuditPort | 构造注入，LOW 缺席降级 | LOW 缺 audit → 直执行 + meta.audit_missing |
+| 审计（R9） | AuditPort | 构造注入，全部危险级别覆盖 | LOW/HIGH/CRITICAL 缺 audit → fail-closed NO_AUDIT |
 
 ### R5.7 验收门禁
 
