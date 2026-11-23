@@ -242,6 +242,13 @@ class ModelGateway:
             task_hint=str(payload.get("task_hint") or "") or None,
             tools_catalog=tools_catalog,
         )
+        # 意图级联 task/tier/text 透传（U-1 关闭）：统一从 EffectPayload.meta 读
+        # （R1 已知键，零改内核）；tier 供 RuleRouter 消费，intent_text 供审计。
+        intent_meta = payload.get("meta") or {}
+        if tier := str(intent_meta.get("tier") or ""):
+            port_ctx.meta["tier"] = tier
+        if intent_text := str(intent_meta.get("intent_text") or ""):
+            port_ctx.meta["intent_text"] = intent_text
         self._notify_model(LifecyclePhase.BEFORE_MODEL, LLMRequest(
             messages=list(payload.get("messages", [])),
             model=str(payload.get("model") or "") or None,

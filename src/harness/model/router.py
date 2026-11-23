@@ -32,6 +32,10 @@ class ModelRouter(Protocol):
         ...
 
 
+INTENT_TASK = "intent"  # 意图识别任务具名常量（规则 5：禁止魔法串比较）
+TIER_KEY = "tier"       # 意图级联档位（cheap/primary）在 meta 中的具名键
+
+
 class _RouteMeta(TypedDict, total=False):
     """LLM Effect 的 payload.meta 里 R4 路由消费的明确字段（规则 4）。
 
@@ -138,6 +142,16 @@ class RuleRouter:
         route_input = _coerce_route(effect)  # 唯一 payload 动态边界（规则 6）
         target = self._routes.get(route_input.task_hint, self._default)
         reason = f"task_hint={route_input.task_hint or 'none'}"
+        # 意图级联 tier 真影响路由：intent/cheap 与 intent/primary 可按 routes 配置
+        # 选不同模型；无专项配置时沿用 task_hint 结果（不伪造降级）。
+        # 规则 6 例外：ctx.meta 为 R4 路由显式消费的 typed 元数据边界（_RouteMeta），
+        # tier 键由本文件具名常量声明，非任意动态键。
+        tier = str(ctx.meta.get(TIER_KEY) or "")
+        if tier and route_input.task_hint == INTENT_TASK:
+            tier_target = self._routes.get(f"intent/{tier}")
+            if tier_target is not None:
+                target = tier_target
+                reason = f"intent_tier={tier}"
 
         # 成本约束：若带 max_cost，选不超预算的最便宜已注册模型。
         max_cost = route_input.max_cost

@@ -71,19 +71,28 @@ def test_async_recognize_l3_fail_l4_hit() -> None:
     assert "L3" in "".join(result.trace) and "L4" in "".join(result.trace)
 
 
-def test_program_path_ignores_injected_model_and_uses_effect() -> None:
-    """Program 路径统一走 Invoke Effect（即便注入 recognize 模型，也不直接 IO）。"""
+def test_program_path_consumes_injected_model_instead_of_effect() -> None:
+    """Program 路径真消费注入的 cheap 部件（U-1 修复后行为）。
+
+    旧测试期望"build() 忽略注入模型、统一走 Invoke"——那是注入无效的错误行为
+    （工作记忆登记的 L3/L4 缺口），现改为真行为：注入部件先被调用，命中即
+    Terminate，不再 yield Invoke(port=llm)。
+    """
     class Cheap:
         name = "cheap"
+        calls = 0
         async def recognize(self, text: str, ctx: object) -> IntentResult:
-            return IntentResult(label="should-not-be-called", confidence=1.0)
+            self.calls += 1
+            return IntentResult(label="injected-hit", confidence=1.0)
 
-    from runtime import Invoke
-    strategy = CascadeIntentStrategy(keyword=RegexKeywordMatcher({}), cheap=Cheap())
+    from runtime import Invoke, Terminate
+    cheap = Cheap()
+    strategy = CascadeIntentStrategy(keyword=RegexKeywordMatcher({}), cheap=cheap)
     gen = strategy.build("x")
     effect = next(gen)
-    assert isinstance(effect, Invoke) and effect.port == "llm"
-    gen.close()
+    assert isinstance(effect, Terminate), "注入 cheap 命中后应直接 Terminate"
+    assert (effect.output or {}).get("label") == "injected-hit"
+    assert cheap.calls == 1, "注入部件未被真调用"
 
 
 def test_intent_as_program_none_fallback() -> None:

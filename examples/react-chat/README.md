@@ -54,6 +54,43 @@ answer = agent.say("用 get_weather 查一下深圳的天气")
 - **记忆自动写回**：say 前 N 条 → say 后 N+1 条（问答对自动入库）
 - **事件流同源**：`agent.stream` 收到真实 seq 事件（非 synthetic）
 
+## 四能力包随意组装（意图 / 反思 / 模板 / Provider）
+
+用户本意是能力可插拔——内置架构、组合式 API、门面 `use()` 三路消费**同一策略对象**：
+
+```python
+from harness.cognition.capability import CognitionCapability
+from harness.cognition.reflection_capability import ReflectionCapability
+from harness.prompt import PromptCapability, PromptTemplate
+from ports.adapters.provider import LLMProviderCapability
+from string import Template
+
+# ① 意图：L1 关键词→L2 样本→L3 便宜模型→L4 主模型，可整包替换或替换单级
+agent.use(CognitionCapability(strategy=CascadeIntentStrategy(cheap=my_cheap_model)))
+result = agent.recognize_intent("帮我订机票")          # 门面路径
+arch = Router(classifier=cognition_cap, arms={...})     # 内置架构路径
+program = intent_as_program(cognition_cap)              # 组合式 API 路径
+
+# ② 反思：use() 后门面 evaluate()，或 Reflection(reflector=cap) 架构循环
+agent.use(ReflectionCapability(reflector=my_reflector))
+verdict = agent.evaluate("草稿", goal="写得更好")      # critique(draft, goal, ctx) 三参真传
+
+# ③ 提示词模板：system/user 双段，不直接注入 prompt
+agent.use(PromptCapability(templates=(PromptTemplate(
+    name="weather.system", system=Template("你是${role}。"), user=Template("${input}")),)))
+
+# ④ 通用 LLM provider：多厂商端点配置 → LLMPort 实例 → ModelRegistry
+providers = LLMProviderCapability()
+deepseek = providers.register("deepseek", base_url="https://api.deepseek.com/v1",
+                              api_key=os.getenv("DEEPSEEK_API_KEY", ""), model="deepseek-chat")
+providers.install_into(registry)   # ModelCapability 按 registry 解析/降级
+```
+
+**诚实边界**：Provider 默认工厂只覆盖 OpenAI-compatible 端点（DeepSeek/Moonshot/vLLM）；
+Anthropic/Gemini 原生协议需注入自定义 factory（履约 `LLMProviderFactory`），密钥只走
+环境变量/构造参数不落文件。L3/L4 的 `task/tier` 已透传到 `RuleRouter`（`intent/cheap`
+与 `intent/primary` 可配不同模型）。
+
 ## 诚实边界（demo 会如实打印，不美化）
 
 - say() 只返回白名单文本；`last_run`/`runtime` 是只读诊断，不泄漏内部消息

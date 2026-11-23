@@ -207,6 +207,10 @@ MODULES = {
         "pkg": "harness.cognition", "path": "harness/cognition",
         "doc": "docs/02-模块详设/Agent/R8-认知与多Agent编排.md",
         "demo": "tests/demos/demo_r8.py", "coverage": 85,
+        # 认知能力包（cognition/capability.py + reflection_capability.py）的测试
+        # 写在 r11 门面集成测试里——同包覆盖率须纳入，否则新代码拉低 r8 覆盖率。
+        "cov_tests": ["tests/r8", "tests/r11/test_cognition_capability_red.py",
+                      "tests/r11/test_reflection_capability_red.py"],
         "symbols": [
             "IntentResult", "IntentSample", "Critique", "Step", "StepResult",
             "IntentStrategy", "KeywordMatcher", "IntentSampleStore",

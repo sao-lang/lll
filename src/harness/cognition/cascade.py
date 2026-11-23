@@ -27,6 +27,20 @@ from .contracts import (
     PrimaryIntentModel,
 )
 
+def _await_sync(factory: Callable[[], object]) -> object:
+    """在同步 Program generator 内执行 async 部件（无 loop 直接 run，有 loop 走独立线程）。
+
+    避免 asyncio.run 在活事件循环中抛 RuntimeError；与门面 say 的同款适配纪律。
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(factory())  # type: ignore[arg-type]
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(lambda: asyncio.run(factory())).result()  # type: ignore[arg-type]
+
+
 __all__ = [
     "CascadeIntentStrategy",
     "InMemoryIntentSampleStore",
@@ -211,22 +225,41 @@ class CascadeIntentStrategy:
         if r2 is not None and r2.confidence >= self.thresholds["L2"]:
             yield Terminate(output=self._output(r2, "L2", trace))
             return
-        # L3：便宜模型（经 Invoke，短路由 call 兑现）
-        injected = yield Invoke(port="llm").with_payload(
-            task="intent", tier="cheap", text=text)
-        r3 = _result_from_injection(injected)
-        trace.append(_stage_trace("L3", r3))
-        if r3 is not None and r3.confidence >= self.thresholds["L3"]:
-            yield Terminate(output=self._output(r3, "L3", trace))
-            return
-        # L4：主模型兜底
-        injected = yield Invoke(port="llm").with_payload(
-            task="intent", tier="primary", text=text)
-        r4 = _result_from_injection(injected)
-        trace.append(_stage_trace("L4", r4))
-        if r4 is not None and r4.confidence >= self.thresholds["L4"]:
-            yield Terminate(output=self._output(r4, "L4", trace))
-            return
+        # L3：注入的 cheap 部件优先（同步适配 async recognize，与 recognize() 路径
+        # 语义一致）；未注入才走 Invoke(port=llm) 由 call 兑现——两路同一判定。
+        cheap = self.cheap
+        if cheap is not None:
+            raw3 = _await_sync(lambda: cheap.recognize(text, None))
+            r3 = raw3 if isinstance(raw3, IntentResult) else None
+            trace.append(_stage_trace("L3", r3))
+            if r3 is not None and r3.confidence >= self.thresholds["L3"]:
+                yield Terminate(output=self._output(r3, "L3", trace))
+                return
+        else:
+            injected = yield Invoke(port="llm").with_payload(
+                task="intent", tier="cheap", text=text)
+            r3 = _result_from_injection(injected)
+            trace.append(_stage_trace("L3", r3))
+            if r3 is not None and r3.confidence >= self.thresholds["L3"]:
+                yield Terminate(output=self._output(r3, "L3", trace))
+                return
+        # L4：注入的 primary 部件优先；未注入走 Invoke 由 call 兑现
+        primary = self.primary
+        if primary is not None:
+            raw4 = _await_sync(lambda: primary.recognize(text, None))
+            r4 = raw4 if isinstance(raw4, IntentResult) else None
+            trace.append(_stage_trace("L4", r4))
+            if r4 is not None and r4.confidence >= self.thresholds["L4"]:
+                yield Terminate(output=self._output(r4, "L4", trace))
+                return
+        else:
+            injected = yield Invoke(port="llm").with_payload(
+                task="intent", tier="primary", text=text)
+            r4 = _result_from_injection(injected)
+            trace.append(_stage_trace("L4", r4))
+            if r4 is not None and r4.confidence >= self.thresholds["L4"]:
+                yield Terminate(output=self._output(r4, "L4", trace))
+                return
         # 全不满足：default/unknown 兜底
         yield Terminate(output=self._output(
             IntentResult(label="unknown", confidence=0.0), "default", trace))

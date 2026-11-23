@@ -212,6 +212,33 @@ async def main() -> None:
         "16 相位见 compose.LifecyclePhase；Notice 只读、hook 异常就地隔离不阻断主流程",
     ])
 
+    # ---- ⑨ 四能力包随意组装（意图/反思/模板/Provider）----
+    from harness.cognition import CascadeIntentStrategy, RegexKeywordMatcher, ThresholdReflector
+    from harness.cognition.capability import CognitionCapability
+    from harness.cognition.reflection_capability import ReflectionCapability
+    from harness.prompt import PromptCapability, PromptTemplate
+    from string import Template
+
+    intent_cap = CognitionCapability(strategy=CascadeIntentStrategy(
+        keyword=RegexKeywordMatcher({"天气": "weather", "订票": "booking"})))
+    reflect_cap = ReflectionCapability(reflector=ThresholdReflector(min_len=1))
+    prompt_cap = PromptCapability(templates=(PromptTemplate(
+        name="weather.system", system=Template("你是${role}。"), user=Template("${input}")),))
+    intent_result = await intent_cap.recognize("帮我查天气")
+    critique = reflect_cap.critique("深圳今天28度晴", goal="一句话回答")
+    rendered = prompt_cap.render("weather.system", role="简洁中文助手", input="深圳天气？")
+    report.add("⑨ 认知/反思/模板/Provider 四能力包组装（离线）", [
+        f"意图识别（CognitionCapability→CascadeIntentStrategy L1）: "
+        f"label={intent_result.label}, confidence={intent_result.confidence:.2f}",
+        f"反思（ReflectionCapability→ThresholdReflector）: passed={critique.passed}, "
+        f"score={critique.score}",
+        f"提示词模板（system/user 双段渲染）: {rendered}",
+        "Provider 能力包: LLMProviderCapability.register(base_url/api_key/model, "
+        "factory=OpenAI-compatible) → install_into(ModelRegistry) → ModelCapability 消费",
+        "组装路径: 内置架构 classifier=cap / 组合式 intent_as_program(cap) / "
+        "门面 use(cap) 三路同一策略对象",
+    ])
+
     # ---- 诚实边界 ----
     report.add("诚实边界（框架现状，不美化）", [
         "· say() 只返回白名单文本；last_run/runtime/trace 是只读诊断，不泄漏内部消息",

@@ -483,9 +483,27 @@ class Agent:
             raw = [{"role": "user", "content": ""}]
         messages = _normalize_history(raw)
         # system 一等参数（B9）：门面在首轮前置 system 消息，用户无需包装 LLM。
-        # 已含 system（架构自带或历史回注）时不重复注入。
-        if self._system and not any(m.get("role") == "system" for m in messages):
-            messages = [{"role": "system", "content": self._system}, *messages]
+        # 两种来源：显式 system=（可为模板对象）；或 use(PromptCapability) 后取
+        # 默认模板渲染（用户零裸 prompt 注入）。已含 system 时不重复。
+        from harness.prompt import PromptCapability
+        prompt_cap = self._caps.get("prompt")
+        if isinstance(prompt_cap, PromptCapability) and not any(
+                m.get("role") == "system" for m in messages):
+            tpl = self._system if hasattr(self._system, "render") else None
+            name = (getattr(tpl, "name", "default.system") if tpl else "default.system")
+            rendered = prompt_cap.render(
+                name, **({"input": str(messages[-1].get("content", "")),
+                          "role": "中文", "style": "简洁"}
+                         if name == "default.system" else
+                         {"input": str(messages[-1].get("content", ""))}))
+            messages = [{"role": "system", "content": str(rendered[0]["content"])},
+                        *messages]
+        elif self._system and not any(m.get("role") == "system" for m in messages):
+            system_text = str(self._system)
+            if hasattr(self._system, "render"):  # 模板对象但无 PromptCapability → 直接渲染
+                system_text = str(self._system.render(
+                    input=str(messages[-1].get("content", "")))[0]["content"])
+            messages = [{"role": "system", "content": system_text}, *messages]
         # 记忆召回（MemoryCapability 钩子）：把命中记忆拼入 system 段（自动召回，用户零胶水）。
         recalled = _memory_context.get()
         if recalled:
@@ -501,6 +519,14 @@ class Agent:
             "messages": self._inject_history(messages),
             "model": effect.payload.get("model") or "",
             "tools": effect.payload.get("tools") or [],
+            # task/tier/text 透传（U-1 关闭）：R1 EffectPayload 已知键只有
+            # task_hint/meta（D-7 零改内核），意图字段走 meta 供 router 消费
+            "task_hint": str(effect.payload.get("task_hint") or effect.payload.get("task") or ""),
+            "meta": {**dict(getattr(effect.payload, "get", lambda k, d=None: d)("meta") or {}),
+                     **({"tier": str(effect.payload.get("tier"))}
+                        if "tier" in effect.payload else {}),
+                     **({"intent_text": str(effect.payload.get("text"))}
+                        if "text" in effect.payload else {})},
         })
         result = await dispatch(clean, pctx)
         data = result.data
@@ -697,6 +723,33 @@ class Agent:
         import concurrent.futures
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             return pool.submit(lambda: asyncio.run(self.aresume(answer))).result()
+
+    def evaluate(self, draft: str, goal: str = "") -> object:
+        """语义入口：用注入的 ReflectionCapability 评审草稿（不跑架构）。"""
+        from harness.cognition.reflection_capability import ReflectionCapability
+        cap = next((c for c in self._caps.values()
+                    if isinstance(c, ReflectionCapability)), None)
+        if cap is None:
+            raise RuntimeError("未注入 ReflectionCapability：use(ReflectionCapability(...))")
+        return cap.critique(draft, goal, AgentState(budgets=self._budgets or Budgets()))
+
+    def recognize_intent(self, text: str) -> object:
+        """语义入口：用注入的 CognitionCapability 识别意图（未注入则 fail-closed）。
+
+        与 say() 正交：不跑架构，只跑认知策略；策略可经 use() 插拔替换。
+        """
+        from harness.cognition.capability import CognitionCapability
+        cap = next((c for c in self._caps.values()
+                    if isinstance(c, CognitionCapability)), None)
+        if cap is None:
+            raise RuntimeError("未注入 CognitionCapability：use(CognitionCapability(...))")
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(cap.recognize(text))
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(lambda: asyncio.run(cap.recognize(text))).result()
 
     def say(self, text: str) -> str:
         """同步语义入口：running loop 中走独立线程，只返回白名单文本。"""
