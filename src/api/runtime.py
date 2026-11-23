@@ -101,15 +101,20 @@ def _tool_call_handler(registry: ToolRegistry) -> CallFn:
             return Result.failure("INVALID_EFFECT", "tool dispatch only handles Invoke")
         payload = effect.payload
         ctx_obj = ctx if isinstance(ctx, PortCtx) else PortCtx()
-        raw_args = payload.get("args")
+        # ReAct/archs 批量工具调用：R1 展开后调用信息在 payload["call"]（见 interpreter.py:89）；
+        # 直接 Invoke 则在 payload 顶层。两种形态都支持，避免 ReAct 工具名解析为空。
+        nested = payload.get("call")
+        source = nested if isinstance(nested, dict) else payload
+        raw_args = source.get("args")
         args = dict(raw_args) if isinstance(raw_args, dict) else {}
-        raw_danger = payload.get("danger")
+        raw_danger = payload.get("danger") or source.get("danger")
         danger = (DangerLevel.coerce(raw_danger)
                   if isinstance(raw_danger, (str, DangerLevel))
                   else DangerLevel.CRITICAL)  # 未知/缺 danger 按最严格处理（fail-closed）
         call = ToolCall(
-            call_id=str(payload.get("call_id") or effect.trace_id or "tool-call"),
-            name=str(payload.get("name") or ""),
+            call_id=str(source.get("call_id") or payload.get("call_id")
+                        or effect.trace_id or "tool-call"),
+            name=str(source.get("name") or ""),
             args=args,
             danger=danger,
             source=str(payload.get("source") or "local"),
