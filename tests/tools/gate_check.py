@@ -165,23 +165,42 @@ MODULES = {
             "store": DEFAULT_IMPL_CONTRACTS["store"],
         },
     },
+    "r11": {
+        "title": "R11 集成接入与治理（api：四组 API + 装配 + 治理 + CLI）",
+        "pkg": "api", "path": "api",
+        "doc": "docs/02-模块详设/Agent/R11-集成接入与治理.md",
+        "demo": "tests/demos/demo_r11.py", "coverage": 85,
+        "symbols": [
+            "PROFILES", "profile_names", "PortRegistry", "PROTOCOL_NAMES",
+            "StreamGateway", "static_check_api",
+            "KillSwitch", "CostLimiter", "Rollout", "FeatureFlags", "Governance",
+            "AgentBuilder", "CLI", "CLIResult",
+        ],
+        "behavior": ["test_builder.py", "test_compose.py", "test_ports.py",
+                     "test_stream.py", "test_static.py", "test_governance.py", "test_cli.py"],
+        "integration": [],
+    },
     "r12": {
-        "title": "R12 算子核心（compose：10 算子 + call 装饰器 + build_call/dispatch）",
+        "title": "R12 算子核心（compose 10 算子 + archs 10 架构 + Agent 装配器）",
         "pkg": "compose", "path": "compose",
-        "doc": "docs/02-模块详设/Agent/R2-算子与装配.md",
-        "demo": "tests/demos/demo_r12.py", "coverage": 60,
-        # 规格 P9：登记 10 算子 + call 装饰器 + build_call/dispatch + DTO。
+        "doc": "docs/02-模块详设/Agent/R12-内置架构与组合.md",
+        "demo": "tests/demos/demo_r12.py", "coverage": 85,
+        # 规格 P6/P9：10 算子 + archs 10 架构 + Agent 装配器 + call 装饰器 + DTO。
         "symbols": [
             "seq", "par", "branch", "race", "loop", "map_state", "map_effect",
-            "fallback", "gate", "retry",
+            "fallback", "gate", "retry", "Agent",
             "build_call", "dispatch", "make_dispatch",
             "FaultRecord", "RoutingTarget", "CallState", "CallContext",
             "retry_call", "timeout", "danger_route", "injection_guard",
-            # P4-P8 新登记：ToolLayer 外壳（DTO 归位/内置架构由 ast_scan r12 覆盖）
             "layer_program",
         ],
-        "behavior": ["test_compose.py", "test_call.py", "test_r3_four_pits.py"],
-        "integration": ["test_r6_pilot.py"],
+        "behavior": ["test_compose.py", "test_call.py", "test_r3_four_pits.py",
+                     "test_archs.py", "test_static.py", "test_edges.py", "test_agent.py"],
+        "integration": ["test_r6_pilot.py", "test_archs_semantics.py", "test_tool_layers.py",
+                        "test_wiring.py"],
+        "extra_cov": ["archs"],
+        # compose 的生命周期/Registry/DTO 契约由 tests/r2 覆盖，与 r12 算子测试合并计量。
+        "cov_tests": ["tests/r2", "tests/r12"],
     },
     "r8": {
         "title": "R8 认知与多 Agent 编排",
@@ -302,7 +321,8 @@ def g0(cfg: dict, module: str) -> None:
 
 
 def g1(cfg: dict, module: str) -> None:
-    proc = command(["-m", "pytest", f"tests/{module}", "-q", "-c", "pyproject.toml",
+    cov_paths = cfg.get("cov_tests", [f"tests/{module}"])
+    proc = command(["-m", "pytest", *cov_paths, "-q", "-c", "pyproject.toml",
                     f"--cov={cfg['pkg']}", "--cov-report=term",
                     f"--cov-fail-under={cfg['coverage']}"])
     cover_line = next((line for line in (proc.stdout or "").splitlines()

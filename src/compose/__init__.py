@@ -22,6 +22,7 @@ from .call import (
 )
 from .dispatch import dispatch, make_dispatch
 from .tool_layer import layer_program
+from .agent import Agent
 from .guards import (
     CallState,
     FaultRecord,
@@ -67,6 +68,8 @@ __all__ = [
     "dispatch", "make_dispatch",
     # ToolLayer 外壳（P4-P8）
     "layer_program",
+    # R12 用户入口装配器
+    "Agent",
     # 协作 DTO（领域语义，无编排角色）
     "CallContext", "FaultRecord", "RoutingTarget", "Invocation", "Next",
     "FAULT_KEY", "ROUTING_TARGET_KEY",

@@ -33,7 +33,8 @@ TARGETS = {
            ROOT / "tests" / "r6"],
     "r7": [SRC / "harness" / "context", SRC / "harness" / "memory",
            ROOT / "tests" / "demos" / "demo_r7.py", ROOT / "tests" / "r7"],
-    "r12": [SRC / "compose", ROOT / "tests" / "demos" / "demo_r12.py", ROOT / "tests" / "r12"],
+    "r11": [SRC / "api", ROOT / "tests" / "demos" / "demo_r11.py", ROOT / "tests" / "r11"],
+    "r12": [SRC / "compose", SRC / "archs", ROOT / "tests" / "demos" / "demo_r12.py", ROOT / "tests" / "r12"],
     "r8": [SRC / "harness" / "cognition", SRC / "archs",
            ROOT / "tests" / "demos" / "demo_r8.py", ROOT / "tests" / "r8"],
     "r9": [SRC / "harness" / "security",
@@ -552,10 +553,25 @@ def scan_r10(files: list[Path]) -> list[str]:
     return violations
 
 
+def scan_r11(files: list[Path]) -> list[str]:
+    """R11 红线：只做投影/装配/治理，不 import runtime 内部对象、不写事件日志。"""
+    violations: list[str] = []
+    for path in (SRC / "api").rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        # 边界：外部系统经契约接入，API 层不得 import runtime 内部实现模块。
+        for banned in ("from runtime.runner import", "from runtime.fold import",
+                       "from runtime.interpreter import"):
+            if banned in text:
+                violations.append(f"{path.name} 越界 import 内核内部: {banned}")
+        if "class Fake" in text or "NotImplementedError" in text:
+            violations.append(f"{path.name} 含假实现/桩")
+    return violations
+
+
 SCANNERS = {
     "r1": scan_r1, "r2": scan_r2, "r3": scan_r3,
     "r4": scan_r4, "r5": scan_r5, "r6": scan_r6, "r7": scan_r7,
-    "r12": scan_r12, "r8": scan_r8, "r9": scan_r9, "r10": scan_r10,
+    "r12": scan_r12, "r8": scan_r8, "r9": scan_r9, "r10": scan_r10, "r11": scan_r11,
 }
 
 

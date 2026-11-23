@@ -12,7 +12,7 @@ def test_capability_installs_three_ports() -> None:
     """SecurityCapability.install 按 PORT_PROTOCOLS 键注册 sandbox/audit/human。"""
     reg = Registry()
     cap = SecurityCapability()
-    cap.install(reg)
+    cap.install(object(), reg)  # 标准 Capability.install(container, reg) 签名
     assert reg.has("sandbox") and reg.has("audit") and reg.has("human")
     assert isinstance(reg.resolve("sandbox"), LocalSandbox)
     assert isinstance(reg.resolve("audit"), AuditLogger)

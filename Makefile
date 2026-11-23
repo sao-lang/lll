@@ -2,12 +2,12 @@
 PYTHON ?= .venv/Scripts/python
 PYTEST := $(PYTHON) -m pytest
 
-.PHONY: install test demo demo-r1 demo-r2 demo-r3 demo-r4 demo-r5 demo-r6 demo-r7 demo-r8 demo-r9 demo-r10 gate gate-r1 gate-r2 gate-r3 gate-r4 gate-r5 gate-r6 gate-r7 gate-r8 gate-r9 gate-r10 gate-r12
+.PHONY: install test demo demo-r1 demo-r2 demo-r3 demo-r4 demo-r5 demo-r6 demo-r7 demo-r8 demo-r9 demo-r10 demo-r11 demo-r12 gate gate-r1 gate-r2 gate-r3 gate-r4 gate-r5 gate-r6 gate-r7 gate-r8 gate-r9 gate-r10 gate-r11 gate-r12
 
 install:
 	$(PYTHON) -m pip install -e ".[dev]"
 
-demo: demo-r1 demo-r2 demo-r3 demo-r4 demo-r5 demo-r6 demo-r7 demo-r8 demo-r9 demo-r10
+demo: demo-r1 demo-r2 demo-r3 demo-r4 demo-r5 demo-r6 demo-r7 demo-r8 demo-r9 demo-r10 demo-r11 demo-r12
 
 demo-r1:
 	$(PYTHON) tests/demos/demo_r1.py
@@ -39,10 +39,16 @@ demo-r9:
 demo-r10:
 	$(PYTHON) tests/demos/demo_r10.py
 
-test:
-	$(PYTEST) tests/r1 tests/r2 tests/r3 tests/r4 tests/r5 tests/r6 tests/r7 tests/r8 tests/r9 tests/r10 tests/ports -q
+demo-r11:
+	$(PYTHON) tests/demos/demo_r11.py
 
-gate: gate-r1 gate-r2 gate-r3 gate-r4 gate-r5 gate-r6 gate-r7 gate-r8 gate-r9 gate-r10 gate-r12
+demo-r12:
+	$(PYTHON) tests/demos/demo_r12.py
+
+test:
+	$(PYTEST) tests/r1 tests/r2 tests/r3 tests/r4 tests/r5 tests/r6 tests/r7 tests/r8 tests/r9 tests/r10 tests/r11 tests/r12 tests/ports -q
+
+gate: gate-r1 gate-r2 gate-r3 gate-r4 gate-r5 gate-r6 gate-r7 gate-r8 gate-r9 gate-r10 gate-r11 gate-r12
 
 gate-r1:
 	$(PYTHON) tests/tools/gate_check.py --module r1
@@ -73,6 +79,9 @@ gate-r9:
 
 gate-r10:
 	$(PYTHON) tests/tools/gate_check.py --module r10
+
+gate-r11:
+	$(PYTHON) tests/tools/gate_check.py --module r11
 
 gate-r12:
 	$(PYTHON) tests/tools/gate_check.py --module r12

@@ -1,7 +1,7 @@
 """R9 安全能力装配（rule 9：协议与默认实现成对，装配期注册 3 个 Port）。
 
 接线：ToolsCapability.__init__ 接收 sandbox/human/audit 三 Port 注入 ToolRegistry；
-本 Capability 提供开箱默认实现，install(reg) 按 PORT_PROTOCOLS 键注册。
+本 Capability 提供开箱默认实现，install(container, reg) 按 PORT_PROTOCOLS 键注册。
 """
 from __future__ import annotations
 
@@ -45,8 +45,11 @@ class SecurityCapability:
         """ToolLayer 外壳：安全能力的 Program 入口。"""
         return layer_program("sandbox", payload={"layer": "security"})()
 
-    def install(self, reg: Registry) -> None:
-        """把三 Port 注册进共用 Provider 注册表。"""
+    def install(self, container: object, reg: Registry) -> None:  # purity-exempt: Capability 协议签名 container 必填，本能力只消费 reg
+        """把三 Port 注册进共用 Provider 注册表（对齐 compose.Capability 协议）。
+
+        container 由协议要求传入，本能力不消费它；reg 必填，缺席即装配错误。
+        """
         reg.register(_PORT_SANDBOX, self.sandbox)
         reg.register(_PORT_AUDIT, self.audit)
         reg.register(_PORT_HUMAN, self.human)

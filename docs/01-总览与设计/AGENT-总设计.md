@@ -6,6 +6,7 @@
 > **配套**：模块详设 `docs/02-模块详设/Agent/`（由本文按 R1~R13 拆分派生，每模块模块内闭环、含 API/字段/门禁）；能力全集见[《能力域全景》](./能力域全景.md)（含自查补齐内容，见附录 B.1 待办清单）。
 > **状态**：设计定稿——**算子核心架构**（依据 `docs/01-总览与设计/组合式工具层重构规格-20261121.md` P1~P9 / D-1~D-10）。R1 一行不改；R2 取消（文档《算子与装配》承接其能力）；组合层 = 算子核心；工具层 R3~R9 可挑选可组合；对外 API 不变。依赖方向恒为 **工具层 → 组合层（算子 + call） → 内核 R1**，R1 零依赖上层。
 > **版本记录**：
+> - 2026-11-23（R11/R12/R13 实现同步）：R12 落地 `src/compose/agent.py` 的 `Agent` 装配器（capability/rag/memory/telemetry/event_stream/build）并补齐 7 个 static_check 错误码（E05/E10/E11/E12/E13/E14/E16），`tests/r12/` 6 文件矩阵、门禁 r12 14/14（compose 93% / archs 96%）；R11 `src/api/` 落地四组 API / AgentBuilder / PortRegistry / StreamGateway / 治理 / CLI 与三档 profile，production profile 经 `SecurityCapability` 默认装配 R9 三 Port（R5/R9 源码零改），`tests/r11/` 29 用例、门禁 r11 13/13（api 93%）；R13 确认为横切规格参考（契约大部分已物化，缺口归 R12/R11）。12 门禁全绿、pytest 全绿、mypy strict 110 文件干净、source_purity rc=0、R1 零改动。本次为文档同步（代码已实现），无新增代码行为变更。
 > - 2026-11-23（R8/R9/R10 实现）：R8 认知与多 Agent 编排、R9 安全与 HITL、R10 可观测评测与持久化落地——cognition（四级级联意图 + `intent_as_program` 单入口 + 确定性服务，契约由 `archs/base.py` 单一 re-export）/ security（复用 `KeywordInjectionDetector` 单检测器 + 沙盒/审计/HITL 三默认实现 + 审批流）/ observability·eval·durability（复用 R1 EventStore，R10 不重复声明）；AOP 已删除；11 门禁全绿、pytest 全绿、mypy strict 101 文件干净、source_purity rc=0。本次为文档同步，无代码行为变更。
 > - 2026-11-21（意图识别默认四级级联路由）：意图策略默认实现由单级"规则/LLM 分类"改为**四级级联 `CascadeIntentStrategy`**（L1 关键词→L2 语义/采样库→L3 便宜模型→L4 主模型，逐级置信度阈值短路 + 兜底）；四个部件 `KeywordMatcher`/`IntentSampleStore`/`CheapIntentModel`/`PrimaryIntentModel` 各自可按接口注入，`strategy=` 整体注入则整包替换默认级联（两级注入共存）；修 R12 Router/RouterSkill 裂缝——统一经 `intent_as_program()` 单入口消费 `IntentResult`，不再把 classifier 塞进 prompt 解析。IntentResult 加可选 trace（观察语义，不下沉内核）。同步 R8/R12/R13/总设/能力域全景；纯文档变更无代码改动。
 > - 2026-11-21（R7 D4/D5 新增方案）：R7 上下文管理补两项正交增强——**D4 大 tool 结果落盘而非截断**（`OffloadPolicy` 阈值判定 + BlobPort 句柄，`mode="truncate"` 构造即拒绝，不留兼容层）；**D5 KV cache 命中率一等可观测指标**（`CacheTelemetry` hits/misses/label/hit_rate 挂 `ContextMemoryManager.cache_telemetry` 观测面，可进 R10 trace、无访问 0.0 不产 NaN）。同步 R7 详设 §11.6/§12.5/§4 与总设 §R7。9 个 TDD 测试 + gate r7 15/15，全量绿、R1 零改动。
@@ -573,7 +574,7 @@ CallFn = Callable[[Effect, DynamicValue], Awaitable[Result]]            # 组合
 
 ## R2 算子与装配（原插件总线与协议）
 
-> 层：组合层 · 依赖：R1 · 源码包：`src/compose/`（`program.py`/`call.py`/`dispatch.py`）+ `src/archs/`；原 `src/aop/` 已删除 · 详见《R2：算子与装配》模块详设
+> 层：组合层 · 依赖：R1 · 源码包：`src/compose/`（`program.py`/`call.py`/`dispatch.py`）+ `src/archs/`（已实现）；原 `src/aop/` 已删除 · 详见《R2：算子与装配》模块详设
 
 ### R2.1 职责与边界
 
@@ -1646,7 +1647,7 @@ def replay_events(events, initial: AgentState) -> AgentState: ...
 
 ## R11 集成接入与治理
 
-> 层：L3 · 依赖：全部 · 源码包：`api/` + cli/ · 详见 R11 模块详设
+> 层：L3 · 依赖：全部 · 源码包：`api/` + cli/（已实现）· 详见 R11 模块详设
 
 ### R11.1 职责与边界
 
@@ -1871,14 +1872,14 @@ decorated = build_call(base, decorators=[retry_call, timeout])      # ③函数�
 | 待办 | 现状 | 归属模块 | 处理方向 |
 |------|------|---------|---------|
 | 用户可定义 reducer（状态合并扩展） | R1 fold 是固定逻辑，不可扩展 | R1 增强 | 设计 reducer 注入点（`fold` 接受可选 reducer 表），不改默认行为 |
-| 图编排 execute 代码（Graph/branch/par/race 等） | R12 设计已完整，代码未实现 | R12 | 按 R12 §6.1 骨架实现 `src/archs/`+`src/compose/` |
+| 图编排 execute 代码（Graph/branch/par/race 等） | ✅ 已实现（2026-11-23） | R12 | 按 R12 §6.1 骨架落地 `src/archs/`+`src/compose/` |
 | 群聊/swarm 多 Agent 编排 | Handoff/Supervisor/Blackboard 设计有，群聊/swarm 无 | R8 增强 | 评估是否为必备；若是则补 Arch 第 11 种（需同步总设计"10 内置"口径） |
 | OTel/OTLP 接入规范 | profile 提"OTel"字样，无规范 | R10 | 设计时补 OTel span/metric 映射与导出契约 |
 | output parser / prompt 模板抽象 | 无独立抽象（结构化校验已有） | R4 增强 | 评估是否需要独立协议；结构化校验已覆盖大部分场景 |
 | 7 项设计缺失（B10/B11/G9/J10/N8/Q10/D13） | 设计态待补 | R5~R11 | 各模块开发前补齐设计到可写代码深度 |
 | R5~R13 剩余能力代码（约 82 项设计充分项） | 设计有、代码无 | R5~R13 | 按模块整块推进，每次完成一个模块 100% 项 |
-| **R1↔R2 / R3→R2 接线未装配**：函数已就绪（ctx_factory/_bind/ResilienceCapability.install）但无生产代码调用 | 接口就绪、无人串接 | R12 装配层 | composition root（Agent 装配器）统一注册，非模块遗漏 |
-| **M1-M6 构造参数生产注入**：dimension_of/idempotency_key/pool/pools/kinds/budgets/available+add_backend/failed_target_of 在 R1-R4 已实现读取端，但无生产装配者 | 读取端就绪、注入端缺位 | R12 装配层 | `Agent.build()` 从用户后端注册表/预算/池配置投影后构造注入（详见 R12 §6.1.3 注入表）；测试手填不算生产装配，非 R1-R4 遗漏 |
+| **R1↔R2 / R3→R2 接线未装配**：函数已就绪（ctx_factory/_bind/ResilienceCapability.install）但无生产代码调用 | ⏳ 待接线（2026-11-23：Agent 装配器已落地，但 ctx_factory/_bind 尚未经 build() 注册） | R12 装配层 | composition root 统一注册仍待实现，非模块遗漏 |
+| **M1-M6 构造参数生产注入**：dimension_of/idempotency_key/pool/pools/kinds/budgets/available+add_backend/failed_target_of 在 R1-R4 已实现读取端，但无生产装配者 | ⏳ 待接线（2026-11-23：读取端就绪，`Agent.build()` 仅做 static_check + 产 Session，未投影注入 M1-M6） | R12 装配层 | 生产装配者待补；详见 R12 §6.1.3 注入表，非 R1-R4 遗漏 |
 | **SandboxPort.run(fn: Callable) 不可序列化** | 签名只够同进程执行，真进程/容器隔离拿不到可序列化代码 | R9 | 实现前改签名为可序列化 spec（code+entrypoint+args），否则沙盒承诺不可达 |
 | **AuditPort.record 收裸 dict** | 防篡改哈希链字段（prev_hash/hash）无处放 | R9 | 实现时签名改收 `AuditEvent` 具名类型 |
 | **EvalPort.score 只给 case_id** | 评测器拿不到 expected/should_refuse，需自己查库 | R10 | 实现时签名改收 `EvalCase` 具名类型 |

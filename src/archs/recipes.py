@@ -20,7 +20,7 @@ from collections.abc import Callable, Generator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final
 
-from compose import ToolSpec
+from compose import DangerLevel, ToolSpec
 from compose.program import ProgramFn
 from harness.cognition import intent_as_program
 from runtime import AgentState, DynamicValue, Effect, Invoke, Program, Spawn, Terminate
@@ -148,6 +148,11 @@ class ToolUse:
             # L1 披露只有 name+description，parameters_schema 缺省空 dict 合法（L2/L3 才披露）。
             if not t.name:
                 errs.append(StaticCheckIssue("R12-E09", "ToolSpec 缺 name", t.name))
+            # E10：高危工具未配沙盒（ToolUse 构造不含 SandboxPort → 高危声明即报）。
+            declared = getattr(t, "danger", None)
+            # 未声明 danger 属 E09 域；这里只处理显式高危且未配沙盒。
+            if declared in (DangerLevel.HIGH, DangerLevel.CRITICAL):
+                errs.append(StaticCheckIssue("R12-E10", f"{t.name} 高危未配沙盒", t.name))
         return _report(self.name, tuple(errs), ("tool",))
 
     def compile(self) -> Program:
@@ -183,8 +188,13 @@ class ReAct:
         errs = []
         if not self.tools:
             errs.append(StaticCheckIssue("R12-E07", "tools 为空", "tools"))
+        if self.llm is None:
+            errs.append(StaticCheckIssue("R12-E11", "llm port 未指定", "llm"))
         if self.max_turns <= 0:
             errs.append(StaticCheckIssue("R12-E17", "max_turns <= 0", "max_turns"))
+        from runtime import Budgets
+        if self.max_turns > Budgets().max_turns:
+            errs.append(StaticCheckIssue("R12-E12", f"max_turns {self.max_turns} 超全局上限", "max_turns"))
         return _report(self.name, tuple(errs), ("llm", "tool"), {"turns": self.max_turns})
 
     def compile(self) -> Program:
@@ -419,6 +429,10 @@ class Supervisor:
             errs.append(StaticCheckIssue("R12-E15", "planner 未履约", "planner"))
         if self.max_children <= 0:
             errs.append(StaticCheckIssue("R12-E17", "max_children <= 0", "max_children"))
+        if getattr(self.join, "name", None) not in ("all", "any", "majority", "majority_vote", "reduce"):
+            errs.append(StaticCheckIssue("R12-E13", "join 未注册", "join"))
+        if not getattr(self.child_spec, "name", None):
+            errs.append(StaticCheckIssue("R12-E14", "child_spec 非法（缺 name）", "child_spec"))
         return _report(self.name, tuple(errs), ("llm",), {"parallel_children": self.max_children})
 
     def compile(self) -> Program:
@@ -514,6 +528,13 @@ class Blackboard:
             errs.append(StaticCheckIssue("R12-E07", "agents 为空", "agents"))
         if self.rounds <= 0:
             errs.append(StaticCheckIssue("R12-E17", "rounds <= 0", "rounds"))
+        seen_writes: dict[str, int] = {}
+        for a in self.agents:
+            for key in getattr(a, "writes", ()) or ():
+                seen_writes[str(key)] = seen_writes.get(str(key), 0) + 1
+        for key, count in seen_writes.items():
+            if count > 1:
+                errs.append(StaticCheckIssue("R12-E16", f"共享键 {key} 无仲裁", key))
         return _report(self.name, tuple(errs), ("llm",), {"rounds": self.rounds})
 
     def compile(self) -> Program:
@@ -591,6 +612,17 @@ class Graph:
         for src, targets in by_src.items():
             if len(set(targets)) != len(targets):
                 errs.append(StaticCheckIssue("R12-E06", f"cond 目标重复于 {src}", src))
+        # E05：cond 返回未声明节点 id——此处以最小 AgentState 探测用户 cond 的返回；
+        # 仅收集声明期可判定的字符串目标，运行期才知道的 cond 异常被隔离不误报。
+        for e in self._edges:
+            if e.cond is None:
+                continue
+            try:
+                probe = e.cond(AgentState())
+            except Exception:
+                continue  # 运行期才知道的 cond 不在此误报
+            if isinstance(probe, str) and probe and probe not in known:
+                errs.append(StaticCheckIssue("R12-E05", f"cond 目标非法 {probe}", e.src))
         # E02：环（DFS 检测，回边即报）。
         if self._has_cycle():
             errs.append(StaticCheckIssue("R12-E02", "图中存在环", "graph"))
