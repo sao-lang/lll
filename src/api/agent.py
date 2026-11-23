@@ -21,8 +21,9 @@ from contextvars import ContextVar
 from typing import Callable, Protocol, cast
 
 from compose import (
-    PortCtx, Provider, Registry, ToolSpec, bind_input,
+    LifecyclePhase, PortCtx, Provider, Registry, ToolSpec, bind_input,
 )
+from compose.notify import NoticeFn
 from runtime import AgentState, Budgets, CallFn, DynamicValue, Effect, EventStore, Invoke, Program, Result, RunResult, Session
 
 from .runtime import AgentRuntime
@@ -212,6 +213,7 @@ class Agent:
         self.runtime: AgentRuntime | None = None  # 最近一次装配的运行期（可观测底座读取）
         self._caps: dict[str, Provider] = {}
         self._tools: list[tuple[ToolSpec, Callable[..., DynamicValue]]] = []
+        self._hooks: list[tuple[LifecyclePhase, NoticeFn, str]] = []
         self._port_handlers: dict[str, Callable[[Effect, DynamicValue], Awaitable[Result]]] = {}
         self._installed: dict[str, Provider] = {}  # 幂等按对象身份：同名但换对象要重装（Round4 S3）
 
@@ -246,6 +248,21 @@ class Agent:
         不是兼容双轨，只是用户-facing 的命名。链式返回 self 支持连续 use()。
         """
         return self.capability(cap)
+
+    def on(self, phase: LifecyclePhase | str, fn: NoticeFn, *, name: str = "") -> "Agent":
+        """订阅 lifecycle 相位（一等 hook API）：say() 前注册，装配期真订阅本次运行的 bus。
+
+        相位 16 个（LifecyclePhase）；hook 收只读 Notice、无返回值、异常被总线
+        就地隔离（通知语义：不拦截、不改写）。每次 say() 重新装配，hooks 从
+        收集列表重放到新 bus——跨 say 持久，无重复订阅（每装配期 bus 全新）。
+        """
+        try:
+            key = phase if isinstance(phase, LifecyclePhase) else LifecyclePhase(str(phase))
+        except ValueError as exc:
+            raise TypeError(
+                f"未知 lifecycle 相位: {phase!r}（合法值见 compose.LifecyclePhase）") from exc
+        self._hooks.append((key, fn, name or getattr(fn, "__name__", "anonymous")))
+        return self
 
     def register_tool(self, name: str, fn: Callable[..., DynamicValue], **kwargs: DynamicValue) -> "Agent":
         """注册工具到门面（tool port 走四级路由）。"""
@@ -470,6 +487,10 @@ class Agent:
                               security=security,
                               tool_setup=tool_setup, call_factory=call_factory)
         self.runtime = rt
+        # lifecycle hooks 真接线：say() 前收集的订阅装配期重放到本次运行的 bus——
+        # 与事件投影同一 bus（runner_notifier/gateway 都从它 emit），先于 run 注册。
+        for hook_phase, hook_fn, hook_name in self._hooks:
+            rt.bus.on(hook_phase, hook_fn, name=hook_name)
         session = Session(
             session_id=self._session_id,
             program_factory=self._arch.compile,

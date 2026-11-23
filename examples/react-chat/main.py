@@ -30,6 +30,7 @@ from api.wiring import STREAM_TOPIC  # noqa: E402
 from archs import ReAct  # noqa: E402
 from compose import (  # noqa: E402
     DangerLevel,
+    LifecyclePhase,
     LLMRequest,
     LLMResponse,
     PortCtx,
@@ -142,6 +143,14 @@ async def main() -> None:
     agent.use(SecurityCapability())   # 沙盒/审计/审批默认实现，插拔即生效
     agent.use(mem_cap)                # say() 自动 recall（前）+ 自动写回（后）
 
+    # lifecycle hook 一等订阅：say 前注册，装配期真订阅本次运行的 bus。
+    # Notice 只读投影（phase/port/payload/meta），异常被总线就地隔离（通知语义）。
+    hook_log: list[str] = []
+    agent.on(LifecyclePhase.AFTER_TOOL,
+             lambda n: hook_log.append(f"{n.phase.value}:{n.port}"))
+    agent.on(LifecyclePhase.SESSION_END,
+             lambda n: hook_log.append(f"{n.phase.value}"))
+
     answer = agent.say(PROMPT)
 
     run = agent.last_run
@@ -188,6 +197,12 @@ async def main() -> None:
         "（LOW 工具直执行但必写审计）",
         "SecurityCapability 默认实现: LocalSandbox + AuditLogger + ApprovalFlow"
         "（CRITICAL 工具才触发审批）",
+    ])
+
+    # ---- ⑧ Lifecycle hook（agent.on）----
+    report.add("⑧ Lifecycle hook（agent.on 一等订阅）", [
+        f"本次运行收到的相位通知: {hook_log or '（无）'}",
+        "16 相位见 compose.LifecyclePhase；Notice 只读、hook 异常就地隔离不阻断主流程",
     ])
 
     # ---- 诚实边界 ----

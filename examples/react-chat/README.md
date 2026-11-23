@@ -25,6 +25,7 @@ agent = Agent(ReAct([get_weather], llm="deepseek-chat", max_turns=2),
 agent.use(ModelCapability(llm=llm, cost_guard=CostGuard(max_cost_usd=0.05)))
 agent.use(SecurityCapability())   # 沙盒/审计/审批默认实现
 agent.use(MemoryCapability())     # say 自动召回（前）+ 自动写回（后）
+agent.on(LifecyclePhase.AFTER_TOOL, lambda n: print(n.phase, n.port))  # lifecycle hook
 answer = agent.say("用 get_weather 查一下深圳的天气")
 # agent.stream — 内置事件流，say 后直接订阅
 ```
@@ -39,6 +40,7 @@ answer = agent.say("用 get_weather 查一下深圳的天气")
 | 手动 `StreamGateway` + 相位接线 | `agent.stream` 内置事件流（懒建与 runtime 同源），AFTER_TOOL/SESSION_END 自动发布 | `api.runtime.bind_stream_projection` |
 | usage 手动搬进 `Result.usage` | 门面 `_call_llm` 自动搬运，R1 Budgets 自动扣费 | `api.agent._call_llm` |
 | RuntimeCtx→PortCtx / ReAct 消息归一化 | 全部框架内部完成 | `api.agent._normalize_history` 等 |
+| 手动拿 `runtime.bus` 订阅（错过本次运行） | `agent.on(phase, fn)` say 前注册，装配期真订阅本次运行 bus，跨 say 持久 | `api.agent.on` + `_arun` |
 
 ## 报告里的"注入生效证据"
 
