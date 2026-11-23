@@ -1,0 +1,485 @@
+{
+  "version": "1.1",
+  "goal": "R5/R9/R10/R11 设计拷问：核查模块逻辑与联通性，修复审计写入/同源/事件时钟/CRITICAL 沙盒四项边界并全绿交付",
+  "source": "user_request",
+  "mode": "conductor",
+  "template": "conductor.4",
+  "confidence": 0.9,
+  "assumptions": [
+    "R1 一行不改",
+    "零死代码/兼容层/测试桩",
+    "以源码端口签名为契约真相源"
+  ],
+  "clarifications": [
+    "用户已给出四项已知问题；其余设计问题由拷问发现后一并修"
+  ],
+  "tasks": [
+    {
+      "id": "T1",
+      "goal": "拷问设计/源码并列出全部逻辑与联通性问题"
+    },
+    {
+      "id": "T2",
+      "goal": "规格固化与覆盖矩阵"
+    },
+    {
+      "id": "T3",
+      "goal": "TDD 修复已知四项及拷问发现的问题"
+    },
+    {
+      "id": "T4",
+      "goal": "门禁全绿 + 独立 review Blocker=0 + 文档同步"
+    }
+  ],
+  "nodes": [
+    {
+      "kind": "skill",
+      "action": "派全新上下文子代理做独立 review：七维 + 接线四问 + 功能遗漏/断点，红队视角找反例",
+      "command": "派新子代理，brief 自包含 diff + 规格 + 完成标准",
+      "command_type": "judgment",
+      "exit_criteria": "收到新子代理报告（非复用旧报告），含 Blocker 分级",
+      "exit_check": {
+        "kind": "file_content",
+        "expect": "报告含 Blocker/Should/Nit 与 文件:行号",
+        "evidence": "overview 独立 review 章节"
+      },
+      "on_fail": "retry",
+      "on_fail_next": "review/DISPATCH",
+      "when": "standard 或 full 档",
+      "atomic": true,
+      "id": "n_review-DISPATCH",
+      "label": "独立 review · DISPATCH · DISPATCH",
+      "serves_task": "T4",
+      "ref": "review",
+      "route_ref": "review/DISPATCH",
+      "expanded_from": "n_review-DISPATCH"
+    },
+    {
+      "kind": "research",
+      "action": "先调查再开口：列目录、读相关文档与报错，把能自己查的查完",
+      "command": "ls <目标目录> && 阅读 <相关文档路径>",
+      "command_type": "file_read",
+      "exit_criteria": "已列出调查过的路径与关键发现",
+      "exit_check": {
+        "kind": "file_content",
+        "expect": "至少 1 个已读路径 + 发现摘要",
+        "evidence": "overview 调查记录"
+      },
+      "on_fail": "ask",
+      "serves_task": "T1",
+      "atomic": true,
+      "id": "n_inv-S2-investigate",
+      "label": "调查现状：读设计+源码 · S2-investigate",
+      "ref": "brainstorm",
+      "route_ref": "brainstorm/S2-investigate",
+      "expanded_from": "n_inv"
+    },
+    {
+      "kind": "ask",
+      "action": "一次问清整个 frontier（≤5 项，给 2-3 个候选），回述意图请用户确认",
+      "command": "向用户输出未决清单 + 候选选项，等待输入",
+      "command_type": "question",
+      "exit_criteria": "用户已确认关键未决项，或明示假设并允许推进",
+      "exit_check": {
+        "kind": "user_confirm",
+        "expect": "用户回复确认/选项编号",
+        "evidence": "对话中的用户回复"
+      },
+      "on_fail": "ask",
+      "atomic": true,
+      "id": "n_clarify-S2-clarify",
+      "label": "未决项澄清 · S2-clarify",
+      "serves_task": "T2",
+      "ref": "brainstorm",
+      "route_ref": "brainstorm/S2-clarify",
+      "expanded_from": "n_clarify"
+    },
+    {
+      "kind": "tool",
+      "action": "大需求：逐条抄用户原话建需求覆盖矩阵（需求→决策→FR→验收），模式切换红队复审后跑门禁",
+      "command": "python ../conductor-brainstorm/scripts/coverage_check.py --matrix <覆盖矩阵> --spec <规格>",
+      "command_type": "command",
+      "exit_criteria": "覆盖矩阵退出码 0，红队复审无漏项",
+      "exit_check": {
+        "kind": "exit_code",
+        "expect": "0",
+        "evidence": "coverage_check.py rc=0 + 矩阵文件"
+      },
+      "on_fail": "retry",
+      "on_fail_next": "n_clarify-S2-clarify",
+      "when": "FR>=8 或 多模块 或 多场景 或 公共契约变更 或 用户说完整系统",
+      "atomic": true,
+      "id": "n_cov-S2-coverage",
+      "label": "需求覆盖矩阵 · S2-coverage",
+      "serves_task": "T2",
+      "ref": "brainstorm",
+      "route_ref": "brainstorm/S2-coverage",
+      "expanded_from": "n_cov"
+    },
+    {
+      "kind": "tool",
+      "action": "规格固化：从澄清输出抽取六段契约（Why/Delta/Invariants/Affected/Acceptance/Open），落 .conductor/contracts/，跑契约检查",
+      "command": "python ../conductor-brainstorm/scripts/contract_check.py --contract <契约路径>",
+      "command_type": "command",
+      "exit_criteria": "契约文件存在且检查退出码 0，Acceptance 灌入台账",
+      "exit_check": {
+        "kind": "exit_code",
+        "expect": "0",
+        "evidence": "contract_check.py rc=0 + 契约文件路径"
+      },
+      "on_fail": "retry",
+      "on_fail_next": "n_clarify-S2-clarify",
+      "when": "standard 或 full 档",
+      "atomic": true,
+      "id": "n_contract-S2-contract",
+      "label": "规格固化 · S2-contract",
+      "serves_task": "T2",
+      "ref": "brainstorm",
+      "route_ref": "brainstorm/S2-contract",
+      "expanded_from": "n_contract"
+    },
+    {
+      "kind": "gate",
+      "action": "硬门禁：契约未生成或 contract_check 非 0 不进 S3",
+      "command": "确认 contract_check rc=0 且 Acceptance 已入台账",
+      "command_type": "gate_check",
+      "exit_criteria": "契约检查通过且台账已接 Acceptance",
+      "exit_check": {
+        "kind": "exit_code",
+        "expect": "0",
+        "evidence": "contract_check rc=0 + commitment_ledger init rc=0"
+      },
+      "on_fail": "abort",
+      "atomic": true,
+      "id": "n_cgate-S2-contract-gate",
+      "label": "契约门禁 · S2-contract-gate",
+      "serves_task": "T2",
+      "ref": "brainstorm",
+      "route_ref": "brainstorm/S2-contract-gate",
+      "expanded_from": "n_cgate"
+    },
+    {
+      "kind": "tool",
+      "action": "跑影响面扫描：符号/文件/diff → 直接引用者",
+      "command": "python ../../scripts/impact_analysis.py --symbols <符号> --files <文件> --diff",
+      "command_type": "command",
+      "exit_criteria": "拿到直接引用者清单（含文件:行号）",
+      "exit_check": {
+        "kind": "file_content",
+        "expect": "引用者清单非空或显式'无引用'",
+        "evidence": "impact_analysis 输出"
+      },
+      "on_fail": "ask",
+      "when": "跨模块 或 full 或 契约 Delta 含公共契约/接口变更",
+      "atomic": true,
+      "id": "n_impact-SCAN",
+      "label": "影响面扫描 · SCAN",
+      "serves_task": "T1",
+      "ref": "impact",
+      "route_ref": "impact/SCAN",
+      "expanded_from": "n_impact"
+    },
+    {
+      "kind": "tool",
+      "action": "写最小失败测试并跑出红；确认失败原因是缺该行为，不是环境/拼写",
+      "command": "python ../../scripts/verify.py <范围>",
+      "command_type": "command",
+      "exit_criteria": "verify 输出失败且失败原因=目标行为缺失",
+      "exit_check": {
+        "kind": "exit_code",
+        "expect": "非 0 且原因匹配目标行为",
+        "evidence": "verify.py 输出片段"
+      },
+      "on_fail": "retry",
+      "on_fail_next": "n_red-RED",
+      "atomic": true,
+      "id": "n_red-RED",
+      "label": "TDD RED · RED",
+      "serves_task": "T3",
+      "ref": "tdd",
+      "route_ref": "tdd/RED",
+      "expanded_from": "n_red"
+    },
+    {
+      "kind": "tool",
+      "action": "写最小实现让测试过；跑全量相关测试（不只单条）",
+      "command": "python ../../scripts/verify.py <全量相关范围>",
+      "command_type": "command",
+      "exit_criteria": "相关测试全绿，无 fake/mock 造假",
+      "exit_check": {
+        "kind": "exit_code",
+        "expect": "0",
+        "evidence": "verify.py rc=0 + source_purity --strict rc=0"
+      },
+      "on_fail": "retry",
+      "on_fail_next": "n_red-RED",
+      "atomic": true,
+      "id": "n_green-GREEN",
+      "label": "TDD GREEN · GREEN",
+      "serves_task": "T3",
+      "ref": "tdd",
+      "route_ref": "tdd/GREEN",
+      "expanded_from": "n_green"
+    },
+    {
+      "kind": "think",
+      "action": "保持绿的前提改善结构，不改行为",
+      "command": "改结构后重跑 verify",
+      "command_type": "command",
+      "exit_criteria": "重构后测试仍全绿",
+      "exit_check": {
+        "kind": "exit_code",
+        "expect": "0",
+        "evidence": "verify.py rc=0"
+      },
+      "on_fail": "retry",
+      "on_fail_next": "n_green-GREEN",
+      "atomic": true,
+      "id": "n_refactor-REFACTOR",
+      "label": "TDD REFACTOR · REFACTOR",
+      "serves_task": "T3",
+      "ref": "tdd",
+      "route_ref": "tdd/REFACTOR",
+      "expanded_from": "n_refactor"
+    },
+    {
+      "kind": "gate",
+      "action": "S4 证据门禁：只认 verify.py 输出，裸跑测试框架不算",
+      "command": "python ../../scripts/verify.py <全量>",
+      "command_type": "gate_check",
+      "exit_criteria": "verify 全绿且 source_purity --strict 通过",
+      "exit_check": {
+        "kind": "exit_code",
+        "expect": "0",
+        "evidence": "verify.py rc=0 + source_purity rc=0"
+      },
+      "on_fail": "abort",
+      "atomic": true,
+      "id": "n_evidence-EVIDENCE",
+      "label": "全量证据门禁 · EVIDENCE",
+      "serves_task": "T3",
+      "ref": "tdd",
+      "route_ref": "tdd/EVIDENCE",
+      "expanded_from": "n_evidence"
+    },
+    {
+      "kind": "tool",
+      "action": "只暂存本任务精确文件，禁 git add -A/.; 提交前 status --short + diff --cached --stat 两步核对",
+      "command": "git add <精确文件列表> && git status --short && git diff --cached --stat",
+      "command_type": "command",
+      "exit_criteria": "暂存区只有本任务文件，两步核对通过",
+      "exit_check": {
+        "kind": "file_content",
+        "expect": "暂存清单与任务变更清单一致",
+        "evidence": "git status/diff 输出"
+      },
+      "on_fail": "abort",
+      "atomic": true,
+      "id": "n_stage-STAGE",
+      "label": "精确暂存 · STAGE",
+      "serves_task": "T4",
+      "ref": "git",
+      "route_ref": "git/STAGE",
+      "expanded_from": "n_stage"
+    },
+    {
+      "kind": "tool",
+      "action": "按 type(scope): 中文简述 提交，body 说为什么；hooks 失败修根因禁 --no-verify",
+      "command": "git commit -m '<type>(<scope>): <简述>' && git log --oneline -1",
+      "command_type": "command",
+      "exit_criteria": "提交成功，hash 记入 overview",
+      "exit_check": {
+        "kind": "exit_code",
+        "expect": "0",
+        "evidence": "git log --oneline -1 + overview commit hash"
+      },
+      "on_fail": "abort",
+      "atomic": true,
+      "id": "n_commit-COMMIT",
+      "label": "提交 · COMMIT",
+      "serves_task": "T4",
+      "ref": "git",
+      "route_ref": "git/COMMIT",
+      "expanded_from": "n_commit"
+    },
+    {
+      "kind": "gate",
+      "action": "review 门禁：Blocker=0 才放行；有 Blocker → 返修后重派新子代理复审",
+      "command": "python ../../scripts/review_gate.py <报告>",
+      "command_type": "gate_check",
+      "exit_criteria": "review_gate 退出 0，Blocker=0",
+      "exit_check": {
+        "kind": "exit_code",
+        "expect": "0",
+        "evidence": "review_gate rc=0"
+      },
+      "on_fail": "retry",
+      "on_fail_next": "n_red-RED",
+      "atomic": true,
+      "id": "n_rgate-GATE",
+      "label": "review 门禁 · GATE",
+      "serves_task": "T4",
+      "ref": "review",
+      "route_ref": "review/GATE",
+      "expanded_from": "n_rgate"
+    },
+    {
+      "kind": "tool",
+      "action": "定位 overview：跑 overview_path.py，同会话 append，路径只认返回值",
+      "command": "python ../../scripts/overview_path.py --project-root . --topic '<主题>'",
+      "command_type": "command",
+      "exit_criteria": "返回 path/action/sid，写入 README/gitignore",
+      "exit_check": {
+        "kind": "exit_code",
+        "expect": "0",
+        "evidence": "overview_path 输出 JSON"
+      },
+      "on_fail": "abort",
+      "atomic": true,
+      "id": "n_memloc-LOCATE",
+      "label": "overview 定位 · LOCATE",
+      "serves_task": "T4",
+      "ref": "memory",
+      "route_ref": "memory/LOCATE",
+      "expanded_from": "n_memloc"
+    },
+    {
+      "kind": "action",
+      "action": "只记有后续影响的内容；L0 ≤8 行，详情进 .details.md，review 报告内嵌主文件",
+      "command": "按 .conductor/README.md 分类写入 overview 主文件/详情文件",
+      "command_type": "file_write",
+      "exit_criteria": "overview 含本轮决策/证据/未完成项，目录无违规",
+      "exit_check": {
+        "kind": "file_content",
+        "expect": "主文件 L0 ≤8 行 + overview_path --audit violations=null",
+        "evidence": "overview 文件 + audit 输出"
+      },
+      "on_fail": "abort",
+      "atomic": true,
+      "id": "n_record-RECORD",
+      "label": "沉淀记录 · RECORD",
+      "serves_task": "T4",
+      "ref": "memory",
+      "route_ref": "memory/RECORD",
+      "expanded_from": "n_record"
+    }
+  ],
+  "edges": [
+    {
+      "from": "n_inv-S2-investigate",
+      "to": "n_clarify-S2-clarify",
+      "type": "seq"
+    },
+    {
+      "from": "n_clarify-S2-clarify",
+      "to": "n_cov-S2-coverage",
+      "type": "seq"
+    },
+    {
+      "from": "n_cov-S2-coverage",
+      "to": "n_contract-S2-contract",
+      "type": "seq"
+    },
+    {
+      "from": "n_contract-S2-contract",
+      "to": "n_cgate-S2-contract-gate",
+      "type": "seq"
+    },
+    {
+      "from": "n_cgate-S2-contract-gate",
+      "to": "n_impact-SCAN",
+      "type": "seq"
+    },
+    {
+      "from": "n_impact-SCAN",
+      "to": "n_red-RED",
+      "type": "seq"
+    },
+    {
+      "from": "n_red-RED",
+      "to": "n_green-GREEN",
+      "type": "seq"
+    },
+    {
+      "from": "n_green-GREEN",
+      "to": "n_refactor-REFACTOR",
+      "type": "seq"
+    },
+    {
+      "from": "n_refactor-REFACTOR",
+      "to": "n_evidence-EVIDENCE",
+      "type": "seq"
+    },
+    {
+      "from": "n_evidence-EVIDENCE",
+      "to": "n_stage-STAGE",
+      "type": "seq"
+    },
+    {
+      "from": "n_stage-STAGE",
+      "to": "n_commit-COMMIT",
+      "type": "seq"
+    },
+    {
+      "from": "n_commit-COMMIT",
+      "to": "n_review-DISPATCH",
+      "type": "seq"
+    },
+    {
+      "from": "n_review-DISPATCH",
+      "to": "n_rgate-GATE",
+      "type": "seq"
+    },
+    {
+      "from": "n_rgate-GATE",
+      "to": "n_memloc-LOCATE",
+      "type": "seq"
+    },
+    {
+      "from": "n_memloc-LOCATE",
+      "to": "n_record-RECORD",
+      "type": "seq"
+    }
+  ],
+  "paths": [
+    {
+      "id": "P1",
+      "label": "调查现状：读设计+源码 · S2-investi / 未决项澄清 · S2-clarify / 需求覆盖矩阵 · S2-coverage / 规格固化 · S2-contract",
+      "guard": "默认路线（无分支条件）",
+      "steps": [
+        "n_inv-S2-investigate",
+        "n_clarify-S2-clarify",
+        "n_cov-S2-coverage",
+        "n_contract-S2-contract",
+        "n_cgate-S2-contract-gate",
+        "n_impact-SCAN",
+        "n_red-RED",
+        "n_green-GREEN",
+        "n_refactor-REFACTOR",
+        "n_evidence-EVIDENCE",
+        "n_stage-STAGE",
+        "n_commit-COMMIT",
+        "n_review-DISPATCH",
+        "n_rgate-GATE",
+        "n_memloc-LOCATE",
+        "n_record-RECORD"
+      ],
+      "terminal": "n_record-RECORD",
+      "is_happy": true
+    }
+  ],
+  "budget": {
+    "max_steps": 60,
+    "max_rounds": 8,
+    "max_retries": 3,
+    "noop_limit": 2
+  },
+  "meta": {
+    "created": "2026-11-23T11:46:57+08:00",
+    "context_refs": [
+      "overview:8ef577c1"
+    ],
+    "habit_refs": [],
+    "expanded": true
+  }
+}

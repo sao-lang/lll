@@ -8,6 +8,8 @@
 """
 from __future__ import annotations
 
+from typing import cast
+
 import asyncio
 import time
 from collections.abc import Callable, Sequence
@@ -186,18 +188,19 @@ class VerifyingAuditPort:
     """
     name = "verifying_audit"
 
-    def __init__(self, inner: AuditLogger | None = None) -> None:
-        """构造审计包装器（默认包 AuditLogger）。"""
-        self._inner = inner or AuditLogger()
+    def __init__(self, inner: object | None = None) -> None:  # purity-exempt: inner 为鸭子 AuditPort（record/events）
+        """构造审计包装器（默认包 AuditLogger；也接受用户注入的 AuditPort）。"""
+        self._inner = inner if inner is not None else AuditLogger()
 
     async def record(self, event: dict[str, DynamicValue], ctx: PortCtx) -> None:
         """追加事件后立刻验链（链断即抛，不进后续步骤）。"""
-        await self._inner.record(event, ctx)
-        self.verify_external(self._inner.events())
+        inner: AuditLogger = cast(AuditLogger, self._inner)  # 鸭子注入须履约 record/events
+        await inner.record(event, ctx)
+        self.verify_external(inner.events())
 
     def events(self) -> tuple[object, ...]:
         """不可变事件快照（供回放/核对）。"""
-        return self._inner.events()
+        return tuple(cast(AuditLogger, self._inner).events())
 
     def bind_sink(self, sink: AuditStore) -> None:
         """装配期把同源 sink 绑到 inner AuditLogger（外部注入审计也同源）。"""
@@ -220,17 +223,21 @@ def verify_audit_chain(port: VerifyingAuditPort) -> bool:
 
 
 def redact_output(value: object, ctx: PortCtx, *, secret_refs: Sequence[str],
-                  source: str = "tool", direction: str = "output") -> SafetyVerdict:
+                  source: str = "tool", direction: str = "output",
+                  guardrail: object | None = None) -> SafetyVerdict:
     """③ secret 脱敏接线：构造 SecurityCtx 注入 secret_refs，过护栏得 redact 裁决。
 
     不改 R9：SecurityCtx.from_port_ctx 复制 meta，护栏从 meta['secret_refs'] 读取。
+    guardrail: 用户注入的护栏实例（来自 SecurityCapability）；缺席才建默认，
+               避免"注入了护栏却另建一个"的影子构造（A2）。
     返回 SafetyVerdict（action='redact' 时 redacted 为脱敏文本）。
     """
-    from harness.security import SecurityCtx
+    from harness.security import Guardrail, SecurityCtx
 
     sec_ctx = SecurityCtx.from_port_ctx(ctx, source=source, direction=direction)
     sec_ctx.meta["secret_refs"] = [str(s) for s in secret_refs if s]
-    return RuleGuardrail().check(value, sec_ctx)
+    active = guardrail if isinstance(guardrail, Guardrail) else RuleGuardrail()
+    return active.check(value, sec_ctx)
 
 
 def bind_stream_projection(

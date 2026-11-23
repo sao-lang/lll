@@ -13,6 +13,7 @@ from compose import (
     DisclosureIndex,
     DisclosurePacket,
     HumanPort,
+    PortCtx,
     Registry,
     SandboxPort,
     SkillManifest,
@@ -53,6 +54,7 @@ class ToolsCapability:
         *,
         registry: ToolRegistry | None = None,
         mcp: MCPManager | None = None,
+        mcp_servers: tuple[str, ...] = (),
         skills: SkillPort | None = None,
         disclosure: DisclosureIndex | None = None,
         sandbox: SandboxPort | None = None,
@@ -67,12 +69,45 @@ class ToolsCapability:
             # 自定义注册表已自带路由依赖，忽略外层 sandbox/human/audit 避免语义歧义。
             self._registry = registry
         self._mcp = mcp
+        # 用户注入 MCP transport（工具/客户端）后进执行链：能力包是组合根，
+        # 持 transport 与 server 名；门面装配期用同一 wired_tools 构造
+        # MCPManager 并 await connect()（mcp.py:83 唯一注册点），不另建 registry。
+        # 规则 6 例外：mcp 为鸭子注入（裸 MCPTransport 或 MCPManager），transport 为其公开属性
+        self.mcp_transport = getattr(mcp, "transport", mcp) if mcp is not None else None
+        # server 名可用构造参数 mcp_servers 覆盖；缺省用 transport.name 作单 server。
+        self.mcp_servers: tuple[str, ...] = mcp_servers
         self._skills = skills
         if disclosure is None:
             # 规则 9：披露策略可替换，但默认必须可用；透传 skills 以启用 L3 正文加载。
             self._disclosure = ToolIndex(self._registry, skills=self._skills)
         else:
             self._disclosure = disclosure
+
+    async def connect_mcp(self, registry: ToolRegistry, ctx: PortCtx,
+                          *, servers: tuple[str, ...] | None = None) -> tuple[str, ...]:
+        """把注入的 MCP transport 接进指定 registry（原设计 mcp.py:83 connect）。
+
+        关键同源：registry 必须是门面执行链的 wired_tools 本身——MCP tools
+        直接注册进去，而不是另建一个 ToolRegistry 或塞进独立 port handler。
+        未注入 transport 时返回空元组（诚实：无 MCP 可接，不造假）。
+        """
+        transport = self.mcp_transport
+        if transport is None:
+            return ()
+        target_servers = servers if servers is not None else self.mcp_servers
+        if not target_servers:
+            # 规则 6 例外：MCPTransport 协议声明 name: str，缺省 server 名的类型化读取
+            declared = str(getattr(transport, "name", "") or "")
+            target_servers = (declared,) if declared else ()
+        if not target_servers:
+            return ()
+        from .mcp import MCPManager
+        manager = MCPManager(registry, transport)  # type: ignore[arg-type]
+        connected: list[str] = []
+        for server in target_servers:
+            specs = await manager.connect(server, ctx)
+            connected.extend(spec.name for spec in specs)
+        return tuple(connected)
 
     def build(self) -> Program:
         """ToolLayer 外壳（规格 P5）：产出"用工具"的 Program 工厂（内部不改）。"""
@@ -109,6 +144,16 @@ class ToolsCapability:
     def manager(self) -> MCPManager | None:
         """返回 MCP 管理器；未装配时为 None。"""
         return self._mcp
+
+    def bind_registry(self, registry: ToolRegistry) -> None:
+        """把披露索引绑定到执行链的同一 registry（A4 同源修复）。
+
+        默认 ToolIndex 内部持有 registry——重绑它使 L1/L2 看到执行链工具；
+        用户自注入的 DisclosureIndex 由调用方传 names（不持有 registry），无需重绑。
+        """
+        from .index import ToolIndex
+        if isinstance(self._disclosure, ToolIndex):
+            self._disclosure._registry = registry  # 同类内部字段，装配期一次性重绑
 
     def skills(self) -> SkillPort | None:
         """返回技能 Port；未装配时为 None。"""

@@ -24,16 +24,18 @@ from harness.rag.types import (
     Vector,
 )
 
+from harness.rag.capability import RAGCapability
+
 __all__ = [
     # 流水线
-    "RAGPipeline", "CachePort", "InMemoryCache",
+    "RAGPipeline", "CachePort", "InMemoryCache", "RAGCapability",  # purity-exempt: 既有导出名清单（行号位移）
     # 核心 DTO
     "Document", "Chunk", "Hit", "Query", "QueryPurpose",
     "RAGResult", "TokenBudget", "Vector",
     # 五段协议与默认实现
     "Splitter", "RecursiveSplitter",
     "Embedder", "EmbeddingClient", "HashEmbedder",
-    "VectorStore", "InMemoryVectorStore",
+    "VectorStore", "InMemoryVectorStore",  # purity-exempt: 既有导出名（行号位移）
     "Retriever", "VectorRetriever", "HybridRetriever",
     "PostProcessor", "DefaultPostProcessor",
     # 增强协议与默认实现

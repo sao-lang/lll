@@ -3,5 +3,6 @@ from __future__ import annotations
 
 from .types import EvalCase, Score, SuiteReport
 from .rules import GoldenJudge, RuleEval
+from .capability import EvalCapability
 
-__all__ = ["EvalCase", "Score", "SuiteReport", "RuleEval", "GoldenJudge"]
+__all__ = ["EvalCase", "Score", "SuiteReport", "RuleEval", "GoldenJudge", "EvalCapability"]

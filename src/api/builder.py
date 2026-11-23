@@ -79,8 +79,14 @@ class AgentBuilder:
             self._caps.setdefault(cap_name, cap_name)  # 缺席：仅登记名字，不造空实现
 
     def capability(self, cap: Capability) -> "AgentBuilder":
-        """注入自定义能力（覆盖同名预设）。"""
+        """注入自定义能力（覆盖同名预设）。
+
+        security 特例：同步更新 _security，使 redact()/audit() 等生产路径
+        消费用户注入的实例，而不是 profile 里新建的默认实例（A2 影子根因）。
+        """
         self._caps[cap.name] = cap
+        if isinstance(cap, SecurityCapability):
+            self._security = cap
         self._agent.capability(cap)
         return self
 
@@ -125,8 +131,13 @@ class AgentBuilder:
         return self
 
     def redact(self, value: object, ctx: PortCtx) -> SafetyVerdict:  # purity-exempt: value 为规则3动态内容边界
-        """③ 生产路径消费：对输出执行 secret 脱敏（返回 SafetyVerdict）。"""
-        return redact_output(value, ctx, secret_refs=self._secret_refs)
+        """③ 生产路径消费：对输出执行 secret 脱敏（返回 SafetyVerdict）。
+
+        复用注入 SecurityCapability 的 guardrail——用户注入的护栏真生效（A2）。
+        """
+        guardrail = getattr(self._security, "guardrail", None)
+        return redact_output(value, ctx, secret_refs=self._secret_refs,
+                             guardrail=guardrail)
 
     def stream_bus(self) -> LifecycleBus | None:
         """④ 返回事件总线（供 Runner(notify=runner_notifier(bus)) 注入）。"""

@@ -91,6 +91,19 @@ Anthropic/Gemini 原生协议需注入自定义 factory（履约 `LLMProviderFac
 环境变量/构造参数不落文件。L3/L4 的 `task/tier` 已透传到 `RuleRouter`（`intent/cheap`
 与 `intent/primary` 可配不同模型）。
 
+## 本轮补齐的能力包（2026-11-24 接线修复）
+
+| 能力包 | 用途 | 门面入口 |
+|---|---|---|
+| `RAGCapability(pipeline=...)` | 持可注入检索流水线，RAGPort 一等 provider | `use()` → `port=rag` |
+| `EvalCapability(evaluator=...)` | 持可替换评测器 | `score_case(case_id, output)`（与反思 `evaluate()` 正交） |
+| `ObservabilityCapability(telemetry=...)` | 持可替换遥测后端 | `use()` → `agent.trace` |
+| `ToolsCapability(mcp=transport, mcp_servers=...)` | MCP tools 按原设计注册进**同一** ToolRegistry | `use()` 后装配期 `connect()` |
+
+**接线边界**：注入的 audit 必被 `VerifyingAuditPort` 包装（验链不可绕过）；三级披露
+由 `before_model` 触发且 L1/L2 真进 LLM tools payload（注入 ToolsCapability 才启用）；
+OTel 接入需 telemetry 履约内部 `_register/_replace` 契约（已知边界）。
+
 ## 诚实边界（demo 会如实打印，不美化）
 
 - say() 只返回白名单文本；`last_run`/`runtime` 是只读诊断，不泄漏内部消息

@@ -221,6 +221,7 @@ class Agent:
         self._pending_session: object | None = None  # HITL 挂起会话（resume 唯一合法入口）
         self._pending_input = ""  # 挂起轮的原 say 输入（续跑完成后补写记忆/历史）
         self._trace: "Trace | None" = None  # 自动链路追踪（懒建，跨 say 共用）
+        self._disclosed_tools: list[object] = []  # before_model 披露包投影（L1+L2）
         self._hooks_bus_id = 0  # hooks 已重放到的 bus 世代（id）
         self._hooks_applied_count = 0  # 当前 bus 上已重放的 hook 数（增量幂等）
 
@@ -275,7 +276,12 @@ class Agent:
         """
         if self._trace is None:
             from harness.observability import Trace as _Trace
-            self._trace = _Trace(trace_id=f"{self._session_id}-{id(self):x}")
+            from harness.observability.capability import ObservabilityCapability
+            cap = next((c for c in self._caps.values()
+                        if isinstance(c, ObservabilityCapability)), None)
+            telemetry = cap.telemetry if cap is not None else None
+            self._trace = _Trace(trace_id=f"{self._session_id}-{id(self):x}",
+                                 telemetry=telemetry)  # type: ignore[arg-type]
         return self._trace
 
     def clear_history(self) -> None:
@@ -522,7 +528,10 @@ class Agent:
         clean = Invoke(port="llm", payload={
             "messages": self._inject_history(messages),
             "model": effect.payload.get("model") or "",
-            "tools": effect.payload.get("tools") or [],
+            # 披露包优先（before_model 相位已算 L1/L2 渐进目录）；
+            # 首轮 LLM 调用先于相位通知时按当前目录即时计算（同步幂等）。
+            "tools": (list(self._disclosed_tools) if self._disclosed_tools
+                      else self._disclose_now(effect)),
             # task/tier/text 透传（U-1 关闭）：R1 EffectPayload 已知键只有
             # task_hint/meta（D-7 零改内核），意图字段走 meta 供 router 消费
             "task_hint": str(effect.payload.get("task_hint") or effect.payload.get("task") or ""),
@@ -547,6 +556,24 @@ class Agent:
             if usage is not None and getattr(result, "usage", None) is None:
                 return Result(result.ok, data, usage, result.error)
         return Result(result.ok, data, result.usage, result.error)
+
+    def _disclose_now(self, effect: Invoke) -> list[object]:
+        """即时计算披露包（首轮 LLM 调用早于 before_model 相位时）。
+
+        无 ToolsCapability 时返回架构原始 tools（不改架构语义）；有则从执行链
+        catalog 取 L1 名字，披露索引产出 L1/L2 写回 _disclosed_tools 供后续复用。
+        """
+        from harness.tools import ToolsCapability
+        cap = next((c for c in self._caps.values()
+                    if isinstance(c, ToolsCapability)), None)
+        if cap is None:
+            return list(effect.payload.get("tools") or [])
+        rt = self.runtime
+        names = [str(getattr(s, "name", ""))
+                 for s in (rt.tools.catalog(level=1) if rt and rt.tools else [])]
+        packet = cap.disclose(names)
+        self._disclosed_tools = [*packet.l1, *packet.l2]
+        return list(self._disclosed_tools)
 
     def _inject_history(self, messages: list[dict[str, object]]) -> list[dict[str, object]]:
         """跨 say 连续性：把历史问答对前置注入本轮首轮 LLM 调用（每 run 一次）。
@@ -602,12 +629,27 @@ class Agent:
         sec_cap = self._caps.get("security")
         security = sec_cap if isinstance(sec_cap, SecurityCapability) else None
 
+        # 注入的 audit 必须真进执行链：SecurityCapability.audit 传给 assemble_runtime
+        # 作为权威 audit（同源绑定 sink 由 assemble_runtime 负责），不再内部新建
+        # AuditLogger 覆盖它（A1 影子构造根因）。
+        injected_audit = getattr(security, "audit", None) if security is not None else None
         rt = assemble_runtime(None,
                               stream=self._stream,
                               store=self._store,
                               security=security,
+                              audit=injected_audit,
                               tool_setup=tool_setup, call_factory=call_factory)
         self.runtime = rt
+        # A3：MCP tools 按原设计注册进同一 wired_tools（不是独立 port handler）。
+        # 能力包持 transport/工具，装配期用执行链的同一 registry connect。
+        from harness.tools import ToolsCapability
+        from compose import PortCtx as _PortCtx
+        tools_cap = next((c for c in self._caps.values()
+                          if isinstance(c, ToolsCapability)), None)
+        if tools_cap is not None and rt.tools is not None:
+            tools_cap.bind_registry(rt.tools)  # 披露索引与执行链同源（Blocker2）
+            await tools_cap.connect_mcp(
+                rt.tools, _PortCtx(session_id=self._session_id))
         # lifecycle hooks 真接线：say() 前收集的订阅装配期重放到本次运行的 bus——
         # 与事件投影同一 bus（runner_notifier/gateway 都从它 emit），先于 run 注册。
         self._replay_hooks()
@@ -631,12 +673,28 @@ class Agent:
         不产生重复订阅。
         """
         rt = self.runtime
-        if rt is None or not self._hooks:
+        if rt is None:
             return
         bus_id = id(rt.bus)
         if bus_id != self._hooks_bus_id:
             self._hooks_bus_id = bus_id
             self._hooks_applied_count = 0
+            # A4：三级披露按原设计在 before_model 相位触发（R5:295）——
+            # 由注入的 ToolsCapability 提供 DisclosureIndex，不新增门面入口。
+            from harness.tools import ToolsCapability
+            from compose import LifecyclePhase as _Phase
+            tools_cap = next((c for c in self._caps.values()
+                              if isinstance(c, ToolsCapability)), None)
+            if tools_cap is not None:
+                def _disclose_on_model(n: object) -> None:
+                    names = [str(getattr(s, "name", "")) for s in
+                             (rt.tools.catalog(level=1) if rt.tools else [])]
+                    packet = tools_cap.disclose(names)  # 内部取 skills catalog
+                    # 产出真消费：L1 常驻目录 + L2 命中 schema → LLM tools payload
+                    # （Blocker2：披露包不可被丢弃）。
+                    self._disclosed_tools = [*packet.l1, *packet.l2]
+                rt.bus.on(_Phase.BEFORE_MODEL, _disclose_on_model,
+                          name="facade.disclosure")
         for hook_phase, hook_fn, hook_name in self._hooks[self._hooks_applied_count:]:
             rt.bus.on(hook_phase, hook_fn, name=hook_name)
         self._hooks_applied_count = len(self._hooks)
@@ -727,6 +785,20 @@ class Agent:
         import concurrent.futures
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             return pool.submit(lambda: asyncio.run(self.aresume(answer))).result()
+
+    async def score_case(self, case_id: str, output: str) -> float:
+        """评测语义入口：用注入的 EvalCapability 对输出打分（EvalPort）。
+
+        与 evaluate() 正交：evaluate() 是反思评审（ReflectionCapability.critique），
+        score_case() 是评测套件评分（EvalPort.score），两者不互相覆盖。
+        """
+        from harness.eval.capability import EvalCapability
+        cap = next((c for c in self._caps.values()
+                    if isinstance(c, EvalCapability)), None)
+        if cap is None:
+            raise RuntimeError("未注入 EvalCapability：use(EvalCapability(...))")
+        ctx = PortCtx(session_id=self._session_id, run_id="facade-eval")
+        return await cap.score(case_id, output, ctx)
 
     def evaluate(self, draft: str, goal: str = "") -> object:
         """语义入口：用注入的 ReflectionCapability 评审草稿（不跑架构）。"""

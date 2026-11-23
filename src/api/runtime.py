@@ -179,9 +179,12 @@ def assemble_runtime(
     approving = approval or ApprovingHumanPort(sec.human, sec.approval)
     audit_sink = sink or R1AuditEventSink(shared_store)
     if audit is not None:
-        # 外部注入审计也同源：装配期把同一 sink 绑到其 inner（已有 sink 不覆盖）。
+        # 外部注入审计也同源：把同一 sink 绑到其 inner（已有 sink 不覆盖）。
         audit.bind_sink(audit_sink)
-        auditing = audit
+        # 验链不可绕过（Blocker1）：注入对象也必须经 VerifyingAuditPort 包装，
+        # 否则用户注入 SecurityCapability() 时哈希链校验被静默跳过。
+        auditing = (audit if isinstance(audit, VerifyingAuditPort)
+                    else VerifyingAuditPort(audit))
     else:
         auditing = VerifyingAuditPort(AuditLogger(sink=audit_sink))
     checkpoint_store = CheckpointEventStore(mgr, inner=shared_store, seq_tracker=seq_tracker)
