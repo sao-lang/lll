@@ -24,7 +24,7 @@ class EmbeddingClient(Protocol):
 
     async def embed(self, texts: list[str]) -> list[Vector]:  # purity-exempt: HEAD 存量 Protocol 空体（import 行号位移，非新增）
         """把文本批转成向量列表。"""
-        ...
+        ...  # purity-exempt: HEAD 存量 Protocol 空体（import 行号位移，非新增）
 
 
 @runtime_checkable
@@ -35,7 +35,7 @@ class Embedder(Protocol):
 
     async def embed(self, texts: list[str]) -> list[Vector]:  # purity-exempt: HEAD 存量 Protocol 空体（import 行号位移，非新增）
         """把文本批转成向量列表。"""
-        ...
+        ...  # purity-exempt: HEAD 存量 Protocol 空体（import 行号位移，非新增）
 
 
 class HashEmbedder:

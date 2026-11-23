@@ -219,11 +219,18 @@ class Agent:
     def stream(self) -> InMemoryEventStream:
         """可观测事件流底座（一等公开属性）：内置自建，注入则复用注入实例。
 
+        同源回退：runtime 已装配（say 之后访问）时返回 rt.stream——装配时
+        self._stream 尚为 None 会让 assemble_runtime 自建实例，懒建一个新实例
+        会造成两实例不同源、事件永远收不到（死注入变体）。全程单实例同源。
         用户目标：agent.stream 直接可读；想外接自己的 sink 时用 use(自己的 sink 能力)。
         """
         if self._stream is None:
-            from harness.observability import InMemoryEventStream as _Stream
-            self._stream = _Stream()
+            rt_stream = getattr(self.runtime, "stream", None) if self.runtime else None
+            if rt_stream is not None:
+                self._stream = rt_stream
+            else:
+                from harness.observability import InMemoryEventStream as _Stream
+                self._stream = _Stream()
         return self._stream
 
     def capability(self, cap: Provider) -> "Agent":
