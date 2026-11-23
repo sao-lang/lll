@@ -17,7 +17,7 @@
 
 ## 2. 设计架构
 
-纵深防御：模型级安全是必要不充分条件，harness 提供独立执行期强制层。每层独立强制，一道护栏（`③ injection_guard` call 装饰器，位于 `compose/call.py` / ⑥安全组件；R9 Guardrail 复用 `harness.skills.KeywordInjectionDetector` 单检测器）的 allow 不能覆盖 deny（取最严格）。核心原则：**工具/检索/网页/技能正文一律不可信**，注入防御在进上下文前由注入检测护栏强制（`before_model` 为 Lifecycle 通知点，只通知不拦截；真正的拦截由 `③ injection_guard` 装饰器 / ⑥安全组件在调用层完成）。审计覆盖全部事件且与事件日志同源可回放。
+纵深防御：模型级安全是必要不充分条件，harness 提供独立执行期强制层。每层独立强制，一道护栏（`③ injection_guard` call 装饰器，位于 `compose/call.py` / ⑥安全组件；R9 Guardrail 复用 `harness.skills.KeywordInjectionDetector` 单检测器）的 allow 不能覆盖 deny（取最严格）。核心原则：**工具/检索/网页/技能正文一律不可信**，注入防御在进上下文前由注入检测护栏强制（`before_model` 为 Lifecycle 通知点，只通知不拦截；真正的拦截由 `③ injection_guard` 装饰器 / ⑥安全组件在调用层完成）。审计覆盖全部风险级别的工具调用（LOW/HIGH/CRITICAL）且与 R1 事件日志同源可回放。
 
 ## 3. 流程图
 

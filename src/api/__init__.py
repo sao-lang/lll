@@ -15,7 +15,7 @@ from .cli import CLI, CLIResult
 from .runtime import AgentRuntime, assemble_runtime, capability_tools
 from .wiring import (
     ApprovingHumanPort, VerifyingAuditPort, CheckpointEventStore,
-    R1AuditEventSink, replay_audit_events,
+    R1AuditEventSink, R1SeqTracker, replay_audit_events,
     bind_stream_projection, redact_output, verify_audit_chain, STREAM_TOPIC,
 )
 

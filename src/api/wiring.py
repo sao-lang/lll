@@ -13,7 +13,7 @@ import time
 from collections.abc import Callable, Sequence
 
 from compose import AuditStore, DangerLevel, LifecycleBus, LifecyclePhase, Notice, PortCtx
-from harness.durability import CheckpointManager, CheckpointSnapshot
+from harness.durability import CheckpointManager
 from harness.observability import EventEnvelope, InMemoryEventStream
 from harness.security import (
     ApprovalFlow,
@@ -71,6 +71,41 @@ class ApprovingHumanPort:
         return str(answer)
 
 _AUDIT_KEY_PREFIX = "__audit__:"
+
+
+class R1SeqTracker:
+    """R1 事件序号追踪器：从 checkpoint 快照的 Event.seq 读权威序号（同源桥）。
+
+    R1 的 `Event.seq = len(session.events)` 在 `Runner.step` 落盘时随 JsonSnapshot
+    一起写入（R1 零改动）。checkpoint 适配器保存时把最后一条 Event.seq 灌入本 tracker，
+    事件流投影发布 EventEnvelope 时优先取 tracker.current()——seq 与 R1 事件日志同源，
+    不再是进程本地合成计数。无 checkpoint 事件时 current() 返回 None，投影层才回退。
+    """
+    name = "r1_seq_tracker"
+
+    def __init__(self) -> None:
+        self._seq: int | None = None
+        self._session: object | None = None  # 运行期绑定的活 Session（R1 事件日志）
+
+    def bind_session(self, session: object) -> None:
+        """AgentRuntime.run/resume 绑定当前会话；current() 从中读活事件数。"""
+        self._session = session
+
+    def observe(self, snapshot: JsonSnapshot) -> None:
+        """从 R1 规范化快照的 events 里取最后一条 Event.seq（无活会话时的兜底）。"""
+        events = snapshot.get("events") or ()
+        for raw in reversed(events):
+            if isinstance(raw, dict) and "seq" in raw:
+                self._seq = int(raw["seq"])
+                return
+
+    def current(self) -> int | None:
+        """返回 R1 权威事件序号：活会话 len(events) 优先，否则最近 checkpoint 值。"""
+        if self._session is not None:
+            events = getattr(self._session, "events", None)
+            if events is not None:
+                return len(events)  # R1 Event.seq = 当前事件数（runner.py:551）
+        return self._seq
 
 
 class R1AuditEventSink(AuditStore):
@@ -197,12 +232,14 @@ def bind_stream_projection(
     stream: InMemoryEventStream | None = None,
     *,
     clock: Callable[[], float] | None = None,
+    seq_source: R1SeqTracker | None = None,
 ) -> LifecycleBus:
     """④ 事件流投影接线：LifecycleBus 订阅三相位 → publish EventEnvelope。
 
     ts 来自注入 clock（真实墙钟，注入假时钟可精确断言；绝不造假 float(n-1)）；
-    seq 优先取 Notice.seq（R1 Event.seq 的只读投影，由通知源携带），缺席时回退
-    payload["seq"]，再退到本进程单调源（显式标注合成，不再冒充 R1 序号）。
+    seq 优先级：Notice.seq（通知源显式携带）> R1SeqTracker.current()（checkpoint
+    快照里 R1 Event.seq 的同源投影）> payload["seq"] > 进程单调源（诚实回退，
+    data 标 seq_synthetic=True，不冒充 R1 序号）。
     返回 bus 供装配期同时注入 Runner(notify=runner_notifier(bus)) 与
     ModelGateway(bus=bus)；after_model 不经 Runner，必须经网关。
     """
@@ -217,16 +254,21 @@ def bind_stream_projection(
         """把只读 Notice 投影为 EventEnvelope 发布到单一 topic。"""
         nonlocal fallback
         seq = notice.seq
+        synthetic = False
+        if seq <= 0 and seq_source is not None:
+            observed = seq_source.current()
+            seq = observed if observed is not None else 0
         if seq <= 0:
-            seq = int(notice.payload.get("seq", 0) or 0)  # 通知源未填 DTO 字段时兼容 payload 投影
+            seq = int(notice.payload.get("seq", 0) or 0)
         if seq <= 0:
             fallback += 1
             seq = fallback
+            synthetic = True
         target.publish(EventEnvelope(
             seq=seq, topic=STREAM_TOPIC, ts=wall_clock(),
             type=notice.phase.value,
             data={"session_id": notice.session_id, "port": notice.port,
-                  **dict(notice.payload)},
+                  "seq_synthetic": synthetic, **dict(notice.payload)},
         ))
 
     for phase in watched:
@@ -244,27 +286,32 @@ class CheckpointEventStore:
     name = "checkpoint_event_store"
 
     def __init__(self, manager: CheckpointManager | None = None,
-                 inner: EventStore | None = None) -> None:
+                 inner: EventStore | None = None,
+                 seq_tracker: R1SeqTracker | None = None) -> None:
         """构造适配器（消除双写：manager 与 inner 共享同一 R1 EventStore）。
 
         Args:
             manager: R10 CheckpointManager（缺省基于注入 inner 构造）。
             inner: R1 EventStore 实现（缺省 InMemoryEventStore）；生产可注入 DB/Redis。
+            seq_tracker: 可选 R1 序号追踪器；save 时从快照 Event.seq 灌入（B-2 同源 seq）。
         """
         from runtime import InMemoryEventStore
 
         self.inner = inner if inner is not None else InMemoryEventStore()
         self._mgr = manager or CheckpointManager(store=self.inner)
+        self._seq_tracker = seq_tracker
 
     async def save(self, session_id: str, snapshot: JsonSnapshot) -> None:
-        """保存：真委托内层 EventStore（R1 形态）+ mgr.save（R10 形态）。"""
-        from runtime import AgentState
-        from runtime.types import restore_state
+        """保存：单次写入共享 R1 EventStore（B-1 修复）+ 更新 R1 序号追踪器（B-2）。
 
+        只写 Runner 传入的 R1 规范化快照（state 已经 `_plain` 处理为 dict）。
+        旧实现额外走 `mgr.save` 对同一 key 二次写入：`_to_json_snapshot` 拿未规范化
+        的 Message 对象填 state.messages，覆盖好快照导致 restore 崩溃。R10 DTO 由
+        `manager().load()` 从同一 store 按需重建，不再双写。
+        """
         await self.inner.save(session_id, snapshot)
-        state = restore_state(snapshot.get("state")) if "state" in snapshot else AgentState()
-        dto = self._mgr.snapshot(session_id, state, tuple(snapshot.get("events") or ()))
-        await self._mgr.save(replace_dto_fingerprint(dto, str(snapshot.get("fingerprint", ""))))
+        if self._seq_tracker is not None:
+            self._seq_tracker.observe(snapshot)
 
     async def load(self, session_id: str) -> JsonSnapshot | None:
         """加载：真委托共享的 R1 EventStore（非本地 dict 桩）。"""
@@ -273,10 +320,3 @@ class CheckpointEventStore:
     def manager(self) -> CheckpointManager:
         """返回被消费的 CheckpointManager（供装配期核对/回放）。"""
         return self._mgr
-
-
-def replace_dto_fingerprint(dto: CheckpointSnapshot, fingerprint: str) -> CheckpointSnapshot:
-    """用 R1 确定性指纹替换 R10 快照指纹（同事件序列口径一致）。"""
-    from dataclasses import replace
-
-    return replace(dto, fingerprint=fingerprint)

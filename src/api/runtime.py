@@ -12,19 +12,28 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from compose import CallFn, LifecycleBus, PortCtx, Registry, SandboxPort
+from compose import (
+    CallFn,
+    DangerLevel,
+    LifecycleBus,
+    PortCtx,
+    Registry,
+    SandboxPort,
+    ToolCall,
+)
 from compose.notify import runner_notifier
 from harness.durability import CheckpointManager
 from harness.model import ModelGateway
 from harness.observability import InMemoryEventStream
 from harness.security import ApprovalFlow, AuditLogger, SecurityCapability
 from harness.tools import ToolsCapability, ToolRegistry
-from runtime import DynamicValue, InMemoryEventStore, Runner, Session
+from runtime import DynamicValue, Effect, InMemoryEventStore, Invoke, Result, Runner, Session
 
 from .wiring import (
     ApprovingHumanPort,
     CheckpointEventStore,
     R1AuditEventSink,
+    R1SeqTracker,
     VerifyingAuditPort,
     bind_stream_projection,
 )
@@ -41,7 +50,8 @@ class AgentRuntime:
 
     def __init__(self, runner: Runner, bus: LifecycleBus, tools: ToolRegistry | None,
                  approval: ApprovingHumanPort | None, audit: VerifyingAuditPort | None,
-                 checkpoint: CheckpointEventStore, stream: InMemoryEventStream | None = None) -> None:
+                 checkpoint: CheckpointEventStore, stream: InMemoryEventStream | None = None,
+                 seq_tracker: R1SeqTracker | None = None) -> None:
         """构造运行期（由 assemble_runtime 统一创建）。"""
         self.runner = runner
         self.bus = bus
@@ -50,13 +60,18 @@ class AgentRuntime:
         self.audit = audit
         self.checkpoint = checkpoint
         self.stream = stream
+        self._seq_tracker = seq_tracker
 
     async def run(self, session: Session) -> object:
-        """真实执行（委托 Runner.run）。"""
+        """真实执行（绑定活会话供 R1 seq 同源投影，委托 Runner.run）。"""
+        if self._seq_tracker is not None:
+            self._seq_tracker.bind_session(session)
         return await self.runner.run(session)
 
     async def resume(self, session: Session, answer: DynamicValue) -> object:
         """挂起后精确续跑（委托 Runner.resume）。"""
+        if self._seq_tracker is not None:
+            self._seq_tracker.bind_session(session)
         return await self.runner.resume(session, answer)
 
     def model_gateway(self, llm: object) -> ModelGateway:
@@ -64,8 +79,42 @@ class AgentRuntime:
         return ModelGateway(llm=llm, bus=self.bus)  # type: ignore[arg-type]
 
 
+def _tool_call_handler(registry: ToolRegistry) -> CallFn:
+    """把 Invoke(port=tool) 桥接成 ToolRegistry.call（B-3 生产最后一公里）。
+
+    R1 只认 CallFn(effect, ctx)；工具层 ToolRegistry.call(ToolCall, PortCtx)。
+    本桥接在装配层做 DTO 转换，不侵入 R1/工具层源码：payload.name/args/call_id/danger
+    映射到 ToolCall，ToolResult.ok/value/error 映射回 Result。审批+沙盒+审计全在
+    registry.call 内真实执行（生产调用链不再是死代码）。
+    """
+    async def handler(effect: Effect, ctx: object) -> Result:
+        if not isinstance(effect, Invoke):
+            return Result.failure("INVALID_EFFECT", "tool dispatch only handles Invoke")
+        payload = effect.payload
+        ctx_obj = ctx if isinstance(ctx, PortCtx) else PortCtx()
+        raw_args = payload.get("args")
+        args = dict(raw_args) if isinstance(raw_args, dict) else {}
+        raw_danger = payload.get("danger")
+        danger = (DangerLevel.coerce(raw_danger)
+                  if isinstance(raw_danger, (str, DangerLevel))
+                  else DangerLevel.CRITICAL)  # 未知/缺 danger 按最严格处理（fail-closed）
+        call = ToolCall(
+            call_id=str(payload.get("call_id") or effect.trace_id or "tool-call"),
+            name=str(payload.get("name") or ""),
+            args=args,
+            danger=danger,
+            source=str(payload.get("source") or "local"),
+        )
+        result = await registry.call(call, ctx_obj)
+        if result.ok:
+            return Result.success(result.value)
+        return Result.failure(result.error or "TOOL_ERROR",
+                              result.error or "tool call failed")
+    return handler
+
+
 def assemble_runtime(
-    call: CallFn,
+    call: CallFn | None = None,
     *,
     approval: ApprovingHumanPort | None = None,
     audit: VerifyingAuditPort | None = None,
@@ -91,21 +140,36 @@ def assemble_runtime(
     mgr = manager or CheckpointManager(store=InMemoryEventStore())
     shared_store = mgr.store
     target_stream = stream or InMemoryEventStream()
-    active_bus = bus or bind_stream_projection(target_stream)
+    seq_tracker = R1SeqTracker()
+    active_bus = bus or bind_stream_projection(target_stream, seq_source=seq_tracker)
 
     approving = approval or ApprovingHumanPort(sec.human, sec.approval)
     audit_sink = R1AuditEventSink(shared_store)
     auditing = audit or VerifyingAuditPort(AuditLogger(sink=audit_sink))
-    store = CheckpointEventStore(mgr, inner=shared_store)
+    store = CheckpointEventStore(mgr, inner=shared_store, seq_tracker=seq_tracker)
 
     # ①② B2 修复：真实注入 SecurityCapability 的 sandbox/human/audit（消除 sandbox=None 断链）。
     wired_tools = tools or ToolRegistry(
         sandbox=sec.sandbox, human=approving, audit=auditing,
     )
 
-    runner = Runner(call, store=store, notify=runner_notifier(active_bus),
+    # B-3 修复：未注入 call 时用已接线的 ToolRegistry 构造默认 CallFn——真实
+    # Agent 跑 Invoke(port=tool) 会经此进审批+沙盒+审计链，而非悬空死代码。
+    tool_handler = _tool_call_handler(wired_tools)
+
+    async def default_call(effect: Effect, ctx: object) -> Result:
+        if not isinstance(effect, Invoke):
+            return Result.failure("INVALID_EFFECT", "default_call only handles Invoke")
+        if effect.port == "tool":
+            return await tool_handler(effect, ctx)
+        # 非 tool port 无默认实现：显式失败而非静默放行（fail-closed）。
+        return Result.failure("PORT_MISSING", f"no default handler for port: {effect.port}")
+
+    active_call = call if call is not None else default_call
+    runner = Runner(active_call, store=store, notify=runner_notifier(active_bus),
                     checkpoint_every=checkpoint_every)
-    return AgentRuntime(runner, active_bus, wired_tools, approving, auditing, store, target_stream)
+    return AgentRuntime(runner, active_bus, wired_tools, approving, auditing, store,
+                        target_stream, seq_tracker=seq_tracker)
 
 
 def capability_tools(

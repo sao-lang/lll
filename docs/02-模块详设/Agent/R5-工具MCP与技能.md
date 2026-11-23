@@ -49,7 +49,7 @@ flowchart TD
         F["ToolCall.danger 归一（路由以 ToolSpec.danger 为准，忽略 call.danger 防伪造降级）<br/>未知值→CRITICAL"] --> V["参数校验 extra=forbid"]
         V --> DR{"DangerLevel 四级路由"}
         DR -->|SAFE| EX["直接执行"]
-        DR -->|LOW| AU["AuditPort.record 审计<br/>缺席→降级直执行 + meta.audit_missing"]
+        DR -->|LOW| AU["AuditPort.record 审计<br/>缺席→fail-closed NO_AUDIT"]
         DR -->|HIGH| SB{"SandboxPort 在场?"}
         DR -->|CRITICAL| AP{"HumanPort 与 SandboxPort 均在场?"}
         AU --> EX
@@ -195,7 +195,7 @@ class KeywordInjectionDetector:          # 默认实现：关键词/正则启发
 | ToolSpec.name | 全局唯一；MCP=`mcp__<server>__<tool>`；用户工具 `x-*` 前缀 |
 | ToolSpec.danger | `DangerLevel`（SAFE/LOW/HIGH/CRITICAL），装配期必填；经 `coerce()` 归一，未知→CRITICAL |
 | ToolSpec.source | local/mcp/skill，审计用 |
-| ToolResult.meta | danger/source/sandbox/duration_ms/approved/retryable/audit_missing |
+| ToolResult.meta | danger/source/sandbox/duration_ms/approved/retryable/seq_synthetic |
 | DisclosurePacket | L1/L2/L3/token_cost，披露成本进 trace |
 | SkillManifest | name/version/description/triggers（定义于 R2 dto.py） |
 | InjectionVerdict | clean/injected；技能正文（含 WebFetchTool 抓取正文）注入检测结果 |
@@ -215,7 +215,7 @@ class KeywordInjectionDetector:          # 默认实现：关键词/正则启发
 | 正文注入检测 | InjectionDetector（R5 本地） | KeywordInjectionDetector | 技能/WebFetch 正文必过 |
 | 沙盒（R9） | SandboxPort | 构造注入，缺席即拒绝 | HIGH/CRITICAL 缺 sandbox → ToolResult 失败 |
 | 审批（R9） | HumanPort | 构造注入，缺席即拒绝 | CRITICAL 缺 human → ToolResult 失败 |
-| 审计（R9） | AuditPort | 构造注入，LOW 缺席降级 | LOW 缺 audit → 直执行 + meta.audit_missing |
+| 审计（R9） | AuditPort | 构造注入，全部危险级别覆盖 | LOW/HIGH/CRITICAL 缺 audit → fail-closed NO_AUDIT |
 
 ## 7. 模块内闭环核对（CL-1~CL-5）
 
@@ -232,7 +232,7 @@ class KeywordInjectionDetector:          # 默认实现：关键词/正则启发
 1. 本地与 MCP 工具同一 Registry，catalog/call 无差别；MCP ping/health 可用，fqname 正确注册；
 2. L1 不含完整 schema，超预算报错；
 3. danger 四级路由（直执行/审计/沙盒/审批+沙盒）各生效；未知 danger 经 coerce 回退 CRITICAL；
-4. R9 三 Port 构造注入缺席拒绝（HIGH 缺 sandbox、CRITICAL 缺 human/sandbox 返回 ToolResult 失败不抛穿；LOW 缺 audit 降级并标 audit_missing）；
+4. R9 三 Port 构造注入缺席拒绝（LOW/HIGH/CRITICAL 缺 audit → NO_AUDIT；HIGH 缺 sandbox、CRITICAL 缺 human/sandbox 返回 ToolResult 失败不抛穿）；
 5. 技能/WebFetch 正文过注入检测；ToolsCapability 装配可独立闭环；
 6. 工具异常折叠为 ToolResult 不抛穿；装配期校验重名/danger/沙盒/审批。
 
@@ -246,7 +246,7 @@ class KeywordInjectionDetector:          # 默认实现：关键词/正则启发
 | MCP 合并 | R5-T04 | `pytest tests/r5/test_mcp.py -q` | 注入同一 Registry 无差别；ping/health/fqname 正确 |
 | 错误折叠 | R5-T05 | `pytest tests/r5/test_errors.py -q` | 异常折叠不抛穿 |
 | 技能与注入检测 | R5-T06 | `pytest tests/r5/test_skills.py -q` | manifest/正文/注入检测（KeywordInjectionDetector） |
-| 构造注入缺席拒绝 | R5-T07 | `pytest tests/r5/test_routing.py -q` | HIGH 缺 sandbox / CRITICAL 缺 human 或 sandbox → ToolResult 失败；LOW 缺 audit → meta.audit_missing |
+| 构造注入缺席拒绝 | R5-T07 | `pytest tests/r5/test_routing.py -q` | LOW/HIGH/CRITICAL 缺 audit → NO_AUDIT；HIGH 缺 sandbox / CRITICAL 缺 human 或 sandbox → ToolResult 失败 |
 | ToolsCapability 装配 | R5-T08 | `pytest tests/r5/test_capability.py -q` | registry()/manager()/index()/disclose() 可访问，闭环可测 |
 | WebFetchTool（D13） | R5-T09 | `pytest tests/r5/test_webfetch.py -q` | 抓取正文过注入检测，命中即拒载 |
 | 装配期自动注册（v2.2） | R5-T10 | `pytest tests/r5/test_pending.py -q` | @tool 入列/pending_tools 快照/register_pending 原子注册+清空+重名报错/freeze 拒绝/install 自动 flush |

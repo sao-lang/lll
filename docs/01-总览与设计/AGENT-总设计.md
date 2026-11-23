@@ -1476,7 +1476,7 @@ seq(a,b); par([...]); branch(fn, arms); race([...]); retry(n,backoff); map_state
 
 ### R9.2 设计架构
 
-**纵深防御**：模型级安全是必要不充分条件，harness 提供独立执行期强制层。每层独立强制，一道防御的 allow 不能覆盖另一道的 deny（取最严格；安全四态用 `SafetyVerdict`）。核心原则：**工具/检索/网页/技能正文一律不可信**，注入防御在进上下文前（R9 安全域 / ③ `injection_guard` 装饰器）。审计覆盖全部事件且与事件日志同源可回放（④notify）。
+**纵深防御**：模型级安全是必要不充分条件，harness 提供独立执行期强制层。每层独立强制，一道防御的 allow 不能覆盖另一道的 deny（取最严格；安全四态用 `SafetyVerdict`）。核心原则：**工具/检索/网页/技能正文一律不可信**，注入防御在进上下文前（R9 安全域 / ③ `injection_guard` 装饰器）。审计覆盖全部风险级别的工具调用（LOW/HIGH/CRITICAL）且与 R1 事件日志同源可回放（④notify + R1AuditEventSink）。
 
 ### R9.3 流程图
 

@@ -208,8 +208,9 @@ class ToolRegistry:
         # 审计事件单一字段契约（B1 修复）：写入方与 AuditLogger 消费方共用一套具名字段，
         # danger/tool/call_id/source 等语义并入 rationale，避免"链有效但内容空壳"。
         async def record_audit(*, approved: bool, sandboxed: bool) -> None:
-            if self._audit is None:  # fail-closed：非 SAFE 工具审计缺席即拒绝。
-                return
+            # 调用前置检查保证非 SAFE 分支 _audit 非 None；这里显式断言而非静默 return，
+            # 防止未来新增分支漏掉前置检查时静默放行（旧降级标记语义复活）。
+            assert self._audit is not None, "record_audit called without audit port"
             await self._audit.record({
                 "who": ctx.session_id,
                 "when": int(time.time()),
