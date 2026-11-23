@@ -12,6 +12,11 @@ from .static_api import static_check_api
 from .governance import KillSwitch, CostLimiter, Rollout, FeatureFlags, Governance
 from .builder import AgentBuilder
 from .cli import CLI, CLIResult
+from .runtime import AgentRuntime, assemble_runtime, capability_tools
+from .wiring import (
+    ApprovingHumanPort, VerifyingAuditPort, CheckpointEventStore,
+    bind_stream_projection, redact_output, verify_audit_chain, STREAM_TOPIC,
+)
 
 __all__ = [
     "PROFILES", "profile_names",
@@ -19,4 +24,7 @@ __all__ = [
     "StreamGateway", "static_check_api",
     "KillSwitch", "CostLimiter", "Rollout", "FeatureFlags", "Governance",
     "AgentBuilder", "CLI", "CLIResult",
+    "AgentRuntime", "assemble_runtime", "capability_tools",
+    "ApprovingHumanPort", "VerifyingAuditPort", "CheckpointEventStore",
+    "bind_stream_projection", "redact_output", "verify_audit_chain", "STREAM_TOPIC",
 ]

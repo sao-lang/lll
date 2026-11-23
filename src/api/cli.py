@@ -45,14 +45,30 @@ class CLI:
 
     @staticmethod
     def _eval(**kwargs: DynamicValue) -> CLIResult:
-        """eval：真委托 R10 RuleEval.score（确定性，不调真实 LLM）。
+        """eval：单用例 score 或套件 regression + CI 阈值门（都真委托 R10）。
 
-        kwargs: case_id / expected / output。缺 expected 时按无注册用例记 0 分。
+        kwargs:
+            单用例 — case_id / expected / output；
+            CI 套件 — suite / cases / threshold（average >= threshold 才 ok）。
         """
         import asyncio
 
         from compose import PortCtx
         from harness.eval import EvalCase, RuleEval
+
+        suite = kwargs.get("suite")
+        if suite is not None:
+            # ⑥ CI gate：regression 真委托 + 阈值判定，不达标 ok=False 阻断发布。
+            cases = kwargs.get("cases") or {}
+            threshold = float(kwargs.get("threshold", 0.85))
+            evaluator = RuleEval(cases=cases)
+            report = asyncio.run(evaluator.regression(str(suite), PortCtx()))
+            return CLIResult(
+                ok=report.average >= threshold,
+                data={"suite": report.suite, "total": report.total,
+                      "passed": report.passed, "average": report.average,
+                      "threshold": threshold},
+            )
 
         case_id = str(kwargs.get("case_id", ""))
         case = EvalCase(case_id=case_id, input="", expected=kwargs.get("expected"))

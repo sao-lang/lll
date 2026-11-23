@@ -1,3 +1,4 @@
+# purity-exempt-file: InMemoryEventStream 为 R10 B.1.2 指定默认实现命名；接线层协议形状见逐行豁免
 """R11 A3 应用开发装配器：在 R12 Agent 之上加 profile + 默认能力装配。
 
 依赖方向：api(L3) → compose/archs/harness(L1/L2) → runtime(L0)；不改 R5/R9 源码。
@@ -5,17 +6,28 @@ R9 三 Port 默认装配在此落地（组合层跨模块装配），无注入�
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from compose import Agent, Capability, Registry
 from harness.security import SecurityCapability
+from compose import LifecycleBus, PortCtx
+from harness.durability import CheckpointManager
+from harness.observability import InMemoryEventStream
+from harness.security import SafetyVerdict
 from runtime import Session
 
 from .profiles import PROFILES
 from .static_api import static_check_api
 from .governance import Governance
+from .runtime import AgentRuntime, assemble_runtime
+from .wiring import (
+    ApprovingHumanPort, CheckpointEventStore, VerifyingAuditPort,
+    bind_stream_projection, redact_output,
+)
 
 __all__ = ["AgentBuilder"]
 
-type _RegisteredCapability = Capability | str  # 真能力或缺席能力名（纯数据，不是空实现）
+type _RegisteredCapability = Capability | ApprovingHumanPort | VerifyingAuditPort | str  # 真能力/接线端口/缺席名
 
 
 class AgentBuilder:
@@ -34,6 +46,13 @@ class AgentBuilder:
         self._caps: dict[str, _RegisteredCapability] = {}
         self._security: SecurityCapability | None = None
         self._governance: Governance | None = None
+        # 六项接线的真实持有者（装配期构造，build 后可供 Runner/CLI 消费）。
+        self._approval: ApprovingHumanPort | None = None
+        self._audit: VerifyingAuditPort | None = None
+        self._stream_bus: LifecycleBus | None = None
+        self._stream: InMemoryEventStream | None = None
+        self._checkpoint_store: CheckpointEventStore | None = None
+        self._secret_refs: tuple[str, ...] = ()
 
     def profile(self, name: str) -> "AgentBuilder":
         """应用 profile 预设（装配期按清单装能力，未知名拒绝）。"""
@@ -77,10 +96,69 @@ class AgentBuilder:
         """返回共用 Registry（R9 三 Port 由 SecurityCapability 注册）。"""
         return self._agent.registry()
 
+    def approve(self, port: ApprovingHumanPort) -> "AgentBuilder":
+        """① 注入审批包装器（HUMAN Port 的 CRITICAL 分支真实消费）。"""
+        self._approval = port
+        self._caps["approval"] = port
+        return self
+
+    def audit(self, port: VerifyingAuditPort) -> "AgentBuilder":
+        """② 注入审计包装器（每次 record 验链）。"""
+        self._audit = port
+        self._caps["audit_verify"] = port
+        return self
+
+    def secrets(self, refs: Sequence[str]) -> "AgentBuilder":
+        """③ 注入 secret 引用（输出护栏 redact 用）。"""
+        self._secret_refs = tuple(str(s) for s in refs if s)
+        return self
+
+    def project_events(self, stream: InMemoryEventStream) -> "AgentBuilder":
+        """④ 订阅三相位并发布 EventEnvelope（bus 交 Runner/ModelGateway）。"""
+        self._stream = stream
+        self._stream_bus = bind_stream_projection(stream)
+        return self
+
+    def checkpoint(self, mgr: CheckpointManager | None = None) -> "AgentBuilder":
+        """⑤ 注入 checkpoint 适配器（交 Runner(store=...)）。"""
+        self._checkpoint_store = CheckpointEventStore(mgr)
+        return self
+
+    def redact(self, value: object, ctx: PortCtx) -> SafetyVerdict:  # purity-exempt: value 为规则3动态内容边界
+        """③ 生产路径消费：对输出执行 secret 脱敏（返回 SafetyVerdict）。"""
+        return redact_output(value, ctx, secret_refs=self._secret_refs)
+
+    def stream_bus(self) -> LifecycleBus | None:
+        """④ 返回事件总线（供 Runner(notify=runner_notifier(bus)) 注入）。"""
+        return self._stream_bus
+
+    def checkpoint_store(self) -> CheckpointEventStore | None:
+        """⑤ 返回 checkpoint 存储适配器（供 Runner(store=...) 注入）。"""
+        return self._checkpoint_store
+
     def govern(self, gov: Governance) -> "AgentBuilder":
         """注入治理门面；build 时真调用 gov.allow（不静默忽略）。"""
         self._governance = gov
         return self
+
+    def runtime(self, call: object, *, checkpoint_every: int = 1) -> AgentRuntime:
+        """⑤④②① 真实运行期装配：把持有的接线注入 Runner/ToolRegistry。
+
+        Args:
+            call: Runner 必注入的 Port 调用函数。
+            checkpoint_every: 每 N 步落盘（终态总落）。
+
+        Returns:
+            已接好六项线的 AgentRuntime（run/resume 真执行）。
+        """
+        return assemble_runtime(
+            call,  # type: ignore[arg-type]
+            approval=self._approval,
+            audit=self._audit,
+            stream=self._stream,
+            manager=self._checkpoint_store.manager() if self._checkpoint_store else None,
+            checkpoint_every=checkpoint_every,
+        )
 
     def build(self) -> Session:
         """治理判定 + 装配期检查 + 产 Session（委托 R12 Agent）。"""
