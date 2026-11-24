@@ -1,0 +1,15 @@
+# Jaeger all-in-one · 链路追踪平台（OTLP/HTTP :4318 + UI :16686）
+# 启动：docker compose -f examples/trace-viewer/docker-compose.jaeger.yml up -d
+# 查看：浏览器打开 http://127.0.0.1:16686，Service 选 agentkit-react-chat
+# 停止：docker compose -f examples/trace-viewer/docker-compose.jaeger.yml down
+services:
+  jaeger:
+    image: jaegertracing/all-in-one:1.62
+    container_name: agentkit-jaeger
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true        # 开启 OTLP 接收器（默认只开 Jaeger thrift）
+      - SPAN_STORAGE_TYPE=memory           # demo 级内存存储，重启清空（诚实边界）
+    ports:
+      - "4318:4318"   # OTLP/HTTP（telemetry 上报端点）
+      - "16686:16686" # Jaeger UI（浏览器查看）
+      - "4317:4317"   # OTLP/gRPC（备用，本实现用 HTTP 不上报）

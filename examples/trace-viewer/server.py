@@ -146,11 +146,16 @@ class Handler(BaseHTTPRequestHandler):
             import os
             server_offline = os.getenv("CHAT_OFFLINE") == "1"
             has_key = bool(os.getenv("DEEPSEEK_API_KEY"))
+            otlp = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "").strip()
+            # 链路后端真实状态（不伪造）：有 endpoint 才上报 Jaeger
+            trace_backend = (f"OTLP → {otlp}" if otlp
+                             else "NoopTelemetry（未上报平台）")
             self._json({"sessions": list(STATE.sessions), "version": STATE.version,
                         "offline": server_offline,
                         "llm_mode": ("offline" if server_offline else
                                      ("deepseek" if has_key else "needs_key")),
-                        "key_present": has_key})
+                        "key_present": has_key,
+                        "trace_backend": trace_backend})
         elif self.path == "/api/trace":
             self._json({"status": "ok", "trace": STATE.last})
         elif self.path.startswith("/api/events"):

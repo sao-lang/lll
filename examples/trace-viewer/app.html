@@ -103,6 +103,10 @@ fetch('/api/state').then(r=>r.json()).then(s=>{
   const label = s.llm_mode==='deepseek' ? 'DeepSeek 真实 LLM' :
                 s.llm_mode==='needs_key' ? '缺 DEEPSEEK_API_KEY（将降级离线）' : '离线模式';
   $('#mode').textContent = label + ' · MCP 工具';
+  const trace = s.trace_backend || '';
+  if(trace){ const b=document.createElement('span'); b.className='badge';
+    b.textContent = '链路: '+trace; b.title='链路追踪后端（Jaeger/OTLP 或本地 Noop）';
+    document.querySelector('header').appendChild(b); }
 }).catch(()=>{ offline = true; $('#mode').textContent='离线模式（状态读取失败）'; });
 addMsg('assistant','你好！我是接了真实 MCP 工具（天气/搜索）、长期记忆和链路追踪的助手。输入消息开始对话。');
 </script>

@@ -45,6 +45,16 @@ def main() -> None:
         os.environ["CHAT_OFFLINE"] = "1"
         print("[start] 未找到密钥 → 离线模式（工具返回降级标记，不伪造数据）")
 
+    # 链路追踪后端：同样从注册表兜底读 setx 写入的 endpoint（B1 修复）——
+    # 否则旧终端 setx 后子进程读不到，静默退化 NoopTelemetry（零上报）。
+    otlp = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") or _read_user_env(
+        "OTEL_EXPORTER_OTLP_ENDPOINT")
+    if otlp:
+        os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = otlp
+        print(f"[start] 已加载 OTEL_EXPORTER_OTLP_ENDPOINT={otlp}（链路将上报 Jaeger）")
+    else:
+        print("[start] 未设 OTLP endpoint → 链路用 NoopTelemetry（不上报平台）")
+
     print(f"[start] 启动 Web 服务：{SERVER}")
     raise SystemExit(subprocess.call([sys.executable, str(SERVER)]))
 

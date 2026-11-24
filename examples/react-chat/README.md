@@ -48,6 +48,37 @@ setx DEEPSEEK_API_KEY "sk-你的key"
 - 输入「search 一下 AgentKit」→ MCP 搜索工具返回真实标题/链接。
 - 关闭浏览器再打开（同 session id）→ 记忆与历史自动恢复。
 
+## 真实链路追踪（Jaeger / OTLP）
+
+框架内置 `ObservabilityCapability(telemetry=注入)` 是真生效的口子；本 demo 写一个
+`OTLPTelemetry`（履约 TelemetryPort + `_register/_replace`），把框架 span 按 OTLP/HTTP
+上报 Jaeger。**注意**：框架的 `TelemetryExporter` 协议零实现零消费者（台账 A5 不修），
+所以走的是 telemetry 注入路径，不是 exporter 路径。
+
+```bash
+# ① 起 Jaeger all-in-one（需 Docker Desktop 正在运行）
+docker compose -f examples/trace-viewer/docker-compose.jaeger.yml up -d
+# ② 设 OTLP endpoint（与 DeepSeek key 一样走环境变量）
+setx OTEL_EXPORTER_OTLP_ENDPOINT "http://127.0.0.1:4318"
+# ③ 启动聊天（start.py 会从注册表读环境变量绕过旧终端问题）
+.venv/Scripts/python examples/react-chat/start.py
+# ④ 浏览器打开 Jaeger UI：http://127.0.0.1:16686
+#    Service 选 agentkit-react-chat → Find Traces → 看 llm / tool:tool span 与耗时
+```
+
+- span 真值来自框架 `TraceSpan`（name/component/duration_ms/tokens/cost），traceId 稳定映射为 OTLP hex。
+- 上报失败内部消化 + `export_failures()` 计数，绝不阻断聊天主流程。
+- 未设 `OTEL_EXPORTER_OTLP_ENDPOINT` → 用 NoopTelemetry，零网络 IO，demo 仍可离线跑。
+- metric/log 本轮只内部留痕（traces only，诚实边界）；Jaeger 内存存储重启清空。
+- **验证范围诚实说明**：本开发环境 Docker daemon 未运行，**没有起过真 Jaeger**；
+  上报链路用假 OTLP/HTTP 接收端做了 E2E（`tests/examples/test_otlp_e2e.py`）：真 chat →
+  框架自动埋点 → OTLP 上报 → 接收端确认为 `llm`/`tool:tool` span、traceId 一致、耗时真实。
+  这证明上报协议与链路真通，但**不等于**已在真 Jaeger UI 里看过——这一步需你本地
+  启动 Docker + Jaeger 后自行确认（AC-5）。
+- 已知边界（独立 review 登记）：OTLP 上报是同步 HTTP（`_replace` 内，最多阻塞 2s/span），
+  与"导出异步不阻塞"的理想契约有差距；`export_failures()` 计数暂未接到 UI；
+  `TelemetryPort.span()` 手动入口产生 duration=0 的 span，仅供协议兼容（框架 `Trace.span` 才是主路径）。
+
 ## 数据落点（`examples/react-chat/.data/`，gitignore）
 
 ```

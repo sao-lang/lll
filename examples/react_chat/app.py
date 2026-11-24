@@ -33,6 +33,7 @@ from ports.adapters.mcp import StdioMCPTransport, SubprocessStdioChannel  # noqa
 from runtime import Budgets  # noqa: E402
 
 from .persistence import FileEventStore, FileMemoryStore  # noqa: E402
+from .otlp_telemetry import OTLPTelemetry  # noqa: E402
 
 MODEL = os.getenv("CHAT_MODEL", "deepseek-chat")
 MAX_COST_USD = 0.10
@@ -179,7 +180,12 @@ async def build_agent_async(session_id: str, *, offline: bool) -> tuple[Agent, d
     agent.use(SecurityCapability())
     agent.use(mem_cap)
     agent.use(ResilienceCapability(timeout=Timeout(timeout=30.0)))
-    agent.use(ObservabilityCapability(telemetry=NoopTelemetry()))
+    # 链路追踪：有 OTLP endpoint 就上报 Jaeger 等平台；否则 NoopTelemetry（离线零 IO）。
+    # 环境变量标准名 OTEL_EXPORTER_OTLP_ENDPOINT（OTel 惯例，如 http://localhost:4318）。
+    otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "").strip()
+    telemetry: object = (OTLPTelemetry(otlp_endpoint) if otlp_endpoint
+                         else NoopTelemetry())
+    agent.use(ObservabilityCapability(telemetry=telemetry))
     agent.use(_mcp_capability(offline))
 
     # 恢复历史：读 examples 层持久化的问答对 → 注入门面 _history
@@ -197,7 +203,8 @@ async def build_agent_async(session_id: str, *, offline: bool) -> tuple[Agent, d
     meta = {"llm_label": llm_label, "offline": offline,
             "memory_path": str(mem_store.path),
             "checkpoint_path": str(event_store.path),
-            "history_path": str(history_path)}
+            "history_path": str(history_path),
+            "trace_backend": f"OTLP → {otlp_endpoint}" if otlp_endpoint else "NoopTelemetry（未上报平台）"}
     agent._app_meta = meta  # examples 层私有挂载，不改框架 Agent API
     return agent, meta
 
