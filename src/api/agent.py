@@ -525,13 +525,27 @@ class Agent:
                 m = dict(messages[sys_idx])
                 m["content"] = f"{m.get('content', '')}\n{memory_text}".strip()
                 messages = [*messages[:sys_idx], m, *messages[sys_idx + 1:]]
+        # 工具目录去重（真 bug 修复）：披露包 L1/L2 与架构原始 tools 可能
+        # 含同名工具（如 MCP tools 既在 registry 又在披露包）——OpenAI-compatible
+        # 后端（DeepSeek 等）对重复 function name 返回 400，必须按 name 收敛。
+        raw_tools = (list(self._disclosed_tools) if self._disclosed_tools
+                     else self._disclose_now(effect))
+        seen_tools: set[str] = set()
+        unique_tools: list[object] = []
+        for t in raw_tools:
+            name = str(getattr(t, "name", "") or "")
+            if name and name in seen_tools:
+                continue
+            if name:
+                seen_tools.add(name)
+            unique_tools.append(t)
+
         clean = Invoke(port="llm", payload={
             "messages": self._inject_history(messages),
             "model": effect.payload.get("model") or "",
             # 披露包优先（before_model 相位已算 L1/L2 渐进目录）；
             # 首轮 LLM 调用先于相位通知时按当前目录即时计算（同步幂等）。
-            "tools": (list(self._disclosed_tools) if self._disclosed_tools
-                      else self._disclose_now(effect)),
+            "tools": unique_tools,
             # task/tier/text 透传（U-1 关闭）：R1 EffectPayload 已知键只有
             # task_hint/meta（D-7 零改内核），意图字段走 meta 供 router 消费
             "task_hint": str(effect.payload.get("task_hint") or effect.payload.get("task") or ""),

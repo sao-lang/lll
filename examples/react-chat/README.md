@@ -7,19 +7,29 @@
 ## 启动
 
 ```bash
-# Web UI（推荐）：聊天界面 + 实时链路时间线
-.venv/Scripts/python examples/trace-viewer/server.py
+# Web UI（推荐）：一键启动器，自动从环境变量/注册表读取密钥，不落盘
+.venv/Scripts/python examples/react-chat/start.py
 # 浏览器打开 http://127.0.0.1:8510（服务会自动尝试打开）
 
-# 真实模式（需密钥，密钥只走环境变量，不落任何文件）
-DEEPSEEK_API_KEY=sk-xxx .venv/Scripts/python examples/trace-viewer/server.py
+# 或直接启动服务（需在终端先设好 DEEPSEEK_API_KEY 环境变量）
+.venv/Scripts/python examples/trace-viewer/server.py
 
 # 离线自检（不联网、不花钱；工具返回明确 offline 标记，绝不编造数据）
-CHAT_OFFLINE=1 .venv/Scripts/python examples/trace-viewer/server.py
+CHAT_OFFLINE=1 .venv/Scripts/python examples/react-chat/start.py
 
 # CLI（同一装配核心，轻量入口）
 CHAT_OFFLINE=1 CHAT_SESSION=my-session .venv/Scripts/python examples/react-chat/main.py "查深圳天气"
 ```
+
+## 密钥配置（只走环境变量，绝不写进项目文件）
+
+```cmd
+:: Windows：设置用户级环境变量（一次即可，永久生效）
+setx DEEPSEEK_API_KEY "sk-你的key"
+```
+`setx` 写入后，已打开的终端可能仍读到旧环境块——用 `start.py` 启动即可：
+它运行时从注册表 User 区读取 key 注入进程（仅内存，不落文件），绕过该问题。
+顶栏 badge 显示 `DeepSeek 真实 LLM` 即表示密钥已生效。
 
 ## 能力地图（每条都真实可验证）
 
