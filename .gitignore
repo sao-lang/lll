@@ -46,3 +46,6 @@ tmp/
 .conductor/ledgers/
 .conductor/baselines/
 .conductor/archive/
+
+# demo 运行产物（会话记忆/历史/checkpoint）
+examples/react-chat/.data/
