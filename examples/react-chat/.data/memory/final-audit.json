@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "items": [
+    {
+      "kind": "entity",
+      "content": "用户问：查深圳天气；答：已按工具返回的真实数据答复。",
+      "importance": 0.5075,
+      "ts": 1795494432758755700,
+      "source": "refined:entity",
+      "item_id": "c717b0db404144dd",
+      "confidence": 0.8,
+      "tier": "warm",
+      "scope": {
+        "tenant": "default",
+        "user": null,
+        "session": null
+      },
+      "access_count": 0,
+      "tier_level": "warm"
+    }
+  ]
+}

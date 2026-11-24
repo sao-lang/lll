@@ -1,0 +1,10 @@
+[
+  {
+    "role": "user",
+    "content": "查深圳天气"
+  },
+  {
+    "role": "assistant",
+    "content": "已按工具返回的真实数据答复。"
+  }
+]

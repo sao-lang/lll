@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "items": [
+    {
+      "kind": "entity",
+      "content": "用户问：查天气；答：（离线助手）已收到你的消息。当前为离线模式，工具返回的是降级标记而非真实数据。",
+      "importance": 0.5075,
+      "ts": 1795492697666284600,
+      "source": "refined:entity",
+      "item_id": "69a750686b23cb19",
+      "confidence": 0.8,
+      "tier": "warm",
+      "scope": {
+        "tenant": "default",
+        "user": null,
+        "session": null
+      },
+      "access_count": 0,
+      "tier_level": "warm"
+    }
+  ]
+}

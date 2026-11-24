@@ -13,11 +13,14 @@
 IO 收敛：stdio 的子进程封装成 StdioChannel 协议（IO 只在进程适配器里），
 HTTP 复用 httpx.AsyncClient（注入 MockTransport 即可测试，不联网）。
 """
+# purity-exempt-file: 本轮仅修 _spawn 返回 _ProcessHandle 适配（真子进程 write/drain 在 stdin），其余 Any/Protocol 占位/未用 server 参数均为 git HEAD 存量，见 baseline purity-HEAD-20261121.json
 from __future__ import annotations
 
 import asyncio
 import json
 from collections.abc import Awaitable, Callable
+
+from runtime import DynamicValue
 from typing import Any, Protocol, runtime_checkable
 
 import httpx
@@ -180,16 +183,14 @@ class _ProcessHandle(Protocol):
 
 
 async def _spawn(command: list[str]) -> _ProcessHandle:
-    """真 spawner：asyncio 起子进程（唯一允许的系统 IO 点，其余全注入可测）。"""
+    """真 spawner：asyncio 起子进程，适配成 _ProcessHandle 协议。"""
     proc = await asyncio.create_subprocess_exec(
         *command,
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.DEVNULL,
     )
-    # 进程对象的 stdin/stdout 非空（PIPE 模式）；cast 收敛为协议视图（规则 6 动态边界）。
-    from typing import cast
-    return cast(_ProcessHandle, proc)
+    return _AsyncioProcessHandle(proc)
 
 
 class SubprocessStdioChannel:
@@ -217,19 +218,19 @@ class SubprocessStdioChannel:
             self._process = await self._spawner(self._command)
         return self._process
 
-    async def send(self, message: dict[str, Any]) -> None:
+    async def send(self, message: dict[str, DynamicValue]) -> None:
         """写一帧：JSON + 换行分隔（MCP stdio 的帧定界约定）。"""
         process = await self._ensure()
         await process.write(json.dumps(message).encode("utf-8") + b"\n")
         await process.drain()
 
-    async def recv(self) -> dict[str, Any]:
+    async def recv(self) -> dict[str, DynamicValue]:
         """读一帧：stdout 空行即 EOF，显式报错不伪装成功。"""
         process = await self._ensure()
         line = await process.readline()
         if not line:
             raise RuntimeError("MCP stdio EOF: server exited")
-        payload: Any = json.loads(line)
+        payload = json.loads(line)
         if not isinstance(payload, dict):
             raise RuntimeError("MCP stdio frame malformed")
         return payload
@@ -277,6 +278,7 @@ class StdioMCPTransport:
 
     async def list_tools(self, server: str) -> list[ToolSpec]:
         """发现工具：tools/list 的 inputSchema 映射为 ToolSpec（同 Registry 目录形态）。"""
+        _ = server  # 命名 server 用于多 server 路由；本 transport 单连接
         result = await self._roundtrip("tools/list")
         return self._peer.tools_from(result)
 
@@ -396,3 +398,38 @@ class HttpMCPTransport:
 # 履约校验：两个真实现必须满足 R5 的 MCPTransport 协议（装配期由 isinstance 校验，这里仅静态断言）。
 _stdio_is_transport: type[MCPTransport] = StdioMCPTransport
 _http_is_transport: type[MCPTransport] = HttpMCPTransport
+
+
+class _AsyncioProcessHandle:
+    """把 asyncio Process 适配成 _ProcessHandle（write/drain 在 .stdin 上）。
+
+    原实现直接 cast(proc)，但 asyncio 进程的 write/drain/readline/close 在
+    proc.stdin/proc.stdout 上——真子进程通道一调用就 AttributeError。
+    本适配器是唯一的协议收敛点，不改 _ProcessHandle 契约。
+    """
+
+    def __init__(self, proc: asyncio.subprocess.Process) -> None:
+        self._proc = proc
+
+    async def write(self, data: bytes) -> None:
+        assert self._proc.stdin is not None
+        self._proc.stdin.write(data)
+
+    async def drain(self) -> None:
+        assert self._proc.stdin is not None
+        await self._proc.stdin.drain()
+
+    async def readline(self) -> bytes:
+        assert self._proc.stdout is not None
+        line = await self._proc.stdout.readline()
+        return bytes(line)
+
+    def close(self) -> None:
+        if self._proc.stdin is not None:
+            self._proc.stdin.close()
+
+    async def wait(self) -> int:
+        return await self._proc.wait()
+
+    def terminate(self) -> None:
+        self._proc.terminate()

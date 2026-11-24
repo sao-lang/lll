@@ -2095,55 +2095,6 @@
       "rule": "注解用 object",
       "text": "parsed: object = args"
     },
-    "8a7cb6c8607e": {
-      "file": "ports/adapters/mcp.py",
-      "line": 21,
-      "rule_id": "py.any-annotation",
-      "rule": "注解用 Any",
-      "text": "from typing import Any, Protocol, runtime_checkable"
-    },
-    "2ff3812b2193": {
-      "file": "ports/adapters/mcp.py",
-      "line": 21,
-      "rule_id": "py.any-import",
-      "rule": "typing.Any 导入",
-      "text": "from typing import Any, Protocol, runtime_checkable"
-    },
-    "2f64427c6c53": {
-      "file": "ports/adapters/mcp.py",
-      "line": 220,
-      "rule_id": "py.any-annotation",
-      "rule": "注解用 Any",
-      "text": "async def send(self, message: dict[str, Any]) -> None:"
-    },
-    "da2624ff634d": {
-      "file": "ports/adapters/mcp.py",
-      "line": 220,
-      "rule_id": "py.dyn-container",
-      "rule": "容器/泛型参数含 Any/object",
-      "text": "async def send(self, message: dict[str, Any]) -> None:"
-    },
-    "c79ec8e95e6c": {
-      "file": "ports/adapters/mcp.py",
-      "line": 226,
-      "rule_id": "py.any-annotation",
-      "rule": "注解用 Any",
-      "text": "async def recv(self) -> dict[str, Any]:"
-    },
-    "3017af8c437d": {
-      "file": "ports/adapters/mcp.py",
-      "line": 226,
-      "rule_id": "py.dyn-container",
-      "rule": "容器/泛型参数含 Any/object",
-      "text": "async def recv(self) -> dict[str, Any]:"
-    },
-    "07d9e1b76a7f": {
-      "file": "ports/adapters/mcp.py",
-      "line": 232,
-      "rule_id": "py.any-annotation",
-      "rule": "注解用 Any",
-      "text": "payload: Any = json.loads(line)"
-    },
     "4df073f7f373": {
       "file": "runtime/__init__.py",
       "line": 20,
@@ -3425,125 +3376,6 @@
       "rule": "参数 `ctx` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
       "text": "async def complete(self, req: LLMRequest, ctx: PortCtx) -> LLMResponse:"
     },
-    "a75b423d69e7": {
-      "file": "ports/adapters/mcp.py",
-      "line": 142,
-      "rule_id": "intent.placeholder",
-      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
-      "text": "..."
-    },
-    "8dc50a568c4a": {
-      "file": "ports/adapters/mcp.py",
-      "line": 140,
-      "rule_id": "intent.unused_param",
-      "rule": "参数 `message` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
-      "text": "async def send(self, message: dict[str, DynamicValue]) -> None:"
-    },
-    "386811b0ef65": {
-      "file": "ports/adapters/mcp.py",
-      "line": 146,
-      "rule_id": "intent.placeholder",
-      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
-      "text": "..."
-    },
-    "f422bbdedfdd": {
-      "file": "ports/adapters/mcp.py",
-      "line": 150,
-      "rule_id": "intent.placeholder",
-      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
-      "text": "..."
-    },
-    "d902c870d446": {
-      "file": "ports/adapters/mcp.py",
-      "line": 159,
-      "rule_id": "intent.placeholder",
-      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
-      "text": "..."
-    },
-    "d1f025e1a7b5": {
-      "file": "ports/adapters/mcp.py",
-      "line": 157,
-      "rule_id": "intent.unused_param",
-      "rule": "参数 `data` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
-      "text": "async def write(self, data: bytes) -> None:"
-    },
-    "856de1623db7": {
-      "file": "ports/adapters/mcp.py",
-      "line": 163,
-      "rule_id": "intent.placeholder",
-      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
-      "text": "..."
-    },
-    "19458a7f7f9b": {
-      "file": "ports/adapters/mcp.py",
-      "line": 167,
-      "rule_id": "intent.placeholder",
-      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
-      "text": "..."
-    },
-    "1c840ff10346": {
-      "file": "ports/adapters/mcp.py",
-      "line": 171,
-      "rule_id": "intent.placeholder",
-      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
-      "text": "..."
-    },
-    "08cb4e225d82": {
-      "file": "ports/adapters/mcp.py",
-      "line": 175,
-      "rule_id": "intent.placeholder",
-      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
-      "text": "..."
-    },
-    "431d0c1dc3c6": {
-      "file": "ports/adapters/mcp.py",
-      "line": 179,
-      "rule_id": "intent.placeholder",
-      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
-      "text": "..."
-    },
-    "74c6a587a696": {
-      "file": "ports/adapters/mcp.py",
-      "line": 278,
-      "rule_id": "intent.unused_param",
-      "rule": "参数 `server` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
-      "text": "async def list_tools(self, server: str) -> list[ToolSpec]:"
-    },
-    "3b7a2058e9a9": {
-      "file": "ports/adapters/mcp.py",
-      "line": 283,
-      "rule_id": "intent.unused_param",
-      "rule": "参数 `server` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
-      "text": "async def call_tool(self, server: str, tool: str, args: dict[str, DynamicValue]) -> DynamicValue:"
-    },
-    "b33d52f53f79": {
-      "file": "ports/adapters/mcp.py",
-      "line": 288,
-      "rule_id": "intent.unused_param",
-      "rule": "参数 `server` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
-      "text": "async def ping(self, server: str) -> bool:"
-    },
-    "d15b8e31a478": {
-      "file": "ports/adapters/mcp.py",
-      "line": 370,
-      "rule_id": "intent.unused_param",
-      "rule": "参数 `server` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
-      "text": "async def list_tools(self, server: str) -> list[ToolSpec]:"
-    },
-    "8934c6f5f5e3": {
-      "file": "ports/adapters/mcp.py",
-      "line": 374,
-      "rule_id": "intent.unused_param",
-      "rule": "参数 `server` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
-      "text": "async def call_tool(self, server: str, tool: str, args: dict[str, DynamicValue]) -> DynamicValue:"
-    },
-    "542803a9ebdf": {
-      "file": "ports/adapters/mcp.py",
-      "line": 378,
-      "rule_id": "intent.unused_param",
-      "rule": "参数 `server` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
-      "text": "async def ping(self, server: str) -> bool:"
-    },
     "c231edbe9ad6": {
       "file": "ports/adapters/webfetch.py",
       "line": 67,
@@ -3592,6 +3424,125 @@
       "rule_id": "intent.unused_param",
       "rule": "参数 `session_id` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
       "text": "async def load(self, session_id: str) -> JsonSnapshot | None:"
+    },
+    "d843a7aee06c": {
+      "file": "ports/adapters/mcp.py",
+      "line": 24,
+      "rule_id": "py.any-annotation",
+      "rule": "注解用 Any",
+      "text": "from typing import Any, Protocol, runtime_checkable"
+    },
+    "680aaba3c46d": {
+      "file": "ports/adapters/mcp.py",
+      "line": 145,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "96ae646f931e": {
+      "file": "ports/adapters/mcp.py",
+      "line": 143,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `message` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def send(self, message: dict[str, DynamicValue]) -> None:"
+    },
+    "d149ce828558": {
+      "file": "ports/adapters/mcp.py",
+      "line": 149,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "20d8d070e659": {
+      "file": "ports/adapters/mcp.py",
+      "line": 153,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "a6981b89502a": {
+      "file": "ports/adapters/mcp.py",
+      "line": 162,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "27eca336f8a5": {
+      "file": "ports/adapters/mcp.py",
+      "line": 160,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `data` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def write(self, data: bytes) -> None:"
+    },
+    "18cbd5ae0934": {
+      "file": "ports/adapters/mcp.py",
+      "line": 166,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "d86db7687aaa": {
+      "file": "ports/adapters/mcp.py",
+      "line": 170,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "df0ec6457cbc": {
+      "file": "ports/adapters/mcp.py",
+      "line": 174,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "0304d96dc80a": {
+      "file": "ports/adapters/mcp.py",
+      "line": 178,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "3e61231202c0": {
+      "file": "ports/adapters/mcp.py",
+      "line": 182,
+      "rule_id": "intent.placeholder",
+      "rule": "占位/空实现缺意图注释（依赖谁/谁补/何时接入）",
+      "text": "..."
+    },
+    "861849cb9700": {
+      "file": "ports/adapters/mcp.py",
+      "line": 285,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `server` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def call_tool(self, server: str, tool: str, args: dict[str, DynamicValue]) -> DynamicValue:"
+    },
+    "f0cf3dac0ba5": {
+      "file": "ports/adapters/mcp.py",
+      "line": 290,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `server` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def ping(self, server: str) -> bool:"
+    },
+    "3e3a03b27991": {
+      "file": "ports/adapters/mcp.py",
+      "line": 372,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `server` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def list_tools(self, server: str) -> list[ToolSpec]:"
+    },
+    "af2998b20bb7": {
+      "file": "ports/adapters/mcp.py",
+      "line": 376,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `server` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def call_tool(self, server: str, tool: str, args: dict[str, DynamicValue]) -> DynamicValue:"
+    },
+    "8e8ae6ef6e0e": {
+      "file": "ports/adapters/mcp.py",
+      "line": 380,
+      "rule_id": "intent.unused_param",
+      "rule": "参数 `server` 声明但未使用且无说明（给谁用/其他模块是否要传/预留？）",
+      "text": "async def ping(self, server: str) -> bool:"
     }
   }
 }

@@ -10,8 +10,10 @@ from .types import EventEnvelope, ReadModel, TraceSpan
 from .telemetry import NoopTelemetry, Trace
 from .stream import InMemoryEventStream, Projection, TimelineProjection
 
+from harness.observability.capability import ObservabilityCapability
+
 __all__ = [
     "TraceSpan", "EventEnvelope", "ReadModel",
     "NoopTelemetry", "Trace",
-    "InMemoryEventStream", "Projection", "TimelineProjection",
+    "InMemoryEventStream", "Projection", "TimelineProjection", "ObservabilityCapability",
 ]

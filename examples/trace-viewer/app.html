@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AgentKit · 聊天助手 + 链路追踪</title>
+<style>
+  :root{--bg:#0f1115;--panel:#181b22;--line:#2a2f3a;--fg:#e6e8ee;--mut:#9aa3b2;--acc:#5b9dff;--ok:#3fbf7f;--warn:#e0a83b;--err:#e05c5c}
+  *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.6 -apple-system,"Segoe UI",sans-serif}
+  header{padding:14px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px}
+  header h1{font-size:16px;margin:0}.badge{font-size:12px;color:var(--mut);border:1px solid var(--line);padding:2px 8px;border-radius:10px}
+  .wrap{display:grid;grid-template-columns:1fr 420px;height:calc(100vh - 52px)}
+  .chat,.trace{display:flex;flex-direction:column;min-width:0}.chat{border-right:1px solid var(--line)}
+  .pane-title{padding:10px 16px;color:var(--mut);font-size:12px;border-bottom:1px solid var(--line);letter-spacing:.05em}
+  #messages{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px}
+  .msg{max-width:86%;padding:10px 12px;border-radius:10px;white-space:pre-wrap;word-break:break-word}
+  .msg.user{align-self:flex-end;background:#25324a}.msg.assistant{align-self:flex-start;background:var(--panel);border:1px solid var(--line)}
+  .msg .meta{font-size:11px;color:var(--mut);margin-top:6px}
+  .composer{display:flex;gap:8px;padding:12px;border-top:1px solid var(--line)}
+  .composer input{flex:1;background:var(--panel);border:1px solid var(--line);color:var(--fg);padding:10px 12px;border-radius:8px;font:inherit}
+  button{background:var(--acc);color:#fff;border:0;padding:10px 16px;border-radius:8px;cursor:pointer;font:inherit}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  .rows{flex:1;overflow-y:auto;padding:12px 16px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:10px}
+  .card h3{margin:0 0 6px;font-size:13px}.kv{display:flex;justify-content:space-between;font-size:12px;color:var(--mut)}
+  .span{border-left:2px solid var(--acc);padding:4px 8px;margin:4px 0;font-size:12px;background:#141821}
+  .tag{font-size:11px;padding:1px 6px;border-radius:8px;border:1px solid var(--line);color:var(--mut)}
+  .ok{color:var(--ok)}.warn{color:var(--warn)}.err{color:var(--err)}
+  .hint{font-size:12px;color:var(--mut);padding:0 16px 10px}
+  @media(max-width:900px){.wrap{grid-template-columns:1fr}.chat{border-right:0}.trace{display:none}}
+</style>
+</head>
+<body>
+<header><h1>AgentKit 聊天助手</h1><span class="badge" id="mode">连接中…</span><span class="badge" id="session">session: -</span></header>
+<div class="wrap">
+  <section class="chat">
+    <div class="pane-title">对话 · 长期记忆 + 多轮上下文</div>
+    <div id="messages"></div>
+    <div class="hint">试试：「用 get_weather 查深圳天气」/「search 一下 AgentKit 框架」。离线模式会明确标注降级，不编造数据。</div>
+    <form class="composer" id="form"><input id="input" placeholder="输入消息，回车发送…" autocomplete="off"><button id="send">发送</button></form>
+  </section>
+  <section class="trace">
+    <div class="pane-title">链路追踪 · 实时 span / 事件 / 审计</div>
+    <div class="rows" id="traces"><div class="hint">发送第一条消息后显示链路数据。</div></div>
+  </section>
+</div>
+<script>
+const $ = s => document.querySelector(s);
+let offline = null, sessionId = sessionStorage.getItem('chat-session') || ('s-' + Math.random().toString(36).slice(2,8));
+sessionStorage.setItem('chat-session', sessionId);
+$('#session').textContent = 'session: ' + sessionId;
+
+function addMsg(role, text, meta){
+  const el = document.createElement('div');
+  el.className = 'msg ' + role;
+  el.textContent = text;
+  if(meta){ const m=document.createElement('div'); m.className='meta'; m.textContent=meta; el.appendChild(m); }
+  $('#messages').appendChild(el); $('#messages').scrollTop = 1e9;
+}
+function renderTrace(r){
+  const box = $('#traces'); box.innerHTML='';
+  if(!r || !r.answer && !r.error){ box.innerHTML='<div class="hint">等待结果…</div>'; return; }
+  const card = document.createElement('div'); card.className='card';
+  const status = r.error ? 'err' : (r.status==='done'?'ok':'warn');
+  card.innerHTML = `<h3>本轮链路 <span class="tag ${status}">${r.error?'error':(r.status||'-')}</span></h3>
+    <div class="kv"><span>turns / tokens</span><span>${r.turns||0} / ${r.tokens||0}</span></div>
+    <div class="kv"><span>cost</span><span>$${(r.cost_usd||0).toFixed(6)}</span></div>
+    <div class="kv"><span>审计链</span><span class="${r.audit_ok?'ok':'warn'}">${r.audit_count||0} 条 · ${r.audit_ok?'验链通过':'未验'}</span></div>
+    <div class="kv"><span>事件流</span><span>${(r.timeline||[]).length} 条</span></div>
+    <div class="kv"><span>历史轮次</span><span>${(r.history||[]).length} 条问答</span></div>`;
+  box.appendChild(card);
+  (r.spans||[]).forEach(s=>{
+    const el=document.createElement('div'); el.className='span';
+    el.textContent=`[${s.component||'?'}] ${s.name} · ${(s.duration_ms||0).toFixed(1)}ms · ${s.tokens||0} tok · $${(s.cost||0).toFixed(6)}`;
+    box.appendChild(el);
+  });
+  (r.timeline||[]).slice(-8).forEach(e=>{
+    const el=document.createElement('div'); el.className='span';
+    el.textContent=`seq=${e.seq} ${e.type} ${e.data && e.data.port?('port='+e.data.port):''}`;
+    box.appendChild(el);
+  });
+}
+async function send(){
+  const text=$('#input').value.trim(); if(!text) return;
+  $('#input').value=''; $('#send').disabled=true;
+  addMsg('user', text);
+  try{
+    const payload={message:text,session_id:sessionId};
+    if(offline !== null) payload.offline = offline;  // null=由服务端 env 判定，不强制离线
+    const resp=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(payload)});
+    const r=await resp.json();
+    if(r.error){ addMsg('assistant','错误：'+r.error); }
+    else{ addMsg('assistant', r.answer||'(空回答)', `turns=${r.turns} tokens=${r.tokens} audit=${r.audit_count}`); renderTrace(r); }
+  }catch(e){ addMsg('assistant','网络错误：'+e); }
+  $('#send').disabled=false; $('#input').focus();
+}
+$('#form').addEventListener('submit',e=>{e.preventDefault();send();});
+const es=new EventSource('/api/events');
+es.addEventListener('chat',e=>{try{renderTrace(JSON.parse(e.data));}catch(_){}});
+fetch('/api/state').then(r=>r.json()).then(s=>{
+  offline = s.offline;
+  const label = s.llm_mode==='deepseek' ? 'DeepSeek 真实 LLM' :
+                s.llm_mode==='needs_key' ? '缺 DEEPSEEK_API_KEY（将降级离线）' : '离线模式';
+  $('#mode').textContent = label + ' · MCP 工具';
+}).catch(()=>{ offline = true; $('#mode').textContent='离线模式（状态读取失败）'; });
+addMsg('assistant','你好！我是接了真实 MCP 工具（天气/搜索）、长期记忆和链路追踪的助手。输入消息开始对话。');
+</script>
+</body>
+</html>
