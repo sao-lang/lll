@@ -188,6 +188,15 @@ async def build_agent_async(session_id: str, *, offline: bool) -> tuple[Agent, d
     agent.use(ObservabilityCapability(telemetry=telemetry))
     agent.use(_mcp_capability(offline))
 
+    # 完整交互流程：有 OTLP 后端时自动桥接 16 相位 → OTLP span（Jaeger 可见
+    # 预算检查/状态折叠/工具决策等 80% 之前不可见的流程）。零配置、用户零胶水。
+    phase_bridge: object | None = None
+    if otlp_endpoint:
+        from .phase_otlp import PhaseOTLPBridge
+        phase_bridge = PhaseOTLPBridge(agent, telemetry=telemetry)
+        phase_bridge.attach()  # 注册 16 相位 hook（跨 say 持久）
+    agent._phase_bridge = phase_bridge  # 供 close_agent 回收（examples 私有挂载）
+
     # 恢复历史：读 examples 层持久化的问答对 → 注入门面 _history
     if history_path.exists():
         try:
@@ -210,7 +219,14 @@ async def build_agent_async(session_id: str, *, offline: bool) -> tuple[Agent, d
 
 
 async def close_agent(agent: Agent) -> None:
-    """显式关闭 MCP stdio 子进程（Web 会话结束时调用，避免句柄泄漏）。"""
+    """关闭 MCP stdio 子进程 + 停相位桥后台线程（避免句柄/线程泄漏）。"""
+    # 先 drain 相位桥（确保尾部相位都上报，不丢链路）
+    bridge = getattr(agent, "_phase_bridge", None)
+    if bridge is not None:
+        try:
+            bridge.close()
+        except Exception:  # noqa: BLE001 - 清理失败不抛给调用方
+            pass
     from harness.tools import ToolsCapability
     cap = next((c for c in agent._caps.values()
                 if isinstance(c, ToolsCapability)), None)

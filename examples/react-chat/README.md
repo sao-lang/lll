@@ -67,7 +67,13 @@ setx OTEL_EXPORTER_OTLP_ENDPOINT "http://127.0.0.1:4318"
 ```
 
 - span 真值来自框架 `TraceSpan`（name/component/duration_ms/tokens/cost），traceId 稳定映射为 OTLP hex。
-- 上报失败内部消化 + `export_failures()` 计数，绝不阻断聊天主流程。
+- **完整交互流程可见**：`PhaseOTLPBridge` 把框架 16 相位通知转成 OTLP span 上报——
+  一轮 chat 约 20 个 span（3 自动埋点 + 17 相位），形成**一颗链路树**：
+  `phase:session_start` 为根，其余相位挂其下；时间戳是相位**真实到达时刻**（非导出时刻），
+  payload（budget_check 的 exceeded、state_fold 的 step、error 等）作为 attributes。
+  Jaeger 上能看到预算检查/状态折叠/工具决策前后等之前不可见的 ~80% 流程。
+  有 `OTEL_EXPORTER_OTLP_ENDPOINT` 时自动挂接，零配置。
+- 上报失败内部消化 + `export_failures()` 计数，绝不阻断聊天主流程（相位 hook 只入队，慢 HTTP 在后台线程）。
 - 未设 `OTEL_EXPORTER_OTLP_ENDPOINT` → 用 NoopTelemetry，零网络 IO，demo 仍可离线跑。
 - metric/log 本轮只内部留痕（traces only，诚实边界）；Jaeger 内存存储重启清空。
 - **验证范围诚实说明**：本开发环境 Docker daemon 未运行，**没有起过真 Jaeger**；

@@ -97,16 +97,41 @@ class OTLPTelemetry:
         return self._fail
 
     # ---------- OTLP 导出 ----------
-    def _otlp_body(self, span: TraceSpan) -> dict[str, Any]:
+    def export_span(self, span: TraceSpan, *,
+                    extra_attrs: dict[str, Any] | None = None,
+                    start_ns: int | None = None,
+                    end_ns: int | None = None) -> None:
+        """公开导出入口：供相位桥等外部生产者复用同一 OTLP 通道。
+
+        与 _replace 的差别：不登记进 self._spans（相位 span 属独立时间线），
+        只做上报 + 计数；失败同样内部消化。
+        start_ns/end_ns 显式传入时用真实时刻（相位到达时刻），否则用导出时刻。
+        """
+        self._export_span(span, extra_attrs=extra_attrs,
+                          start_ns=start_ns, end_ns=end_ns)
+
+    def _otlp_body(self, span: TraceSpan, *,
+                   extra_attrs: dict[str, Any] | None = None,
+                   start_ns: int | None = None,
+                   end_ns: int | None = None) -> dict[str, Any]:
         """把 TraceSpan 映射成 OTLP/HTTP JSON 的 TracesData。"""
-        now_ns = time.time_ns()
+        now_ns = end_ns if end_ns is not None else time.time_ns()
         duration_ns = int(span.duration_ms * 1_000_000)
-        start_ns = now_ns - duration_ns
+        start_ns = start_ns if start_ns is not None else (now_ns - duration_ns)
         attrs = [
             {"key": "component", "value": {"stringValue": span.component}},
             {"key": "tokens", "value": {"intValue": str(span.tokens)}},
             {"key": "cost_usd", "value": {"doubleValue": span.cost}},
         ]
+        # 额外属性（相位 payload：phase/port/exceeded/step/error 等）
+        for key, value in (extra_attrs or {}).items():
+            if isinstance(value, bool):
+                attrs.append({"key": key, "value": {"boolValue": value}})
+            elif isinstance(value, (int, float)):
+                attrs.append({"key": key, "value": {
+                    "doubleValue" if isinstance(value, float) else "intValue": str(value)}})
+            else:
+                attrs.append({"key": key, "value": {"stringValue": str(value)}})
         item: dict[str, Any] = {
             "traceId": _hex_id(span.trace_id, 32),
             "spanId": _hex_id(span.span_id, 16),
@@ -133,13 +158,17 @@ class OTLPTelemetry:
             }],
         }
 
-    def _export_span(self, span: TraceSpan) -> None:
+    def _export_span(self, span: TraceSpan, *,
+                     extra_attrs: dict[str, Any] | None = None,
+                     start_ns: int | None = None,
+                     end_ns: int | None = None) -> None:
         """POST 到 OTLP /v1/traces；任何异常内部消化（通知语义不抛穿）。"""
         client = self._client or httpx.Client(timeout=2.0)
         try:
             resp = client.post(
                 self.endpoint + OTLP_TRACES_PATH,
-                json=self._otlp_body(span),
+                json=self._otlp_body(span, extra_attrs=extra_attrs,
+                                     start_ns=start_ns, end_ns=end_ns),
                 headers={"Content-Type": "application/json"},
             )
             if 200 <= resp.status_code < 300:

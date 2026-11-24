@@ -11,5 +11,6 @@
 | R7 平台可查看 | 采用：Jaeger all-in-one（Docker）+ UI :16686 | FR-7 | AC-5 |
 | R8 src 零改 | 采用：全部在 examples 层 | FR-8 | AC-6 |
 | R9 无死代码 | 采用：PhaseBridge 作废清理；exporter 有真消费者 | FR-9 | AC-6 |
+| R10 完整流程可见（用户追问） | 采用：16 相位→OTLP span，Jaeger 现全链 | FR-10 | AC-10/11 |
 
 FR 数 = 9。
