@@ -38,7 +38,8 @@ setx DEEPSEEK_API_KEY "sk-你的key"
 | 全走 MCP | `mcp_servers/weather_server.py`（open-meteo 免费 API）、`search_server.py`（DuckDuckGo HTML）→ 框架 `StdioMCPTransport` → `MCPManager.connect()` 注册进**同一 ToolRegistry** | `tests/examples/test_mcp_servers_red.py` + `test_mcp_tools_real_api_logic.py` |
 | 跨会话长期记忆 | `FileMemoryStore`（examples 层 JSON 落盘，按 session_id 隔离）；新 Agent 同 session 自动恢复 | `test_persistence_red.py` + 重启 E2E |
 | 多轮对话 | `Agent.history` + examples 层 history JSON（重启后注入）；checkpoint `FileEventStore` 另存 R1 快照 | `test_app_core_red.py::test_red_history_survives_restart` |
-| 链路追踪可视化 | `app.html` 聊天区 + span/事件/审计时间线；`GET /api/events` SSE 推结果；`GET /api/trace` 全链路 JSON | `test_web_e2e_red.py` + 浏览器实测 |
+| 链路追踪可视化 | `app.html` 聊天区 + span/事件/审计时间线；`GET /api/events` SSE 推结果；`GET /api/trace` 全链路 JSON；span 带真实 tokens/cost | `test_web_e2e_red.py` + `test_trace_usage_red.py` |
+| 流式输出 | 框架一等 `Agent.say_stream(text) -> AsyncIterator[str]`（走 `ModelGateway.stream_events()` 原生事件，逐 TEXT_DELTA yield）；页面 `GET /api/chat_stream` SSE 逐字显示，首字 ~0.9s（真 DeepSeek 实测 8 块） | `test_say_stream_red.py` + SSE 端到端实测 |
 | 真实 LLM | 有 `DEEPSEEK_API_KEY` 走 DeepSeek OpenAI-compatible；无密钥/离线走明确标注的离线 LLM | `app.html` 顶部 badge 显示真实模式 |
 
 ## Web UI 用法
@@ -48,42 +49,43 @@ setx DEEPSEEK_API_KEY "sk-你的key"
 - 输入「search 一下 AgentKit」→ MCP 搜索工具返回真实标题/链接。
 - 关闭浏览器再打开（同 session id）→ 记忆与历史自动恢复。
 
-## 真实链路追踪（Jaeger / OTLP）
+## 真实链路追踪（Jaeger / OTLP）—— 在链路平台上直接看完整走向
 
-框架内置 `ObservabilityCapability(telemetry=注入)` 是真生效的口子；本 demo 写一个
-`OTLPTelemetry`（履约 TelemetryPort + `_register/_replace`），把框架 span 按 OTLP/HTTP
-上报 Jaeger。**注意**：框架的 `TelemetryExporter` 协议零实现零消费者（台账 A5 不修），
-所以走的是 telemetry 注入路径，不是 exporter 路径。
+**无需任何胶水层**：框架 `Trace` 原生实现 `LifecycleBus` 插件协议（`name` +
+`register(bus)`），门面装配期 `bus.subscribe(trace)` 自动接入。`session_start` 开
+root span，16 相位 + llm/tool 全部挂其下，形成一棵同 `trace_id` 的树。设了
+OTLP endpoint 后整棵树经 `OTLPTelemetry` 上报，Jaeger UI 直接呈现
+「会话 → 相位 → LLM → 工具 → 输出」的完整走向。旧的 examples 层 `PhaseOTLPBridge`
+胶水层已删除——不再需要。
 
 ```bash
-# ① 起 Jaeger all-in-one（需 Docker Desktop 正在运行）
+# ① 起 Jaeger all-in-one（Podman 命名管道 API 或 Docker）
 docker compose -f examples/trace-viewer/docker-compose.jaeger.yml up -d
-# ② 设 OTLP endpoint（与 DeepSeek key 一样走环境变量）
+#    （镜像 quay.io/jaegertracing/all-in-one:1.62.0；tag 必须是 1.62.0）
+# ② 设 OTLP endpoint（与 DeepSeek key 一样走环境变量，start.py 也能从注册表读）
 setx OTEL_EXPORTER_OTLP_ENDPOINT "http://127.0.0.1:4318"
-# ③ 启动聊天（start.py 会从注册表读环境变量绕过旧终端问题）
+# ③ 启动聊天（一键启动器读密钥/endpoint 注入进程，不落盘）
 .venv/Scripts/python examples/react-chat/start.py
-# ④ 浏览器打开 Jaeger UI：http://127.0.0.1:16686
-#    Service 选 agentkit-react-chat → Find Traces → 看 llm / tool:tool span 与耗时
+# ④ 打开 Jaeger UI：http://127.0.0.1:16686
+#    Service 选 agentkit-react-chat → Find Traces → 点进 trace → 看链路树
 ```
 
-- span 真值来自框架 `TraceSpan`（name/component/duration_ms/tokens/cost），traceId 稳定映射为 OTLP hex。
-- **完整交互流程可见**：`PhaseOTLPBridge` 把框架 16 相位通知转成 OTLP span 上报——
-  一轮 chat 约 20 个 span（3 自动埋点 + 17 相位），形成**一颗链路树**：
-  `phase:session_start` 为根，其余相位挂其下；时间戳是相位**真实到达时刻**（非导出时刻），
-  payload（budget_check 的 exceeded、state_fold 的 step、error 等）作为 attributes。
-  Jaeger 上能看到预算检查/状态折叠/工具决策前后等之前不可见的 ~80% 流程。
-  有 `OTEL_EXPORTER_OTLP_ENDPOINT` 时自动挂接，零配置。
-- 上报失败内部消化 + `export_failures()` 计数，绝不阻断聊天主流程（相位 hook 只入队，慢 HTTP 在后台线程）。
-- 未设 `OTEL_EXPORTER_OTLP_ENDPOINT` → 用 NoopTelemetry，零网络 IO，demo 仍可离线跑。
+- **链路树结构（实测 2 轮 = 43 span / 1 trace / 1 root）**：
+  `session`（root）→ `turn:1`、`turn:2`（每轮一个分支）→ 各轮下挂
+  `phase:session_start/user_prompt/budget_check/before_model/after_model/state_fold/
+  before_tool/after_tool/tool_error/session_end` + `llm` + `tool:tool`。
+  多轮对话是**一棵树**（不是多棵），Jaeger 上按 turn 展开就是整个会话走向。
+  Trace 状态用 ContextVar 隔离，并发 chat 不串扰。
+- span 真值来自框架 `TraceSpan`（name/component/duration_ms/tokens/cost），traceId 稳定映射为 OTLP hex。llm span 的 tokens/cost 由门面把 `Result.usage` 写回（prompt+completion、cost_usd），页面与 Jaeger 都显示真实账单（不再全 0）；`Trace.span` 退出时读回块内 usage 再记 duration，不覆盖真实值。
+- **流式思考过程**：页面输入后走 `GET /api/chat_stream?message=...`，SSE `delta` 事件逐字追加到助手气泡；框架侧是 `Agent.say_stream()` 一等 API，直接消费 `gateway.stream_events()` 的 TEXT_DELTA，无 ContextVar 开关、无 topic 转手、无 examples 胶水。无流式后端时回退 complete 一次性 yield（诚实，不伪装逐字）。流式是单轮 LLM 对话；工具编排仍走 say/asay。
+- 未设 `OTEL_EXPORTER_OTLP_ENDPOINT` → 用 NoopTelemetry，零网络 IO，demo 仍可离线跑（链路树照样在 `agent.trace.spans()` 里可查）。
 - metric/log 本轮只内部留痕（traces only，诚实边界）；Jaeger 内存存储重启清空。
-- **验证范围诚实说明**：本开发环境 Docker daemon 未运行，**没有起过真 Jaeger**；
-  上报链路用假 OTLP/HTTP 接收端做了 E2E（`tests/examples/test_otlp_e2e.py`）：真 chat →
-  框架自动埋点 → OTLP 上报 → 接收端确认为 `llm`/`tool:tool` span、traceId 一致、耗时真实。
-  这证明上报协议与链路真通，但**不等于**已在真 Jaeger UI 里看过——这一步需你本地
-  启动 Docker + Jaeger 后自行确认（AC-5）。
-- 已知边界（独立 review 登记）：OTLP 上报是同步 HTTP（`_replace` 内，最多阻塞 2s/span），
-  与"导出异步不阻塞"的理想契约有差距；`export_failures()` 计数暂未接到 UI；
-  `TelemetryPort.span()` 手动入口产生 duration=0 的 span，仅供协议兼容（框架 `Trace.span` 才是主路径）。
+- **已真实验证**：本地起真 Jaeger 容器跑一轮 chat，`GET /api/traces?service=agentkit-react-chat`
+  查到 1 条 trace、21 span、唯一 root `session`、相位+llm/tool 全挂其下（`tests/examples/
+  test_phase_otlp_red.py` + `tests/r11/test_trace_lifecycle_tree_red.py` 守门）。
+- 已知边界：OTLP 上报是同步 HTTP（`_replace` 内，最多阻塞 2s/span）；`export_failures()`
+  计数未接到 UI；`TelemetryPort.span()` 手动入口产生 duration=0 的 span，仅供协议兼容
+  （框架 `Trace.span` 才是主路径）。
 
 ## 数据落点（`examples/react-chat/.data/`，gitignore）
 

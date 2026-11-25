@@ -1,8 +1,8 @@
 """react-chat 聊天助手 · CLI 入口（Web UI 的轻量替代）。
 
 运行：
-    # 真正可用（Web UI，聊天 + 链路追踪可视化，全走 MCP）：
-    .venv/Scripts/python examples/trace-viewer/server.py
+    # Web UI（聊天）：一键启动器自动读密钥/endpoint，不落盘
+    .venv/Scripts/python examples/react-chat/start.py
     # 浏览器打开 http://127.0.0.1:8510
 
     # CLI 离线自检（不联网、不花钱）：
@@ -11,8 +11,15 @@
     # CLI 真实（需 DEEPSEEK_API_KEY；天气/搜索走 MCP）：
     DEEPSEEK_API_KEY=sk-xxx .venv/Scripts/python examples/react-chat/main.py "搜一下 AgentKit"
 
+链路追踪（在 Jaeger 平台看完整 AI 走向，无胶水层）：
+    docker compose -f examples/trace-viewer/docker-compose.jaeger.yml up -d
+    setx OTEL_EXPORTER_OTLP_ENDPOINT "http://127.0.0.1:4318"
+    .venv/Scripts/python examples/react-chat/start.py   # 或本 CLI
+    # 浏览器打开 Jaeger UI http://127.0.0.1:16686 → Service 选 agentkit-react-chat
+    # → Find Traces → 点进去看「session → 相位 → llm → tool → 输出」的链路树
+
 设计：装配核心在 examples/react_chat/app.py（Web 与 CLI 单源复用）；
-工具全走 MCP；记忆/历史文件持久化；无密钥/离线不伪造数据。
+工具全走 MCP；记忆/历史文件持久化；链路树由框架 Trace 原生产出；无密钥/离线不伪造数据。
 """
 from __future__ import annotations
 
@@ -53,8 +60,11 @@ async def _main() -> None:
     print(f"记忆文件={meta['memory_path']}  历史文件={meta['checkpoint_path']}")
     print(f"多轮历史={len(result.get('history', []))} 条问答")
     print("=" * 68)
-    print("提示：完整聊天 UI（含链路时间线）运行 "
-          ".venv/Scripts/python examples/trace-viewer/server.py")
+    print("链路树（session → turn:N → 相位/llm/tool）已由框架 Trace 产出；"
+          f"后端={meta.get('trace_backend', '-')}")
+    print("在 Jaeger 平台看走向：设 OTEL_EXPORTER_OTLP_ENDPOINT 后打开 "
+          "http://127.0.0.1:16686 → Service=agentkit-react-chat")
+    print("Web 聊天：.venv/Scripts/python examples/react-chat/start.py")
 
 
 if __name__ == "__main__":

@@ -310,7 +310,9 @@ def intent_as_program(strategy: object, text: str = "") -> _ProgramFn:
     recognize = getattr(strategy, "recognize", None)
     if callable(recognize):
         def adapted() -> _ProgramGen:
-            result: DynamicValue = asyncio.run(recognize(text, None))
+            # Router 在 Runner 的活 loop 内 compile：直接 asyncio.run 会抛
+            # RuntimeError 并泄漏协程；_await_sync 无 loop 直接 run，有 loop 走独立线程。
+            result: DynamicValue = _await_sync(lambda: recognize(text, None))
             normalized = (result if isinstance(result, IntentResult)
                           else _result_from_injection(result))
             if normalized is None:
@@ -323,7 +325,7 @@ def intent_as_program(strategy: object, text: str = "") -> _ProgramFn:
         def callable_adapter() -> _ProgramGen:
             raw: DynamicValue = strategy(text)
             if hasattr(raw, "__await__"):
-                raw = asyncio.run(raw)
+                raw = _await_sync(lambda: raw)
             result = raw if isinstance(raw, IntentResult) else _result_from_injection(raw)
             if result is None:
                 result = IntentResult(label="unknown", confidence=0.0)

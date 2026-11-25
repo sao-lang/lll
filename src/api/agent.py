@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
-from collections.abc import Awaitable
+from collections.abc import AsyncIterator, Awaitable, Mapping
 from contextvars import ContextVar
 from typing import Callable, Protocol, cast
 
@@ -40,9 +40,12 @@ class ArchLike(Protocol):
 
 
 def _normalize_history(msgs: list[dict[str, DynamicValue]]) -> list[dict[str, DynamicValue]]:
-    """ReAct 内部消息 → OpenAI-compatible（框架内部，用户不碰）。"""
+    """ReAct 内部消息 → OpenAI-compatible（框架内部，用户不碰）。
+
+    tool_call_id 严格取 tool 消息自带的 call_id：同轮并行调用同名工具时按 name
+    猜会「最后写入胜出」（c1 无结果、c2 重复），OpenAI-compatible 后端直接 400。
+    """
     normalized: list[dict[str, DynamicValue]] = []
-    id_by_name: dict[str, str] = {}
     for m in msgs:
         role = str(m.get("role") or "user")
         if role == "assistant" and m.get("tool_calls"):
@@ -52,7 +55,6 @@ def _normalize_history(msgs: list[dict[str, DynamicValue]]) -> list[dict[str, Dy
                     continue
                 cid = str(c.get("call_id") or c.get("id") or "call")
                 name = str(c.get("name") or "")
-                id_by_name[name] = cid
                 calls.append({"id": cid, "type": "function", "function": {
                     "name": name,
                     "arguments": str(c.get("arguments") or json.dumps(c.get("args") or {})),
@@ -60,10 +62,17 @@ def _normalize_history(msgs: list[dict[str, DynamicValue]]) -> list[dict[str, Dy
             normalized.append({"role": "assistant", "content": str(m.get("content") or ""),
                                "tool_calls": calls})
         elif role == "tool":
-            name = str(m.get("name") or "")
+            content = m.get("content")
+            # 失败工具回填的是 Runner 设计的内部错误信封（Result 本身，见 runner._send_value），
+            # 送 LLM 前必须在这一归一化边界降为可读字符串：否则 json.dumps(Result) 抛
+            # TypeError，在 _call_llm 内冒泡被 Runner 折叠，第二轮 LLM 根本不发（用户拿空答复）。
+            if isinstance(content, Result):
+                error = content.error
+                content = (f"{error.code}: {error.message}" if error is not None
+                           else str(content))
             normalized.append({"role": "tool",
-                               "tool_call_id": str(m.get("call_id") or id_by_name.get(name) or name),
-                               "content": json.dumps(m.get("content"), ensure_ascii=False)})
+                               "tool_call_id": str(m.get("call_id") or ""),
+                               "content": json.dumps(content, ensure_ascii=False)})
         else:
             normalized.append({"role": role, "content": str(m.get("content") or "")})
     return normalized
@@ -71,6 +80,11 @@ def _normalize_history(msgs: list[dict[str, DynamicValue]]) -> list[dict[str, Dy
 
 # 记忆召回上下文（ContextVar 按调用链隔离，并发 say 互不串扰）。
 _memory_context: ContextVar[tuple[str, ...]] = ContextVar("agentkit_memory_context", default=())
+
+# 流式文本增量队列（say_stream 置位 → _call_llm 逐 TEXT_DELTA put；架构零改动，
+# 所有架构的每轮 LLM 输出都自动进流）。ContextVar 保证并发 say_stream 互不串扰。
+_stream_queue: ContextVar["asyncio.Queue[str] | None"] = ContextVar(
+    "agentkit_stream_queue", default=None)
 
 _ALLOWED_ANSWER_KEYS = frozenset({"content", "text", "answer", "output"})
 
@@ -217,7 +231,6 @@ class Agent:
         self._port_handlers: dict[str, Callable[[Effect, DynamicValue], Awaitable[Result]]] = {}
         self._installed: dict[str, Provider] = {}  # 幂等按对象身份：同名但换对象要重装（Round4 S3）
         self._history: list[dict[str, str]] = []  # 跨 say 对话历史（user/assistant 对）
-        self._history_pending = False  # 本次 run 是否还需注入历史（只注首轮 LLM 调用）
         self._pending_session: object | None = None  # HITL 挂起会话（resume 唯一合法入口）
         self._pending_input = ""  # 挂起轮的原 say 输入（续跑完成后补写记忆/历史）
         self._trace: "Trace | None" = None  # 自动链路追踪（懒建，跨 say 共用）
@@ -304,9 +317,20 @@ class Agent:
         return self
 
     def register_tool(self, name: str, fn: Callable[..., DynamicValue], **kwargs: DynamicValue) -> "Agent":
-        """注册工具到门面（tool port 走四级路由）。"""
+        """注册工具到门面（tool port 走四级路由）。
+
+        危险级别取「显式传入」与「架构 ToolSpec 声明」中更严格者：用户只提供
+        处理器函数时不得把架构声明的 CRITICAL 静默降为 SAFE（安全 fail-open）。
+        """
         from compose import DangerLevel
-        danger = kwargs.get("danger") or DangerLevel.SAFE
+        explicit = kwargs.get("danger")
+        declared = next((spec.danger for spec in getattr(self._arch, "tools", ())
+                         if getattr(spec, "name", "") == name), None)
+        candidates = [d for d in (explicit, declared)
+                      if isinstance(d, DangerLevel)]
+        severity = {DangerLevel.SAFE: 0, DangerLevel.LOW: 1,
+                    DangerLevel.HIGH: 2, DangerLevel.CRITICAL: 3}
+        danger = max(candidates, key=lambda d: severity[d]) if candidates else DangerLevel.SAFE
         self._tools.append((
             ToolSpec(name=name, description=str(kwargs.get("description") or ""),
                      danger=danger),
@@ -481,6 +505,51 @@ class Agent:
 
         return cast(CallFn, call)
 
+    async def _dispatch_streaming(self, effect: Invoke, ctx: DynamicValue,
+                                  queue: "asyncio.Queue[str]", dispatch: CallFn) -> Result:
+        """流式 llm 调用：走 gateway.stream_events，逐 TEXT_DELTA 投递到队列，
+        同时聚合成与 complete 等价的 LLMResponse 交回架构（tool_calls 不丢）。
+
+        这是 say_stream 的核心：架构（ReAct/PlanExecute/...）完全不知道流式存在，
+        它们照常 yield Invoke("llm")，但每个 LLM 轮次的文本增量都自动进流。
+        流式失败回退 dispatch（complete），不伪造增量、不丢真实答复。
+        """
+        from compose import LLMRequest, StreamEventKind, ToolCall, Usage
+        from harness.model import ModelCapability
+        put = getattr(queue, "put_nowait", None)
+        if not callable(put):
+            return await dispatch(effect, ctx)
+        cap = self._caps.get("model")
+        if not isinstance(cap, ModelCapability):
+            return await dispatch(effect, ctx)
+        payload = effect.payload or {}
+        request = LLMRequest(
+            messages=[dict(m) for m in (payload.get("messages") or [])],
+            tools_catalog=list(payload.get("tools") or []) or None,
+            model=str(payload.get("model") or "") or None)
+        chunks: list[str] = []
+        calls: list[ToolCall] = []
+        usage: Usage | None = None
+        try:
+            async for event in cap.gateway().stream_events(request, ctx):
+                if event.kind is StreamEventKind.TEXT_DELTA and isinstance(event.data, str):
+                    chunks.append(event.data)
+                    put(event.data)
+                elif event.kind is StreamEventKind.TOOL_CALL_END and isinstance(event.data, dict):
+                    d = event.data
+                    raw_args = d.get("arguments")
+                    args = dict(raw_args) if isinstance(raw_args, dict) else {}
+                    calls.append(ToolCall(call_id=str(d.get("call_id") or ""),
+                                          name=str(d.get("name") or ""), args=args))
+                elif event.kind is StreamEventKind.USAGE and isinstance(event.data, Usage):
+                    usage = event.data
+            if usage is None:
+                usage = getattr(cap.llm, "last_usage", None) or Usage()
+            return Result(ok=True, data={"content": "".join(chunks) or None,
+                                        "tool_calls": calls, "usage": usage})
+        except Exception:  # noqa: BLE001 - 流式失败回退 complete
+            return await dispatch(effect, ctx)
+
     async def _call_llm(self, effect: Invoke, ctx: DynamicValue, dispatch: CallFn) -> Result:
         """llm port：ctx 转换 + 消息归一 + system 前置 + ToolCall 归一 + usage 搬运（框架内部）。"""
         pctx = PortCtx(
@@ -530,14 +599,29 @@ class Agent:
         # 后端（DeepSeek 等）对重复 function name 返回 400，必须按 name 收敛。
         raw_tools = (list(self._disclosed_tools) if self._disclosed_tools
                      else self._disclose_now(effect))
-        seen_tools: set[str] = set()
+        # 同名保留 schema 语义更完整者：披露包 L1（schema 空）先于 L2（schema 全）。
+        # 判据必须是 properties/required 的存在，不是 str(schema) 长度——长
+        # description 的空壳会按长度胜出，后端因此拿不到参数定义而无法填 arguments。
+        by_name: dict[str, int] = {}
         unique_tools: list[object] = []
         for t in raw_tools:
             name = str(getattr(t, "name", "") or "")
-            if name and name in seen_tools:
+            if not name:
+                unique_tools.append(t)
                 continue
-            if name:
-                seen_tools.add(name)
+            schema = getattr(t, "parameters_schema", None) or {}
+            if name in by_name:
+                idx = by_name[name]
+                prev_schema = getattr(unique_tools[idx], "parameters_schema", None) or {}
+                keys = set(schema) if isinstance(schema, Mapping) else set()
+                prev_keys = set(prev_schema) if isinstance(prev_schema, Mapping) else set()
+                score = (2 if "properties" in keys else 0) + (1 if "required" in keys else 0)
+                prev_score = ((2 if "properties" in prev_keys else 0)
+                              + (1 if "required" in prev_keys else 0))
+                if score > prev_score:
+                    unique_tools[idx] = t  # 语义更完整胜出；并列保留先出现者
+                continue
+            by_name[name] = len(unique_tools)
             unique_tools.append(t)
 
         clean = Invoke(port="llm", payload={
@@ -555,7 +639,11 @@ class Agent:
                      **({"intent_text": str(effect.payload.get("text"))}
                         if "text" in effect.payload else {})},
         })
-        result = await dispatch(clean, pctx)
+        queue = _stream_queue.get()
+        if queue is not None:
+            result = await self._dispatch_streaming(clean, pctx, queue, dispatch)
+        else:
+            result = await dispatch(clean, pctx)
         data = result.data
         if isinstance(data, dict):
             data = dict(data)
@@ -568,7 +656,10 @@ class Agent:
             ]
             usage = data.pop("usage", None)
             if usage is not None and getattr(result, "usage", None) is None:
+                self.trace.record_usage(usage)  # 真实 token/cost 落到当前 llm span
                 return Result(result.ok, data, usage, result.error)
+        if result.usage is not None:
+            self.trace.record_usage(result.usage)  # 后端在 Result.usage 上的真实账单
         return Result(result.ok, data, result.usage, result.error)
 
     def _disclose_now(self, effect: Invoke) -> list[object]:
@@ -595,9 +686,13 @@ class Agent:
         插入点：第一条 user 消息之前（system/记忆之后）——本轮 tool 循环的后续
         消息自带上文，不重复注入。
         """
-        if not self._history or not self._history_pending:
+        # 首轮判定不依赖跨 run 共享可变标志（并发 asay 下首个 run 的标记会
+        # 让其余 run 静默丢失历史）。本轮首轮 = messages 尚无
+        # assistant/tool 消息（ReAct 第二轮起必带），这是每个 run 自身的形态。
+        roles = {m.get("role") for m in messages if isinstance(m, dict)}
+        is_first_round = not ({"assistant", "tool"} & roles)
+        if not self._history or not is_first_round:
             return messages
-        self._history_pending = False
         out = [dict(m) for m in messages]
         first_user = next((i for i, m in enumerate(out)
                            if m.get("role") == "user"), None)
@@ -612,8 +707,12 @@ class Agent:
         用 assemble_runtime 的 tool_setup/call_factory 钩子，让工具注册与 llm call
         都在**同一次装配**中完成——tools/audit/sandbox/store/bus 全同源（Round3 审计断裂修复）。
         """
+        # HITL fail-closed：挂起会话是唯一可 resume 的活会话。此时再发起新 say
+        # 会重建 runtime 并覆盖唯一槽位，把首个挂起会话静默丢弃——显式拒绝。
+        if self._pending_session is not None:
+            raise RuntimeError(
+                "存在未恢复的挂起会话：请先 agent.resume(答复) 续跑，再发起新 say")
         self._install_caps()
-        self._history_pending = True  # 新 run：允许首轮 LLM 调用注入历史
         from harness.tools import ToolRegistry, clear_pending, pending_tools
         tools_snapshot = list(self._tools)
         facade = self
@@ -666,6 +765,9 @@ class Agent:
                 rt.tools, _PortCtx(session_id=self._session_id))
         # lifecycle hooks 真接线：say() 前收集的订阅装配期重放到本次运行的 bus——
         # 与事件投影同一 bus（runner_notifier/gateway 都从它 emit），先于 run 注册。
+        # Trace 以 LifecycleBus 原生插件身份订阅全相位：每轮 say 开 root span，
+        # 16 相位 + llm/tool 进同一棵树（OTLP 导出后 Jaeger 直接呈现完整走向）。
+        rt.bus.subscribe(self.trace)
         self._replay_hooks()
         session = Session(
             session_id=self._session_id,
@@ -713,6 +815,28 @@ class Agent:
             rt.bus.on(hook_phase, hook_fn, name=hook_name)
         self._hooks_applied_count = len(self._hooks)
 
+    def _check_input_guard(self, text: str, ctx: PortCtx) -> tuple[bool, str]:
+        """输入护栏（fail-closed）：deny/ask 阻断，redact 用脱敏文本继续。
+
+        返回 (blocked, 文本/拒绝提示)。say/asay/say_stream 共用，避免流式入口
+        绕过护栏造成 fail-open（恶意输入直达 LLM）。
+        """
+        from harness.security import SecurityCapability, SecurityCtx
+        sec_cap = self._caps.get("security")
+        guard = (getattr(sec_cap, "guardrail", None)
+                 if isinstance(sec_cap, SecurityCapability) else None)
+        if guard is None:
+            return False, text
+        sec_ctx = SecurityCtx.from_port_ctx(ctx, source="input", direction="input")
+        verdict = guard.check(text, sec_ctx)
+        action = str(getattr(verdict, "action", "allow"))
+        if action in ("deny", "ask"):
+            rule = str(getattr(verdict, "rule", "") or "-")
+            return True, f"[blocked] 输入被护栏拒绝（rule={rule}）"
+        if action == "redact":
+            text = str(getattr(verdict, "redacted", text))
+        return False, text
+
     async def asay(self, text: str) -> str:
         """异步语义入口：输入经 ContextVar 按调用链绑定（并发安全）。
 
@@ -723,22 +847,11 @@ class Agent:
         mem_cap = next(
             (c for c in self._caps.values() if isinstance(c, MemoryCapability)), None)
         ctx = PortCtx(session_id=self._session_id, run_id="facade-run")
-        # guardrail 输入链（fail-closed）：注入 SecurityCapability 时输入先过护栏。
-        # deny/ask 一律阻断（ask 无门面输入审批语义，按最严处置）；redact 以脱敏
-        # 文本作为实际输入继续。拒绝时不调 LLM、不写记忆。
-        from harness.security import SecurityCapability, SecurityCtx
-        sec_cap = self._caps.get("security")
-        guard = (getattr(sec_cap, "guardrail", None)
-                 if isinstance(sec_cap, SecurityCapability) else None)
-        if guard is not None:
-            sec_ctx = SecurityCtx.from_port_ctx(ctx, source="input", direction="input")
-            verdict = guard.check(text, sec_ctx)
-            action = str(getattr(verdict, "action", "allow"))
-            if action == "deny" or action == "ask":
-                rule = str(getattr(verdict, "rule", "") or "-")
-                return f"[blocked] 输入被护栏拒绝（rule={rule}）"
-            if action == "redact":
-                text = str(getattr(verdict, "redacted", text))
+        # guardrail 输入链（fail-closed）：与 say_stream 共用同一口径。
+        blocked, text = self._check_input_guard(text, ctx)
+        if blocked:
+            return text  # 拒绝提示（不调 LLM、不写记忆）
+
         with bind_input(text):
             if mem_cap is not None:
                 recalled = await mem_cap.recall_before(text, ctx)
@@ -760,6 +873,82 @@ class Agent:
         self._history.append({"role": "assistant", "content": answer})
         return answer
 
+    async def say_stream(self, text: str) -> AsyncIterator[str]:
+        """一等流式对话入口：逐字 yield LLM 文本增量（框架原生，无胶水）。
+
+        与 say/asay 对称：**走完整架构**（ReAct 工具轮、PlanExecute 等全部适用），
+        所有 LLM 轮次的 TEXT_DELTA 都经框架内部控制流（ContextVar + Queue）
+        投递到本流。架构零改动、无 topic 转手、无 examples 适配。
+        无流式后端时 _call_llm 回退 complete，一次性 yield 完整答复（诚实降级）。
+        """
+        from compose import bind_input
+        from harness.context import MemoryCapability
+        # 输入护栏与 asay 同一口径（fail-closed）：deny/ask 不触达 LLM、不进流。
+        guard_ctx = PortCtx(session_id=self._session_id, run_id="facade-stream")
+        blocked, guarded = self._check_input_guard(text, guard_ctx)
+        if blocked:
+            yield guarded  # [blocked] 提示作为唯一增量，调用方不会误以为答案
+            return
+        text = guarded
+        queue: asyncio.Queue[str] = asyncio.Queue()
+        token = _stream_queue.set(queue)
+
+        async def drive() -> None:
+            """在流式上下文里跑完整架构：每个 LLM 轮次的增量自动进 queue。"""
+            with bind_input(text):
+                mem_cap = next((c for c in self._caps.values()
+                                if isinstance(c, MemoryCapability)), None)
+                if mem_cap is not None:
+                    recalled = await mem_cap.recall_before(
+                        text, PortCtx(session_id=self._session_id, run_id="facade-stream"))
+                    mtoken = _memory_context.set(recalled)
+                    try:
+                        await self._arun()
+                    finally:
+                        _memory_context.reset(mtoken)
+                else:
+                    await self._arun()
+
+        task = asyncio.create_task(drive())
+        chunks: list[str] = []
+        try:
+            while True:
+                if queue.empty() and task.done():
+                    break
+                try:
+                    chunk = await asyncio.wait_for(queue.get(), timeout=0.05)
+                except asyncio.TimeoutError:
+                    if task.done():
+                        break
+                    continue
+                chunks.append(chunk)
+                yield chunk
+            # 排空 task 完成前最后入队的增量
+            while not queue.empty():
+                chunk = queue.get_nowait()
+                chunks.append(chunk)
+                yield chunk
+            await task  # 让架构的异常/副作用正常传播
+            if str(getattr(self.last_run, "status", "")) == "suspended":
+                # 与 asay 对齐：挂起时保存原输入供 aresume 重建 ContextVar，并向流
+                # 显式下发 [wait_human]——否则流静默结束，调用方无从得知需先 resume。
+                # fail-closed 守卫在 _arun 内已拒绝后续 say_stream，不动其语义。
+                self._pending_input = text
+                wait_msg = (
+                    "[wait_human] 已挂起等待人工输入：调用 agent.resume(你的答复) 续跑")
+                chunks.append(wait_msg)
+                yield wait_msg
+        finally:
+            _stream_queue.reset(token)
+        # 架构产出的最终答复与增量一致性：若架构有答复但无增量（非流式后端），
+        # 用 last_run 的真实 output 补一次，保证调用方拿得到完整答复。
+        answer = "".join(chunks)
+        if not answer and self.last_run is not None:
+            from api.agent import _extract_answer
+            fallback = _extract_answer(self.last_run.output)
+            if fallback:
+                yield fallback
+
     async def aresume(self, answer: str) -> str:
         """异步续跑入口：answer 回填挂起会话（wait_human → resumed），跑完出结果。
 
@@ -772,15 +961,17 @@ class Agent:
         if rt is None or not isinstance(session, Session):
             raise RuntimeError("无挂起会话可续跑（agent.resume 仅在 say 挂起后可用）")
         ctx = PortCtx(session_id=self._session_id, run_id="facade-resume")
-        self._history_pending = True
         self._replay_hooks()  # say 之后新加的 hook 也要收到 resumed/终态相位
-        result = cast(RunResult, await rt.resume(session, answer))
+        # Runner.resume 会重新 program_factory()：compile 期读 current_input()，
+        # 必须用挂起时保存的原输入重建 ContextVar，否则所有架构续跑提示词变空。
+        text = self._pending_input
+        with bind_input(text):
+            result = cast(RunResult, await rt.resume(session, answer))
         self.last_run = result
         if str(getattr(result, "status", "")) == "suspended":
             return "[wait_human] 再次挂起：继续调用 agent.resume(你的答复)"
         self._pending_session = None
         out = _extract_answer(result.output)
-        text = self._pending_input
         self._pending_input = ""
         mem_cap = next(
             (c for c in self._caps.values() if isinstance(c, MemoryCapability)), None)

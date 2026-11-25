@@ -4,33 +4,85 @@
 不属于已实现模块契约（R1~R4 锁定 runtime/compose/harness），新增为兼容扩展。
 
 设计约束（R4 §6.1）：
-- complete(): POST /chat/completions，解析 content/usage，写 last_usage。
-- stream(): 带 stream_options.include_usage，逐块解析 SSE，末块 usage 写 last_usage。
-- 错误折叠为 LLMResponse，不抛裸异常；api_key 只进 Authorization 头。
+- complete(): POST /chat/completions，解析 content/usage/tool_calls，写本任务 usage。
+- stream()/stream_events(): 带 stream_options.include_usage，共用一条 SSE 解析链；
+  流式 usage 写本任务上下文的结算口，断流/HTTP 错误一律上抛，绝不吞成成功。
+- complete() 的错误折叠为 LLMResponse（R3 据此重试/熔断）；stream 路径必须上抛原错误，
+  否则网关会把半截流当成功结算并写缓存。api_key 只进 Authorization 头。
 """
 from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
+from contextvars import ContextVar
+from dataclasses import dataclass
 
 import httpx
 
-from compose import LLMRequest, LLMResponse, PortCtx, ToolCall, Usage
+from compose import (
+    LLMRequest,
+    LLMResponse,
+    PortCtx,
+    StreamEvent,
+    StreamEventKind,
+    ToolCall,
+    Usage,
+)
 
 __all__ = ["OpenAICompatLLM"]
 
 _SSE_DONE = "[DONE]"
 
 
+class _UsageUnset:
+    """哨兵：区分"本任务上下文从未设置 usage"与"显式设置为 None"。
+
+    两者语义不同：从未设置（如 asyncio.run 结束后的新上下文）才回退兼容读取口；
+    显式 None（流开头声明本流无 usage）必须保持 None，不得回退到另一个并发任务
+    写入兼容口的账，否则无 USAGE 的流会串台结算别人的成本。
+    """
+
+
+_USAGE_UNSET = _UsageUnset()
+
+
+@dataclass(frozen=True, slots=True)
+class _ToolCallFragment:
+    """SSE 一帧里的单片 tool_calls；index 是跨帧聚合的唯一键。"""
+
+    index: int
+    call_id: str
+    name: str
+    arguments_delta: str
+
+
+@dataclass(frozen=True, slots=True)
+class _ParsedChunk:
+    """一帧 SSE 的归一化结果：文本增量 + 工具调用分片 + 可选账单。"""
+
+    content: str = ""
+    tool_calls: tuple[_ToolCallFragment, ...] = ()
+    usage: Usage | None = None
+
+
+@dataclass(slots=True)
+class _CallAccumulator:
+    """按 index 聚合的半截工具调用（arguments 逐片拼接，流末一次性解析）。"""
+
+    call_id: str
+    name: str
+    argument_parts: list[str]
+
+
 class OpenAICompatLLM:
     """OpenAI-compatible HTTP 后端（需 base_url + api_key + model）。
 
     属性：
-        name: 适配器名。last_usage: 最近一次调用的结算 usage（LLMPort 协议成员）。
+        name: 适配器名。last_usage: 本任务上下文最近一次调用的结算 usage
+        （LLMPort 协议成员；仅供兼容读取，记账以流内 USAGE / 响应 usage 为准）。
     """
 
     name = "openai_compat"
-    last_usage: Usage | None = None
 
     def __init__(
         self,
@@ -52,7 +104,33 @@ class OpenAICompatLLM:
         self._api_key = api_key
         self._model = model
         self._client = client
-        self.last_usage = None
+        # usage 按"实例 × 并发任务"隔离：每实例持独立 ContextVar，
+        # 同一实例的并发流在各自 task 的 context 写入/读取，互不覆盖（EXP2-B）。
+        self._usage_var: ContextVar[Usage | None | _UsageUnset] = ContextVar(
+            "agentkit_openai_compat_last_usage", default=_USAGE_UNSET
+        )
+        # 跨任务边界（如 asyncio.run 结束后在主上下文读取）的兼容读取口。
+        # 只供外部读取"最近一次 usage"；网关记账始终读本任务 ContextVar，不走这里。
+        self._last_usage_compat: Usage | None = None
+
+    @property
+    def last_usage(self) -> Usage | None:
+        """本任务上下文的结算 usage。
+
+        仅当本上下文从未设置过 usage 时才回退兼容读取口（跨 asyncio.run 后
+        的外部读取）；显式设置的 None（本流无 usage）必须保持 None，绝不回退
+        到其它并发任务写入兼容口的账（否则无 USAGE 的流串台记假成本）。
+        """
+        scoped = self._usage_var.get()
+        if isinstance(scoped, _UsageUnset):
+            return self._last_usage_compat
+        return scoped
+
+    @last_usage.setter
+    def last_usage(self, value: Usage | None) -> None:
+        """写入本任务上下文的 usage（隔离记账），并同步兼容读取口。"""
+        self._usage_var.set(value)
+        self._last_usage_compat = value
 
     def _headers(self) -> dict[str, str]:
         """构造请求头；密钥只在此处进入 Authorization（K3 凭据管理）。"""
@@ -161,18 +239,13 @@ class OpenAICompatLLM:
             return LLMResponse(content="", tool_calls=[], usage=Usage(),
                                model=self._model, error=f"NETWORK_ERROR: {exc}")
 
-    def stream(self, req: LLMRequest, ctx: PortCtx) -> AsyncIterator[str]:
-        """流式补全：逐块解析 SSE data 行的 delta.content；末块 usage 写 last_usage。
+    async def _iter_sse(self, req: LLMRequest, ctx: PortCtx) -> AsyncIterator[_ParsedChunk]:
+        """SSE 唯一解析链：逐帧产出归一化增量；HTTP/网络错误原样上抛。
 
-        PEP525 签名（调用即得 AsyncIterator，无需 await）。取消由消费方 aclose() 传播，
-        try/finally 关闭底层响应。
+        断流绝不吞：网关据此释放预留、不结算、不写缓存（EXP2-C/D）。
+        usage 写入本任务 ContextVar，供兼容读取；结算依据是产出的 _ParsedChunk.usage。
         """
-        return self._stream_impl(req, ctx)
-
-    async def _stream_impl(self, req: LLMRequest, ctx: PortCtx) -> AsyncIterator[str]:
-        """异步生成器实现体；SSE 断流与取消均在 finally 关闭连接。"""
-        # N1：每次流开始重置结算口，避免复用实例时残留上次调用的 usage。
-        self.last_usage = None
+        self.last_usage = None  # 每次流开始重置本任务上下文的结算口，避免复用残留
         client = self._client or httpx.AsyncClient()
         acquired = self._client is None  # 自建客户端需自行关闭
         try:
@@ -182,7 +255,7 @@ class OpenAICompatLLM:
                 headers=self._headers(),
                 json=self._payload(req, stream=True),
             ) as resp:
-                resp.raise_for_status()
+                resp.raise_for_status()  # HTTP 错误原样抛出，保留状态码与响应体
                 # SSE 逐行推送，按行读才能及时把文本片段 yield 出去；
                 # aiter_lines 负责 TCP 分包/粘包，调用方无需自己拼缓冲区。
                 async for line in resp.aiter_lines():
@@ -201,27 +274,115 @@ class OpenAICompatLLM:
                     # 非 dict 的 JSON 行（如标量）不是有效 chunk，忽略而非当成文本。
                     if not isinstance(data, dict):
                         continue
-                    # 末块：usage 无 choices，写入结算口后不 yield 文本。
-                    usage = data.get("usage")
-                    # usage 只出现在末块；出现即写入结算口，保留真实账单值。
-                    if usage is not None:
-                        self.last_usage = self._usage_from(usage)
+
+                    # 末块 usage 无 choices；出现即写入本任务结算口并随帧产出。
+                    raw_usage = data.get("usage")
+                    settled: Usage | None = (
+                        self._usage_from(raw_usage) if raw_usage is not None else None
+                    )
+                    if settled is not None:
+                        self.last_usage = settled
+
+                    content = ""
+                    fragments: list[_ToolCallFragment] = []
                     choices = data.get("choices", [])
                     # 仅从首个 choice 取增量（本适配器只服务单主流）；
                     # choices 为空正是 usage-only 末块的标志，此时不产出文本。
                     if isinstance(choices, list) and choices and isinstance(choices[0], dict):
                         delta = choices[0].get("delta", {})
-                        # delta 形态可能是 dict 或缺省；非 dict 时无 content 可取，直接忽略。
+                        # delta 形态可能是 dict 或缺省；非 dict 时无字段可取。
                         if isinstance(delta, dict):
-                            content = delta.get("content")
-                            # 只 yield 非空字符串片段，空 content 不产生无意义的下游事件。
-                            if isinstance(content, str) and content:
-                                yield content
-        except Exception:
-            # N1：流中断不得把 last_usage 设成全零 Usage()——那会绕过网关
-            # "usage is None → 拒答" 防线，记假零成本并把空内容写进缓存污染后续请求。
-            # 保持 None（初值即 None），由网关显式拒答；若断流前已收到 usage 则保留真实值。
-            return
+                            raw_content = delta.get("content")
+                            if isinstance(raw_content, str) and raw_content:
+                                content = raw_content
+                            # 流式 tool_calls：按 index 收集分片，逐片重建完整调用（EXP2-B）。
+                            raw_tools = delta.get("tool_calls")
+                            if isinstance(raw_tools, list):
+                                for item in raw_tools:
+                                    if not isinstance(item, dict):
+                                        continue
+                                    raw_fn = item.get("function")
+                                    fn = raw_fn if isinstance(raw_fn, dict) else {}
+                                    raw_index = item.get("index", 0)
+                                    fragments.append(_ToolCallFragment(
+                                        index=int(raw_index) if isinstance(raw_index, int) else 0,
+                                        call_id=str(item.get("id", "") or ""),
+                                        name=str(fn.get("name", "") or ""),
+                                        arguments_delta=str(fn.get("arguments", "") or ""),
+                                    ))
+                    if content or fragments or settled is not None:
+                        yield _ParsedChunk(
+                            content=content, tool_calls=tuple(fragments), usage=settled
+                        )
         finally:
             if acquired:
                 await client.aclose()
+
+    def stream(self, req: LLMRequest, ctx: PortCtx) -> AsyncIterator[str]:
+        """流式补全：逐块产出 delta.content；末帧 usage 写本任务结算口。
+
+        PEP525 签名（调用即得 AsyncIterator，无需 await）。取消由消费方 aclose() 传播，
+        try/finally 关闭底层响应。断流/HTTP 错误上抛，由网关拒答、不结算不写缓存。
+        """
+        return self._stream_impl(req, ctx)
+
+    async def _stream_impl(self, req: LLMRequest, ctx: PortCtx) -> AsyncIterator[str]:
+        """文本流实现体：只转出文本增量；结构化调用走 stream_events。"""
+        async for chunk in self._iter_sse(req, ctx):
+            if chunk.content:
+                yield chunk.content
+
+    def stream_events(self, req: LLMRequest, ctx: PortCtx) -> AsyncIterator[StreamEvent]:
+        """原生结构化事件流：与 stream() 共用解析链，额外产出工具调用生命周期事件。
+
+        工具分片按 index 聚合：首片发 TOOL_CALL_START，每片 arguments 发 TOOL_CALL_DELTA，
+        正常流末发 TOOL_CALL_END（data 含 call_id/name/arguments，供上层聚合成 ToolCall）。
+        断流时异常上抛，不发 END/DONE，绝不把半截调用当可执行结果。
+        """
+        return self._stream_events_impl(req, ctx)
+
+    async def _stream_events_impl(
+        self, req: LLMRequest, ctx: PortCtx,
+    ) -> AsyncIterator[StreamEvent]:
+        """事件流实现体：透传文本/usage，按 index 聚合工具调用分片。"""
+        accumulators: dict[int, _CallAccumulator] = {}
+        async for chunk in self._iter_sse(req, ctx):
+            if chunk.content:
+                yield StreamEvent(kind=StreamEventKind.TEXT_DELTA, data=chunk.content)
+            for frag in chunk.tool_calls:
+                acc = accumulators.get(frag.index)
+                if acc is None:
+                    acc = _CallAccumulator(
+                        call_id=frag.call_id, name=frag.name, argument_parts=[]
+                    )
+                    accumulators[frag.index] = acc
+                    yield StreamEvent(kind=StreamEventKind.TOOL_CALL_START, data={
+                        "index": frag.index, "call_id": frag.call_id, "name": frag.name,
+                    })
+                else:
+                    # vendor 可能把 id/name 放在后续片，补齐以便 END 给出完整调用。
+                    if frag.call_id and not acc.call_id:
+                        acc.call_id = frag.call_id
+                    if frag.name and not acc.name:
+                        acc.name = frag.name
+                if frag.arguments_delta:
+                    acc.argument_parts.append(frag.arguments_delta)
+                    yield StreamEvent(kind=StreamEventKind.TOOL_CALL_DELTA, data={
+                        "index": frag.index, "arguments_delta": frag.arguments_delta,
+                    })
+            if chunk.usage is not None:
+                yield StreamEvent(kind=StreamEventKind.USAGE, data=chunk.usage)
+
+        # 只有正常流末才提交工具调用；断流时 _iter_sse 已抛异常，不会走到这里。
+        for index in sorted(accumulators):
+            acc = accumulators[index]
+            raw_args = "".join(acc.argument_parts)
+            try:
+                parsed = json.loads(raw_args)
+            except (ValueError, TypeError):
+                parsed = {}
+            yield StreamEvent(kind=StreamEventKind.TOOL_CALL_END, data={
+                "index": index, "call_id": acc.call_id, "name": acc.name,
+                "arguments": parsed if isinstance(parsed, dict) else {},
+            })
+        yield StreamEvent(kind=StreamEventKind.DONE)

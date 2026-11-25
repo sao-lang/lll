@@ -121,6 +121,10 @@ class Registry:
         """
         if self._frozen:
             raise HookBusError("registry is frozen")
+        if name not in self._providers:
+            # register 才创建、replace 只更新：拼错名字的 replace 不得静默新建
+            # 一个 provider（否则装配期"It was replaced"是假象，真目标没被更新）。
+            raise HookBusError(f"provider not registered: {name}")
         self._providers[name] = provider
         return self
 

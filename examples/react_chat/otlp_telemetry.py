@@ -97,19 +97,6 @@ class OTLPTelemetry:
         return self._fail
 
     # ---------- OTLP 导出 ----------
-    def export_span(self, span: TraceSpan, *,
-                    extra_attrs: dict[str, Any] | None = None,
-                    start_ns: int | None = None,
-                    end_ns: int | None = None) -> None:
-        """公开导出入口：供相位桥等外部生产者复用同一 OTLP 通道。
-
-        与 _replace 的差别：不登记进 self._spans（相位 span 属独立时间线），
-        只做上报 + 计数；失败同样内部消化。
-        start_ns/end_ns 显式传入时用真实时刻（相位到达时刻），否则用导出时刻。
-        """
-        self._export_span(span, extra_attrs=extra_attrs,
-                          start_ns=start_ns, end_ns=end_ns)
-
     def _otlp_body(self, span: TraceSpan, *,
                    extra_attrs: dict[str, Any] | None = None,
                    start_ns: int | None = None,

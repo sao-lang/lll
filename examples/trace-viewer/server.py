@@ -23,6 +23,12 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 import sys  # noqa: E402
+# Windows 控制台默认 GBK：中文启动横幅/诊断输出被上游以 UTF-8 读取会抛
+# UnicodeDecodeError（如 0xb2/0xbb）。进程内强制 UTF-8 输出，杜绝编码错配。
+if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT))
 
@@ -60,6 +66,24 @@ class Session:
         finally:
             self.ready.set()
         self.loop.run_forever()
+
+    def submit_stream(self, prompt: str, on_delta: Any) -> None:
+        """在持久 loop 里跑框架 say_stream，逐块回调（SSE 工作线程驱动）。"""
+        self.ready.wait()
+        if not self.agent:
+            on_delta({"error": self.meta.get("error", "agent 构建失败"), "done": True})
+            return
+
+        async def run() -> None:
+            try:
+                async for chunk in self.agent.say_stream(prompt):
+                    on_delta({"text": chunk})
+                on_delta({"done": True})
+            except Exception as exc:  # noqa: BLE001 - 错误上送流，不静默
+                on_delta({"error": f"{type(exc).__name__}: {exc}", "done": True})
+
+        future = asyncio.run_coroutine_threadsafe(run(), self.loop)
+        future.result(timeout=120)
 
     def submit(self, prompt: str) -> dict[str, Any]:
         """在持久 loop 里跑一轮 chat，阻塞至完成（HTTP 工作线程调用）。"""
@@ -160,8 +184,36 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"status": "ok", "trace": STATE.last})
         elif self.path.startswith("/api/events"):
             self._sse_stream()
+        elif self.path.startswith("/api/chat_stream"):
+            self._chat_stream()
         else:
             self._json({"error": "not found"}, status=404)
+
+    def _chat_stream(self) -> None:
+        """流式聊天：SSE 逐块推框架 say_stream 的文本增量。"""
+        from urllib.parse import parse_qs, urlparse
+        query = parse_qs(urlparse(self.path).query)
+        message = str((query.get("message") or [""])[0]).strip()
+        session_id = str((query.get("session_id") or [""])[0])
+        if not message:
+            self._json({"error": "message 不能为空"}, status=400)
+            return
+        session_id = session_id or uuid.uuid4().hex[:8]
+        offline = __import__("os").getenv("CHAT_OFFLINE") == "1"
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "keep-alive")
+        self.end_headers()
+        try:
+            session = STATE.get_or_create(session_id, offline)
+
+            def on_delta(payload: dict[str, Any]) -> bool:
+                return self._sse("delta", payload)
+
+            session.submit_stream(message, on_delta)
+        except Exception as exc:  # noqa: BLE001 - 错误上送流
+            self._sse("delta", {"error": f"{type(exc).__name__}: {exc}", "done": True})
 
     def _sse_stream(self) -> None:
         self.send_response(200)

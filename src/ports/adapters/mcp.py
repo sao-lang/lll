@@ -45,6 +45,9 @@ MCP_PROTOCOL_VERSION = "2024-11-05"
 MCP_CLIENT_NAME = "agentkit"
 MCP_CLIENT_VERSION = "5.0.0"
 
+_MAX_SKIPPED_NOTIFICATIONS = 64
+"""单次请求允许跳过的合法通知帧上限（防异常/恶意 server 用通知流死等）。"""
+
 
 def _initialize_request(id: int) -> dict[str, DynamicValue]:
     """构造 initialize 请求帧（JSON-RPC 2.0 + 协议版本 + 客户端身份）。"""
@@ -77,6 +80,15 @@ class _JsonRpcPeer:
         self._id += 1
         return self._id
 
+    def reset_connection(self) -> None:
+        """重连后复位 id 序列与握手状态（新连接从 id=1 重新计数）。
+
+        不复位会让新 server 返回的 id=1 与客户端继续自增的 id=3 错配，
+        被 result_of_matched 判为响应错配而误拒绝合法重连。
+        """
+        self._id = 0
+        self._ready = False
+
     def request(self, method: str, params: dict[str, DynamicValue] | None = None) -> dict[str, DynamicValue]:
         """构造带 id 的请求帧；params 缺省时省略该键（ping 无需参数）。"""
         frame: dict[str, DynamicValue] = {
@@ -90,6 +102,20 @@ class _JsonRpcPeer:
     def initialized_notification(self) -> dict[str, DynamicValue]:
         """构造 initialized 通知（无 id；握手第二步告知 server 客户端就绪）。"""
         return {"jsonrpc": "2.0", "method": "notifications/initialized"}
+
+    def result_of_matched(self, response: dict[str, DynamicValue],
+                          expected_id: int) -> DynamicValue:
+        """取 result 并校验 JSON-RPC id 与请求一致（响应错配 fail-closed）。
+
+        单管道 HTTP/stdio 都可能出现后发先回或错位响应；不校验 id 会把别人的
+        结果当自己的返回，属静默数据错误。校验失败显式抛，交上层折叠。
+        """
+        if not isinstance(response, dict):
+            raise RuntimeError("MCP response frame malformed")
+        if response.get("id") != expected_id:
+            raise RuntimeError(
+                f"MCP response id mismatch: expected {expected_id}, got {response.get('id')}")
+        return self.result_of(response)
 
     def result_of(self, response: dict[str, DynamicValue]) -> DynamicValue:
         """从响应帧取 result；error 折叠为 RuntimeError，不裸抛字典。"""
@@ -113,11 +139,21 @@ class _JsonRpcPeer:
             if not isinstance(raw, dict) or not isinstance(raw.get("name"), str):
                 continue
             schema = raw.get("inputSchema")
+            # annotations.destructiveHint=True 的破坏性工具至少 HIGH，不得以构造
+            # 默认 SAFE 裸奔绕过沙盒；用户显式 danger 不被注解降级（取更严者）。
+            annotations = raw.get("annotations")
+            annotations = annotations if isinstance(annotations, dict) else {}
+            effective = self._danger
+            if annotations.get("destructiveHint") is True:
+                severity = {DangerLevel.SAFE: 0, DangerLevel.LOW: 1,
+                            DangerLevel.HIGH: 2, DangerLevel.CRITICAL: 3}
+                if severity.get(effective, 0) < severity[DangerLevel.HIGH]:
+                    effective = DangerLevel.HIGH
             specs.append(ToolSpec(
                 name=raw["name"],
                 description=str(raw.get("description", "")),
                 parameters_schema=schema if isinstance(schema, dict) else {},
-                danger=self._danger,
+                danger=effective,
                 source="mcp",
             ))
         return specs
@@ -257,24 +293,56 @@ class StdioMCPTransport:
         """构造：注入 stdio 通道；danger 为拉回工具的默认风险级别。"""
         self._channel = channel
         self._peer = _JsonRpcPeer(danger)
+        # 单 stdin/stdout 管道无法真正多路复用：串行化 in-flight 请求，保证
+        # 每个 recv 拿到的就是刚刚 send 的那个请求的响应（并发不串台）。
+        self._rpc_lock = asyncio.Lock()
+
+    async def _recv_result(self, expected_id: int) -> DynamicValue:
+        """收响应：跳过合法通知帧后按 id 匹配，返回 result（错误统一折叠）。
+
+        只跳过"无 id 键 + method 为 notifications/*"的通知形态帧；带 id 的帧、
+        无 id 但 method 非通知的帧、非 dict 帧都不跳过，交 result_of_matched
+        fail-closed。跳过累计有上限，超限显式报错，防异常 server 造成死等。
+        """
+        skipped = 0
+        while True:
+            frame = await self._channel.recv()
+            method = frame.get("method") if isinstance(frame, dict) else None
+            if (
+                isinstance(frame, dict)
+                and "id" not in frame
+                and isinstance(method, str)
+                and method.startswith("notifications/")
+            ):
+                skipped += 1
+                if skipped > _MAX_SKIPPED_NOTIFICATIONS:
+                    raise RuntimeError("MCP stdio notification flood")
+                continue
+            return self._peer.result_of_matched(frame, expected_id)
 
     async def _handshake(self) -> None:
-        """首次使用时握手：initialize → 校验响应 → 发 initialized 通知。"""
+        """首次使用时握手：initialize → 校验响应 → 发 initialized 通知。
+
+        调用方须持 _rpc_lock（防握手响应与其它 in-flight 请求互相抢读）。
+        """
         if self._peer._ready:
             return
         req = _initialize_request(self._peer.next_id())
         await self._channel.send(req)
-        response = await self._channel.recv()
-        self._peer.result_of(response)  # error 直接抛，由调用路径折叠。
+        await self._recv_result(req["id"])  # error/id 不符直接抛。
         await self._channel.send(self._peer.initialized_notification())
         self._peer._ready = True
 
     async def _roundtrip(self, method: str, params: dict[str, DynamicValue] | None = None) -> DynamicValue:
-        """握手（若未握手）→ 发请求 → 收响应 → 取 result（统一错误折叠）。"""
-        await self._handshake()
-        await self._channel.send(self._peer.request(method, params))
-        response = await self._channel.recv()
-        return self._peer.result_of(response)
+        """握手（若未握手）→ 发请求 → 收响应 → 取 result（统一错误折叠）。
+
+        整段持锁：单管道一次只处理一个请求，响应按 id 校验后才返回。
+        """
+        async with self._rpc_lock:
+            await self._handshake()
+            req = self._peer.request(method, params)
+            await self._channel.send(req)
+            return await self._recv_result(req["id"])
 
     async def list_tools(self, server: str) -> list[ToolSpec]:
         """发现工具：tools/list 的 inputSchema 映射为 ToolSpec（同 Registry 目录形态）。"""
@@ -297,9 +365,9 @@ class StdioMCPTransport:
             return False
 
     async def reconnect(self) -> None:
-        """显式重连：关闭旧通道 + 复位握手状态（不自动重试 call，防副作用重复执行）。"""
+        """显式重连：关闭旧通道 + 复位 id/握手（不自动重试 call，防副作用重复）。"""
         await self._channel.close()
-        self._peer._ready = False
+        self._peer.reset_connection()
 
     async def aclose(self) -> None:
         """关闭底层 stdio 通道（进程/管道资源释放）。"""
@@ -326,6 +394,8 @@ class HttpMCPTransport:
         self._client = client or httpx.AsyncClient()
         self._owns_client = client is None
         self._peer = _JsonRpcPeer(danger)
+        # 与 stdio 一致：串行化整段 _roundtrip（含握手），防并发首调各自 initialize。
+        self._rpc_lock = asyncio.Lock()
 
     async def _post(self, frame: dict[str, DynamicValue]) -> dict[str, DynamicValue]:
         """发一帧并解析响应：JSON 直接 loads，SSE 取首个 data: JSON 帧。"""
@@ -355,19 +425,32 @@ class HttpMCPTransport:
         raise RuntimeError("MCP SSE has no data frame")
 
     async def _handshake(self) -> None:
-        """首次握手：initialize → 校验 → initialized 通知（与 stdio 同语义）。"""
+        """首次握手：initialize → 校验 → initialized 通知（与 stdio 同语义）。
+
+        调用方须持 _rpc_lock（防并发首调重复 initialize）。
+        """
         if self._peer._ready:
             return
-        response = await self._post(_initialize_request(self._peer.next_id()))
-        self._peer.result_of(response)
+        init_req = _initialize_request(self._peer.next_id())
+        response = await self._post(init_req)
+        if not response:
+            # initialize 是带 id 的请求，必须有可匹配的 JSON-RPC 响应；202/204 空体
+            # 只适用于通知，不能当作握手成功（无协议/能力协商结果，fail-closed）。
+            raise RuntimeError("MCP HTTP initialize returned no JSON-RPC response")
+        self._peer.result_of_matched(response, init_req["id"])
         await self._post(self._peer.initialized_notification())
         self._peer._ready = True
 
     async def _roundtrip(self, method: str, params: dict[str, DynamicValue] | None = None) -> DynamicValue:
-        """握手 → 发请求 → 解析 → 取 result。"""
-        await self._handshake()
-        response = await self._post(self._peer.request(method, params))
-        return self._peer.result_of(response)
+        """握手 → 发请求 → 解析 → 取 result（按 id 校验响应匹配）。
+
+        整段持锁：与 stdio 同语义，握手与请求不交错。
+        """
+        async with self._rpc_lock:
+            await self._handshake()
+            req = self._peer.request(method, params)
+            response = await self._post(req)
+            return self._peer.result_of_matched(response, req["id"])
 
     async def list_tools(self, server: str) -> list[ToolSpec]:
         """发现工具：与 stdio 同构（同一帧助手，保证两种 transport 行为一致）。"""
@@ -386,8 +469,8 @@ class HttpMCPTransport:
             return False
 
     async def reconnect(self) -> None:
-        """显式重连：复位握手状态，下次调用重新 initialize（不做副作用重放）。"""
-        self._peer._ready = False
+        """显式重连：复位 id/握手状态，下次调用重新 initialize（不重放副作用）。"""
+        self._peer.reset_connection()
 
     async def aclose(self) -> None:
         """关闭自有的 httpx client（注入的 client 由调用方负责关闭）。"""

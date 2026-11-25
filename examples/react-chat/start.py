@@ -22,6 +22,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SERVER = ROOT / "examples" / "trace-viewer" / "server.py"
 
+# Windows 控制台默认 GBK：本脚本与子进程的中文输出被上游以 UTF-8 读取会抛
+# UnicodeDecodeError（如 0xb2）。进程内 + 子进程统一 UTF-8，杜绝编码错配。
+if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+
 
 def _read_user_env(name: str) -> str | None:
     """Windows：从注册表 User 区读取环境变量（只读，不写文件）。"""

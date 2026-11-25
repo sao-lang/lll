@@ -338,6 +338,17 @@ class Runner:
             return Result.failure(
                 _ErrCode.PORT_CRASHED.value, f"{type(exc).__name__}: {exc}"
             ), ()
+        if not isinstance(result, Result):
+            # Port 契约违规：畸形返回值在 _execute 边界折叠为失败信封，绝不裸抛穿 run()。
+            if is_tool:
+                self._notify(_Phase.TOOL_ERROR.value, {
+                    "session_id": session.session_id, "port": PortName.TOOL.value,
+                    "error": _ErrCode.PORT_CRASHED.value,
+                })
+            return Result.failure(
+                _ErrCode.PORT_CRASHED.value,
+                f"port returned {type(result).__name__}, expected Result",
+            ), ()
         if is_tool:
             if result.ok:
                 self._notify(_Phase.AFTER_TOOL.value, {
@@ -488,38 +499,48 @@ class Runner:
                     effects = (Terminate(reason=reason),)
                     results = (Result.success(None),)
                     status = _StepStatus.DONE.value
-                elif effects and all(isinstance(e, Terminate) for e in effects):
-                    # Program 主动 Terminate：整批都是才走快路径，不调用 Port。
-                    results = tuple(Result.success(None) for _ in effects)
-                    first_term = effects[0]
-                    assert isinstance(first_term, Terminate)
-                    status, reason = (
-                        _StepStatus.DONE.value,
-                        str(first_term.reason or _REASON_TERMINATED),
-                    )
-                elif effects and all(isinstance(e, Suspend) for e in effects):
-                    # 人工在环：整批都是 Suspend 才挂起（混合批含可执行 Effect 不能被吞）。
-                    results = tuple(Result.success(None) for _ in effects)
-                    status, reason = _StepStatus.SUSPENDED.value, _REASON_WAIT_HUMAN
-                    first_suspend = effects[0]
-                    assert isinstance(first_suspend, Suspend)
-                    self._notify(_Phase.WAIT_HUMAN.value, {
-                        "session_id": session.session_id,
-                        "question": first_suspend.question,
-                    })
                 else:
-                    # 常规批：为每个 Invoke 构造上下文并绑定 invoke，并发执行。
-                    ctxs = [
-                        self._bind(self._ctx_factory(e, session), self) for e in effects
-                    ]
-                    executed = await asyncio.gather(
-                        *(self._execute(e, c, session) for e, c in zip(effects, ctxs))
+                    # tagged union 分派：只有 Invoke/Spawn 走执行链；Suspend/Terminate 是
+                    # 内核控制信号，即便与可执行 Effect 同批也绝不送 Port。
+                    exec_indices = tuple(
+                        i for i, e in enumerate(effects)
+                        if not isinstance(e, (Suspend, Terminate))
                     )
-                    results = tuple(item[0] for item in executed)
-                    # 子会话事件挂到父会话日志（子 Agent 的轨迹对父可见）。
-                    child_events = tuple(ev for item in executed for ev in item[1])
-                    for ev in child_events:
-                        session.events.append(ev)
+                    result_list: list[Result] = [Result.success(None) for _ in effects]
+                    if exec_indices:
+                        ctxs = [
+                            self._bind(self._ctx_factory(effects[i], session), self)
+                            for i in exec_indices
+                        ]
+                        executed = await asyncio.gather(
+                            *(
+                                self._execute(effects[i], c, session)
+                                for i, c in zip(exec_indices, ctxs)
+                            )
+                        )
+                        for i, (result, child_events) in zip(exec_indices, executed):
+                            result_list[i] = result
+                            # 子会话事件挂到父会话日志（子 Agent 的轨迹对父可见）。
+                            for ev in child_events:
+                                session.events.append(ev)
+                    results = tuple(result_list)
+                    first_term = next((e for e in effects if isinstance(e, Terminate)), None)
+                    first_suspend = next((e for e in effects if isinstance(e, Suspend)), None)
+                    if first_term is not None:
+                        # Terminate 优先：批次含终止信号即结束并产出其 output。
+                        assert isinstance(first_term, Terminate)
+                        status, reason = (
+                            _StepStatus.DONE.value,
+                            str(first_term.reason or _REASON_TERMINATED),
+                        )
+                    elif first_suspend is not None:
+                        # 人工在环：批次含挂起信号即挂起，等待 resume 回填答案。
+                        assert isinstance(first_suspend, Suspend)
+                        status, reason = _StepStatus.SUSPENDED.value, _REASON_WAIT_HUMAN
+                        self._notify(_Phase.WAIT_HUMAN.value, {
+                            "session_id": session.session_id,
+                            "question": first_suspend.question,
+                        })
                     # 回填给 Program 的值：batch 用 list，单个取 data（失败取 Result 本身）。
                     rt.last_value = (
                         [r.data if r.ok else r for r in results]

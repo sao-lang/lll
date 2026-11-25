@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import time
+from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Collection, MutableMapping
 from enum import Enum
 
@@ -237,11 +238,19 @@ class Bulkhead:
         self._used[pool] = max(0, self._used.get(pool, 0) - 1)
 
     async def run_in_slot(self, inv: Invocation, next: NextFn) -> Result:
-        """舱位隔离执行（领域语义）：占槽 → 调下一跳 → finally 释放。"""
-        if not self.acquire(self._pool):
+        """舱位隔离执行（领域语义）：占槽 → 调下一跳 → finally 释放。
+
+        只有真正 acquire 成功的调用才释放槽位。满池 DEGRADE 路径虽继续执行
+        next，但它没占用槽，finally 不得释放——否则会释放持槽者的槽击穿隔离。
+        """
+        acquired = self.acquire(self._pool)
+        if not acquired:
             if self._on_full is _ExceedPolicy.REJECT:
                 return Result.failure("BULKHEAD_FULL", "bulkhead_full")
             inv.write_fault(FaultRecord(reason="bulkhead_full", failed_target=failed_target_of(inv)))
+        if not acquired:
+            # DEGRADE：降级执行但不占槽，不进入释放分支。
+            return await next(inv)
         try:
             return await next(inv)
         finally:
@@ -287,13 +296,21 @@ class Watchdog:
         repeat_k: int = 3,
         detect_abab: bool = True,
         kinds: Collection[str] | None = None,
+        max_sessions: int = 1024,
     ) -> None:
-        """装配循环检测：window 观察窗，repeat_k 重复阈值，detect_abab 是否查交替。"""
+        """装配循环检测：window 观察窗，repeat_k 重复阈值，detect_abab 是否查交替。
+
+        max_sessions: 会话历史桶上限（LRU 淘汰最久未活动桶），防多租户长生命周期
+        策略实例无界泄漏；0 表示不限制（兼容需要无限历史的场景）。
+        """
         self._window = window
         self._repeat_k = repeat_k
         self._detect_abab = detect_abab
         self._kinds = frozenset(kinds) if kinds else None
-        self._history: list[str] = []
+        self._max_sessions = max_sessions
+        # 历史按会话分桶：跨会话交替调用不得形成假循环（B1 会话隔离）。
+        # OrderedDict 供 LRU 淘汰：活跃会话访问即移到末尾，淘汰最久未用桶。
+        self._history: OrderedDict[str, list[str]] = OrderedDict()
 
     def _kind_of(self, inv: Invocation) -> str | None:
         """由 Invoke.port 派生观测标识；不在 kinds 白名单内跳过。"""
@@ -305,19 +322,30 @@ class Watchdog:
             return None
         return kind
 
-    def inspect(self, kind: str) -> bool:
+    def inspect(self, kind: str, session_id: str = "") -> bool:
         """记录一个观测点并检测循环（看门狗领域语义）。
 
         返回 True 表示命中重复或 A-B 交替模式（执行器据此终止拒绝），False 正常。
+        session_id 区分会话历史：缺省空串供单会话直接调用（兼容既有领域 API）。
         """
-        self._history.append(kind)
-        self._history = self._history[-self._window:]
-        if self._repeat_k > 0 and len(self._history) >= self._repeat_k:
-            tail = self._history[-self._repeat_k:]
+        history = self._history.get(session_id)
+        if history is None:
+            history = []
+            self._history[session_id] = history
+        else:
+            self._history.move_to_end(session_id)  # LRU：活跃会话移到末尾
+        history.append(kind)
+        del history[:-self._window]
+        # 桶上限淘汰：最久未活动的会话先走，活跃桶刚 move_to_end 不受影响。
+        if self._max_sessions > 0:
+            while len(self._history) > self._max_sessions:
+                self._history.popitem(last=False)
+        if self._repeat_k > 0 and len(history) >= self._repeat_k:
+            tail = history[-self._repeat_k:]
             if len(set(tail)) == 1:
                 return True
-        if self._detect_abab and len(self._history) >= 4:
-            tail = self._history[-4:]
+        if self._detect_abab and len(history) >= 4:
+            tail = history[-4:]
             if tail[0] == tail[2] and tail[1] == tail[3] and tail[0] != tail[1]:
                 return True
         return False
@@ -330,7 +358,9 @@ class Watchdog:
         kind = self._kind_of(inv)
         if kind is None:
             return False
-        return self.inspect(kind)
+        session = getattr(inv, "session", None)
+        sid = str(getattr(session, "session_id", "") or "")
+        return self.inspect(kind, session_id=sid)
 
 
 class KillSwitch:

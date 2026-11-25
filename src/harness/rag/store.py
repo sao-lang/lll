@@ -43,6 +43,14 @@ class VectorStore(Protocol):
         """写入块（含其向量）。"""
         ...
 
+    async def delete(self, chunk_ids: list[str]) -> None:  # purity-exempt: 协议签名参数由实现消费，声明体无实现
+        """按 chunk_id 删除块（幂等：不存在的 id 忽略）。
+
+        共享存储场景下"遗忘"必须同步清除已写入的块，否则其他消费端（如
+        RAGPipeline）仍能召回已删除的语义块。
+        """
+        ...
+
     async def search(
         self, vec: Vector, top_k: int, filters: dict[str, object] | None = None
     ) -> list[Hit]:
@@ -60,13 +68,26 @@ class InMemoryVectorStore:
         self._chunks: list[Chunk] = []
 
     async def upsert(self, chunks: list[Chunk]) -> None:
-        """追加块引用到库中（当前为追加语义，按 chunk_id 覆盖的增量去重未实现）。
+        """按 chunk_id 覆盖去重（upsert）：稳定 id 只保留一份，重复入库不追加。
 
+        同批次内同 id 由最后一块胜出；已存在 id 原地替换（保持顺序稳定）。
         Note:
             存的是对象引用而非深拷贝——调用方入库后不应再修改这些 Chunk；
             需要隔离时可自行传入 model_copy 后的块。
         """
-        self._chunks.extend(chunks)
+        index = {chunk.chunk_id: i for i, chunk in enumerate(self._chunks)}
+        for chunk in chunks:
+            pos = index.get(chunk.chunk_id)
+            if pos is None:
+                index[chunk.chunk_id] = len(self._chunks)
+                self._chunks.append(chunk)
+            else:
+                self._chunks[pos] = chunk
+
+    async def delete(self, chunk_ids: list[str]) -> None:
+        """按 chunk_id 删除块（幂等；保留剩余块的插入顺序）。"""
+        doomed = set(chunk_ids)
+        self._chunks = [c for c in self._chunks if c.chunk_id not in doomed]
 
     def all_chunks(self) -> list[Chunk]:
         """返回库内全部块（供混合召回的关键词通道做词面打分）。"""

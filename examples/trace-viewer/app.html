@@ -84,16 +84,26 @@ async function send(){
   const text=$('#input').value.trim(); if(!text) return;
   $('#input').value=''; $('#send').disabled=true;
   addMsg('user', text);
-  try{
-    const payload={message:text,session_id:sessionId};
-    if(offline !== null) payload.offline = offline;  // null=由服务端 env 判定，不强制离线
-    const resp=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify(payload)});
-    const r=await resp.json();
-    if(r.error){ addMsg('assistant','错误：'+r.error); }
-    else{ addMsg('assistant', r.answer||'(空回答)', `turns=${r.turns} tokens=${r.tokens} audit=${r.audit_count}`); renderTrace(r); }
-  }catch(e){ addMsg('assistant','网络错误：'+e); }
-  $('#send').disabled=false; $('#input').focus();
+  // 流式：逐字追加到助手气泡（框架 Agent.say_stream → SSE delta）
+  const el=document.createElement('div'); el.className='msg assistant'; el.textContent='';
+  $('#messages').appendChild(el);
+  let answer='';
+  const stream=new EventSource('/api/chat_stream?message='+encodeURIComponent(text)+'&session_id='+encodeURIComponent(sessionId));
+  stream.addEventListener('delta', e=>{
+    try{
+      const d=JSON.parse(e.data);
+      if(d.error){ el.textContent='错误：'+d.error; }
+      else if(d.text){ answer+=d.text; el.textContent=answer; $('#messages').scrollTop=1e9; }
+      if(d.done){
+        stream.close(); $('#send').disabled=false; $('#input').focus();
+        refreshTrace();  // 链路面板从服务端取最新 trace（零额外 LLM 调用）
+      }
+    }catch(_){}
+  });
+  stream.onerror=()=>{ stream.close(); if(!answer) el.textContent='(流式连接中断)'; $('#send').disabled=false; $('#input').focus(); };
+}
+async function refreshTrace(){
+  try{ const r=await (await fetch('/api/trace')).json(); if(r.trace) renderTrace(r.trace); }catch(_){}
 }
 $('#form').addEventListener('submit',e=>{e.preventDefault();send();});
 const es=new EventSource('/api/events');

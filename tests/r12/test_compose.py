@@ -1,7 +1,8 @@
-"""A 类 10 组合算子的语义单测（规格 §2.3 / D-4）。
+"""A 类组合算子的语义单测（规格 §2.3 / D-4）。
 
-覆盖：10 算子装配期 Program→Program 纯变换、compile 幂等、状态进 scratch x-*、
-gate 可 yield Suspend、嵌套组合。算子不改原 Program、不持有流程进度。
+覆盖：保留算子装配期 Program→Program 纯变换、compile 幂等、状态进 scratch x-*、
+嵌套组合。原 10 算子里 branch/loop/map_state/gate 依赖不存在的 port="state"，
+已在真实 Runner 下静默误路由，故删除；回注值驱动的 branch_value/loop_until 为替代。
 """
 from __future__ import annotations
 
@@ -16,8 +17,6 @@ from runtime import (
     Result,
     Runner,
     Session,
-    Spawn,
-    Suspend,
     Terminate,
     Usage,
 )
@@ -29,12 +28,10 @@ from tests.r12.conftest import drive, leaf
 
 from compose.program import (
     _carry_x,
-    branch,
+    branch_value,
     fallback,
-    gate,
-    loop,
+    loop_until,
     map_effect,
-    map_state,
     par,
     race,
     retry,
@@ -42,9 +39,9 @@ from compose.program import (
 )
 
 
-def test_ten_operators_are_callable() -> None:
-    """10 个 A 类算子全部可导入且可调用（D-4 硬清单）。"""
-    for op in (seq, par, branch, race, loop, map_state, map_effect, fallback, gate, retry):
+def test_public_operators_are_callable() -> None:
+    """公开 A 类算子全部可导入且可调用；读不存在 state port 的 4 个算子已删除。"""
+    for op in (seq, par, race, map_effect, fallback, retry, loop_until, branch_value):
         assert callable(op)
 
 
@@ -85,24 +82,6 @@ def test_par_all_join_returns_all_outputs_in_order() -> None:
     assert state.output == ["X", "Y"]
 
 
-def test_branch_selects_arm_by_state() -> None:
-    """branch：fn(state) 返回 key 选 arm。"""
-    program = branch(lambda s: "yes" if s.get("pick") else "no",
-                     {"yes": leaf("yes"), "no": leaf("no")})
-    effects, _ = drive(program, initial=AgentState().set("pick", True))
-    names = [e.payload.get("name") for e in effects if isinstance(e, Invoke)]
-    assert names == ["yes"]
-
-
-def test_branch_default_fallback() -> None:
-    """branch：key 不在 arms 时走 default。"""
-    program = branch(lambda s: "missing", {"yes": leaf("yes"), "no": leaf("no")},
-                     default="no")
-    effects, _ = drive(program)
-    names = [e.payload.get("name") for e in effects if isinstance(e, Invoke)]
-    assert names == ["no"]
-
-
 def test_race_drives_each_child_and_returns_first_output() -> None:
     """race：真并行——每个子 Program 的 Effect 汇入同批，首个产出者胜出。"""
     program = race([leaf("r1", output="first"), leaf("r2", output="second")])
@@ -110,26 +89,6 @@ def test_race_drives_each_child_and_returns_first_output() -> None:
     names = [e.payload.get("name") for e in effects if isinstance(e, Invoke)]
     assert names == ["r1", "r2"]
     assert state.output == "first"
-
-
-def test_loop_respects_max_rounds_via_state_not_self_count() -> None:
-    """loop：cond 决定循环；轮次上限交 Budgets，不在 generator 自数。"""
-    # cond 恒真但 max_rounds=2 作防御护栏 → body 至多跑 2 次（真实约束由 R1 Budgets）
-    program = loop(leaf("body"), cond=lambda s: True, max_rounds=2)
-    effects, _ = drive(program)
-    names = [e.payload.get("name") for e in effects if isinstance(e, Invoke)]
-    assert names == ["body", "body"]
-
-
-def test_map_state_transforms_view() -> None:
-    """map_state：对 State 视图做纯变换，不改原对象。"""
-    seen: list[AgentState] = []
-    def lens(s: AgentState) -> AgentState:
-        seen.append(s)
-        return s.set("view", s.get("pick"))
-    program = map_state(lens)(leaf("m"))
-    drive(program, initial=AgentState().set("pick", 7))
-    assert seen and seen[0].get("pick") == 7
 
 
 def test_map_effect_rewrites_payload() -> None:
@@ -152,23 +111,6 @@ def test_fallback_tries_next_arm_on_failure() -> None:
     effects, _ = drive(program)
     names = [e.payload.get("name") for e in effects if isinstance(e, Invoke)]
     assert names and names[0] == "primary"
-
-
-def test_gate_can_yield_suspend() -> None:
-    """gate：挂起类横切只能在 A 类实现——可 yield Suspend（call 装饰器做不到，D-6）。"""
-    # policy 非 None 表示需要审批；last_wait_human 为空时 yield Suspend
-    program = gate(leaf("g"), policy=lambda s: "need_approval")
-    effects, _ = drive(program)
-    assert any(isinstance(e, Suspend) for e in effects)
-    assert any(isinstance(e, Invoke) and e.payload.get("name") == "g" for e in effects)
-
-
-def test_gate_resume_skips_suspend_when_answered() -> None:
-    """gate resume：last_wait_human 已有答复时不再挂起，续跑 p。"""
-    program = gate(leaf("g"), policy=lambda s: "need_approval")
-    effects, _ = drive(program, initial=AgentState().set("last_wait_human", "yes"))
-    assert not any(isinstance(e, Suspend) for e in effects)
-    assert any(isinstance(e, Invoke) and e.payload.get("name") == "g" for e in effects)
 
 
 def test_retry_is_process_level_replay() -> None:
@@ -212,9 +154,14 @@ def test_par_end_to_end_with_real_runner() -> None:
 
 
 def test_nested_compose() -> None:
-    """嵌套：seq 包 branch 包 par，返回的仍是新 Program。"""
+    """嵌套：seq 包 branch_value 包 par，返回的仍是新 Program。"""
     inner = par([leaf("p1"), leaf("p2")])
-    branch_p = branch(lambda s: "a", {"a": inner})
+
+    def source():
+        yield Invoke(port="llm", payload={"name": "router"})
+        yield Terminate(output="a")
+
+    branch_p = branch_value(source, lambda value: str(value), {"a": inner})
     program = seq(leaf("head"), branch_p)
     effects, _ = drive(program)
     names = [e.payload.get("name") for e in effects if isinstance(e, Invoke)]

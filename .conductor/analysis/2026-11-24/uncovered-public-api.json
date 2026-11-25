@@ -1,0 +1,1572 @@
+[
+  {
+    "module": "api.agent",
+    "count": 9,
+    "symbols": [
+      {
+        "name": "Agent.stream",
+        "signature": "(?)"
+      },
+      {
+        "name": "Agent.history",
+        "signature": "(?)"
+      },
+      {
+        "name": "Agent.clear_history",
+        "signature": "(self) -> 'None'"
+      },
+      {
+        "name": "Agent.register_port",
+        "signature": "(self, port: 'str', handler: 'Callable[[Effect, DynamicValue], Awaitable[Result]]') -> \"'Agent'\""
+      },
+      {
+        "name": "Agent.inject_strategy",
+        "signature": "(self, strategy: 'Provider') -> \"'Agent'\""
+      },
+      {
+        "name": "Agent.aresume",
+        "signature": "(self, answer: 'str') -> 'str'"
+      },
+      {
+        "name": "Agent.resume",
+        "signature": "(self, answer: 'str') -> 'str'"
+      },
+      {
+        "name": "Agent.say",
+        "signature": "(self, text: 'str') -> 'str'"
+      },
+      {
+        "name": "Agent.run",
+        "signature": "(self, text: 'str') -> 'str'"
+      }
+    ]
+  },
+  {
+    "module": "api.builder",
+    "count": 17,
+    "symbols": [
+      {
+        "name": "AgentBuilder.__init__",
+        "signature": "(self, arch: 'object') -> 'None'"
+      },
+      {
+        "name": "AgentBuilder.profile",
+        "signature": "(self, name: 'str') -> \"'AgentBuilder'\""
+      },
+      {
+        "name": "AgentBuilder.capability",
+        "signature": "(self, cap: 'Capability') -> \"'AgentBuilder'\""
+      },
+      {
+        "name": "AgentBuilder.applied_profiles",
+        "signature": "(self) -> 'tuple[str, ...]'"
+      },
+      {
+        "name": "AgentBuilder.capability_names",
+        "signature": "(self) -> 'tuple[str, ...]'"
+      },
+      {
+        "name": "AgentBuilder.registry",
+        "signature": "(self) -> 'Registry'"
+      },
+      {
+        "name": "AgentBuilder.approve",
+        "signature": "(self, port: 'ApprovingHumanPort') -> \"'AgentBuilder'\""
+      },
+      {
+        "name": "AgentBuilder.audit",
+        "signature": "(self, port: 'VerifyingAuditPort') -> \"'AgentBuilder'\""
+      },
+      {
+        "name": "AgentBuilder.secrets",
+        "signature": "(self, refs: 'Sequence[str]') -> \"'AgentBuilder'\""
+      },
+      {
+        "name": "AgentBuilder.project_events",
+        "signature": "(self, stream: 'InMemoryEventStream') -> \"'AgentBuilder'\""
+      },
+      {
+        "name": "AgentBuilder.checkpoint",
+        "signature": "(self, mgr: 'CheckpointManager | None' = None) -> \"'AgentBuilder'\""
+      },
+      {
+        "name": "AgentBuilder.redact",
+        "signature": "(self, value: 'object', ctx: 'PortCtx') -> 'SafetyVerdict'"
+      },
+      {
+        "name": "AgentBuilder.stream_bus",
+        "signature": "(self) -> 'LifecycleBus | None'"
+      },
+      {
+        "name": "AgentBuilder.checkpoint_store",
+        "signature": "(self) -> 'CheckpointEventStore | None'"
+      },
+      {
+        "name": "AgentBuilder.govern",
+        "signature": "(self, gov: 'Governance') -> \"'AgentBuilder'\""
+      },
+      {
+        "name": "AgentBuilder.runtime",
+        "signature": "(self, call: 'object', *, checkpoint_every: 'int' = 1) -> 'AgentRuntime'"
+      },
+      {
+        "name": "AgentBuilder.build",
+        "signature": "(self) -> 'Session'"
+      }
+    ]
+  },
+  {
+    "module": "api.ports",
+    "count": 1,
+    "symbols": [
+      {
+        "name": "PortRegistry.has",
+        "signature": "(self, name: 'str') -> 'bool'"
+      }
+    ]
+  },
+  {
+    "module": "api.profiles",
+    "count": 1,
+    "symbols": [
+      {
+        "name": "profile_names",
+        "signature": "() -> 'tuple[str, ...]'"
+      }
+    ]
+  },
+  {
+    "module": "api.runtime",
+    "count": 3,
+    "symbols": [
+      {
+        "name": "AgentRuntime.resume",
+        "signature": "(self, session: 'Session', answer: 'DynamicValue') -> 'object'"
+      },
+      {
+        "name": "AgentRuntime.model_gateway",
+        "signature": "(self, llm: 'object') -> 'ModelGateway'"
+      },
+      {
+        "name": "capability_tools",
+        "signature": "(approval: 'ApprovingHumanPort', audit: 'VerifyingAuditPort', *, sandbox: 'SandboxPort | None' = None) -> 'ToolsCapability'"
+      }
+    ]
+  },
+  {
+    "module": "api.stream",
+    "count": 1,
+    "symbols": [
+      {
+        "name": "StreamGateway.project",
+        "signature": "(self, projection: 'Projection', topic: 'str', since: 'int | None' = None) -> 'ReadModel'"
+      }
+    ]
+  },
+  {
+    "module": "api.wiring",
+    "count": 3,
+    "symbols": [
+      {
+        "name": "ApprovingHumanPort.ask",
+        "signature": "(self, question: 'str', options: 'list[str] | None', ctx: 'PortCtx', *, danger: 'DangerLevel | None' = None) -> 'str'"
+      },
+      {
+        "name": "VerifyingAuditPort.bind_sink",
+        "signature": "(self, sink: 'AuditStore') -> 'None'"
+      },
+      {
+        "name": "redact_output",
+        "signature": "(value: 'object', ctx: 'PortCtx', *, secret_refs: 'Sequence[str]', source: 'str' = 'tool', direction: 'str' = 'output', guardrail: 'object | None' = None) -> 'SafetyVerdict'"
+      }
+    ]
+  },
+  {
+    "module": "archs.base",
+    "count": 1,
+    "symbols": [
+      {
+        "name": "StaticCheckReport.ok",
+        "signature": "(?)"
+      }
+    ]
+  },
+  {
+    "module": "archs.recipes",
+    "count": 33,
+    "symbols": [
+      {
+        "name": "_X.of",
+        "signature": "(arch: 'str', key: 'str') -> 'str'"
+      },
+      {
+        "name": "ToolUse.__init__",
+        "signature": "(self, tools: 'list[ToolSpec]', *, parallel: 'bool' = True) -> 'None'"
+      },
+      {
+        "name": "ToolUse.static_check",
+        "signature": "(self) -> 'StaticCheckReport'"
+      },
+      {
+        "name": "ToolUse.compile",
+        "signature": "(self) -> 'Program'"
+      },
+      {
+        "name": "ReAct.__init__",
+        "signature": "(self, tools: 'list[ToolSpec]', *, llm: 'str | None' = None, max_turns: 'int' = 30) -> 'None'"
+      },
+      {
+        "name": "ReAct.static_check",
+        "signature": "(self) -> 'StaticCheckReport'"
+      },
+      {
+        "name": "ReAct.compile",
+        "signature": "(self) -> 'Program'"
+      },
+      {
+        "name": "PlanExecute.__init__",
+        "signature": "(self, planner: 'Planner', executor: 'Executor', *, replanner: 'RePlanner | None' = None) -> 'None'"
+      },
+      {
+        "name": "PlanExecute.static_check",
+        "signature": "(self) -> 'StaticCheckReport'"
+      },
+      {
+        "name": "PlanExecute.compile",
+        "signature": "(self) -> 'Program'"
+      },
+      {
+        "name": "Reflection.__init__",
+        "signature": "(self, reflector: 'ReflectStrategy', *, max_rounds: 'int' = 3) -> 'None'"
+      },
+      {
+        "name": "Reflection.static_check",
+        "signature": "(self) -> 'StaticCheckReport'"
+      },
+      {
+        "name": "Reflection.compile",
+        "signature": "(self) -> 'Program'"
+      },
+      {
+        "name": "Router.__init__",
+        "signature": "(self, classifier: 'IntentStrategy | Callable[..., IntentResult] | None', arms: 'Mapping[str, Arch | SkillSpec]', *, default: 'str | None' = None, min_confidence: 'float' = 0.0) -> 'None'"
+      },
+      {
+        "name": "Router.static_check",
+        "signature": "(self) -> 'StaticCheckReport'"
+      },
+      {
+        "name": "Router.compile",
+        "signature": "(self) -> 'Program'"
+      },
+      {
+        "name": "RouterSkill.__init__",
+        "signature": "(self, classifier: 'IntentStrategy | Callable[..., IntentResult] | None', routes: 'Mapping[str, Arch | SkillSpec]', default: 'str') -> 'None'"
+      },
+      {
+        "name": "RouterSkill.compile",
+        "signature": "(self) -> 'Program'"
+      },
+      {
+        "name": "Supervisor.__init__",
+        "signature": "(self, planner: 'Planner', child_spec: 'ChildSpec', *, max_children: 'int' = 8, join: 'JoinStrategy | None' = None) -> 'None'"
+      },
+      {
+        "name": "Supervisor.static_check",
+        "signature": "(self) -> 'StaticCheckReport'"
+      },
+      {
+        "name": "Supervisor.compile",
+        "signature": "(self) -> 'Program'"
+      },
+      {
+        "name": "Handoff.__init__",
+        "signature": "(self, roles: 'Mapping[str, Arch]', *, max_hops: 'int' = 5) -> 'None'"
+      },
+      {
+        "name": "Handoff.static_check",
+        "signature": "(self) -> 'StaticCheckReport'"
+      },
+      {
+        "name": "Handoff.compile",
+        "signature": "(self) -> 'Program'"
+      },
+      {
+        "name": "Blackboard.__init__",
+        "signature": "(self, agents: 'Sequence[Arch]', *, rounds: 'int' = 3) -> 'None'"
+      },
+      {
+        "name": "Blackboard.static_check",
+        "signature": "(self) -> 'StaticCheckReport'"
+      },
+      {
+        "name": "Blackboard.compile",
+        "signature": "(self) -> 'Program'"
+      },
+      {
+        "name": "Graph.__init__",
+        "signature": "(self) -> 'None'"
+      },
+      {
+        "name": "Graph.node",
+        "signature": "(self, id: 'str', program: 'ProgramFn | Arch', *, inputs: 'tuple[str, ...]' = (), outputs: 'tuple[str, ...]' = ()) -> 'Graph'"
+      },
+      {
+        "name": "Graph.edge",
+        "signature": "(self, src: 'str', dst: 'str', *, cond: 'Callable[[AgentState], str | None] | None' = None) -> 'Graph'"
+      },
+      {
+        "name": "Graph.exit",
+        "signature": "(self, id: 'str') -> 'Graph'"
+      },
+      {
+        "name": "Graph.static_check",
+        "signature": "(self) -> 'StaticCheckReport'"
+      },
+      {
+        "name": "Graph.compile",
+        "signature": "(self) -> 'Program'"
+      }
+    ]
+  },
+  {
+    "module": "compose.agent",
+    "count": 5,
+    "symbols": [
+      {
+        "name": "Agent.__init__",
+        "signature": "(self, arch: '_ArchLike') -> 'None'"
+      },
+      {
+        "name": "Agent.capability",
+        "signature": "(self, cap: 'Capability') -> \"'Agent'\""
+      },
+      {
+        "name": "Agent.registry",
+        "signature": "(self) -> 'Registry'"
+      },
+      {
+        "name": "Agent.static_check",
+        "signature": "(self) -> 'object'"
+      },
+      {
+        "name": "Agent.build",
+        "signature": "(self, *, session_id: 'str' = 'agent') -> 'Session'"
+      }
+    ]
+  },
+  {
+    "module": "compose.call",
+    "count": 9,
+    "symbols": [
+      {
+        "name": "retry_call",
+        "signature": "(base: 'CallFn', *, attempts: 'int' = 3, backoff: 'float' = 0.0, retry_on: 'Callable[[Result], bool] | None' = None) -> 'CallFn'"
+      },
+      {
+        "name": "retry_call.call",
+        "signature": "(?)"
+      },
+      {
+        "name": "timeout",
+        "signature": "(base: 'CallFn', *, seconds: 'float') -> 'CallFn'"
+      },
+      {
+        "name": "timeout.call",
+        "signature": "(?)"
+      },
+      {
+        "name": "danger_route",
+        "signature": "(base: 'CallFn', registry: 'object') -> 'CallFn'"
+      },
+      {
+        "name": "danger_route.call",
+        "signature": "(?)"
+      },
+      {
+        "name": "injection_guard",
+        "signature": "(base: 'CallFn', detector: 'object') -> 'CallFn'"
+      },
+      {
+        "name": "injection_guard.call",
+        "signature": "(?)"
+      },
+      {
+        "name": "build_call",
+        "signature": "(base: 'CallFn', *, decorators: 'Sequence[Callable[[CallFn], CallFn]]' = ()) -> 'CallFn'"
+      }
+    ]
+  },
+  {
+    "module": "compose.context",
+    "count": 5,
+    "symbols": [
+      {
+        "name": "CallContext.session_id",
+        "signature": "(?)"
+      },
+      {
+        "name": "CallContext.write_fault",
+        "signature": "(self, fault: 'FaultRecord') -> 'None'"
+      },
+      {
+        "name": "CallContext.write_routing_target",
+        "signature": "(self, target: 'RoutingTarget') -> 'None'"
+      },
+      {
+        "name": "CallContext.routing_target",
+        "signature": "(self) -> 'RoutingTarget | None'"
+      },
+      {
+        "name": "CallContext.meta_view",
+        "signature": "(self) -> 'Mapping[str, object]'"
+      }
+    ]
+  },
+  {
+    "module": "compose.dispatch",
+    "count": 3,
+    "symbols": [
+      {
+        "name": "make_dispatch",
+        "signature": "(ports: 'PortMap') -> 'CallFn'"
+      },
+      {
+        "name": "make_dispatch.call",
+        "signature": "(?)"
+      },
+      {
+        "name": "dispatch",
+        "signature": "(ports: 'PortMap', effect: 'Effect', ctx: 'object') -> 'Result'"
+      }
+    ]
+  },
+  {
+    "module": "compose.guards",
+    "count": 4,
+    "symbols": [
+      {
+        "name": "CallState.write_fault",
+        "signature": "(self, fault: 'FaultRecord') -> 'None'"
+      },
+      {
+        "name": "CallState.fault",
+        "signature": "(self) -> 'FaultRecord | None'"
+      },
+      {
+        "name": "CallState.write_routing_target",
+        "signature": "(self, target: 'RoutingTarget') -> 'None'"
+      },
+      {
+        "name": "CallState.session_id",
+        "signature": "(self) -> 'str'"
+      }
+    ]
+  },
+  {
+    "module": "compose.notify",
+    "count": 2,
+    "symbols": [
+      {
+        "name": "Notice.from_invocation",
+        "signature": "(phase: 'LifecyclePhase', inv: 'Invocation', *, payload: 'Mapping[str, Any] | None' = None) -> 'Notice'"
+      },
+      {
+        "name": "LifecycleBus.subscribe",
+        "signature": "(self, plugin: 'object') -> 'LifecycleBus'"
+      }
+    ]
+  },
+  {
+    "module": "compose.program",
+    "count": 3,
+    "symbols": [
+      {
+        "name": "_as_program.constant",
+        "signature": "(?)"
+      },
+      {
+        "name": "branch_value",
+        "signature": "(source: 'ProgramFn', fn: 'Callable[[DynamicValue], str]', arms: 'dict[str, ProgramFn]', *, default: 'str' = '', no_route_reason: 'str' = 'no_route') -> 'ProgramFn'"
+      },
+      {
+        "name": "branch_value.program",
+        "signature": "(?)"
+      }
+    ]
+  },
+  {
+    "module": "compose.registry",
+    "count": 2,
+    "symbols": [
+      {
+        "name": "Registry.has",
+        "signature": "(self, name: 'str') -> 'bool'"
+      },
+      {
+        "name": "Registry.freeze",
+        "signature": "(self) -> 'Registry'"
+      }
+    ]
+  },
+  {
+    "module": "compose.tool_layer",
+    "count": 2,
+    "symbols": [
+      {
+        "name": "layer_program",
+        "signature": "(port: 'str', *, payload: 'Mapping[str, DynamicValue] | None' = None, output: 'DynamicValue' = None) -> 'Callable[[], Program]'"
+      },
+      {
+        "name": "layer_program.program",
+        "signature": "(?)"
+      }
+    ]
+  },
+  {
+    "module": "harness.cognition.cascade",
+    "count": 7,
+    "symbols": [
+      {
+        "name": "InMemoryIntentSampleStore.similarity",
+        "signature": "(text: 'str', sample_text: 'str') -> 'float'"
+      },
+      {
+        "name": "CascadeIntentStrategy.build",
+        "signature": "(self, text: 'str' = '') -> '_ProgramGen'"
+      },
+      {
+        "name": "intent_as_program",
+        "signature": "(strategy: 'object', text: 'str' = '') -> '_ProgramFn'"
+      },
+      {
+        "name": "intent_as_program.from_build",
+        "signature": "(?)"
+      },
+      {
+        "name": "intent_as_program.adapted",
+        "signature": "(?)"
+      },
+      {
+        "name": "intent_as_program.callable_adapter",
+        "signature": "(?)"
+      },
+      {
+        "name": "intent_as_program.fallback",
+        "signature": "(?)"
+      }
+    ]
+  },
+  {
+    "module": "harness.cognition.services",
+    "count": 4,
+    "symbols": [
+      {
+        "name": "RulePlanner.__init__",
+        "signature": "(self, separator: 'str' = ';') -> 'None'"
+      },
+      {
+        "name": "RulePlanner.plan",
+        "signature": "(self, goal: 'str', ctx: 'AgentState | None' = None) -> 'tuple[Step, ...]'"
+      },
+      {
+        "name": "RuleExecutor.execute",
+        "signature": "(self, step: 'Step', ctx: 'AgentState | None' = None) -> 'StepResult'"
+      },
+      {
+        "name": "RuleRePlanner.replan",
+        "signature": "(self, goal: 'str', steps: 'tuple[Step, ...]', failures: 'tuple[str, ...]', ctx: 'AgentState | None' = None) -> 'tuple[Step, ...]'"
+      }
+    ]
+  },
+  {
+    "module": "harness.context.assembler",
+    "count": 1,
+    "symbols": [
+      {
+        "name": "DefaultContextAssembler.assemble",
+        "signature": "(self, sections: 'list[ContextSection]', budget: 'TokenBudget') -> 'list[Message]'"
+      }
+    ]
+  },
+  {
+    "module": "harness.context.compaction",
+    "count": 3,
+    "symbols": [
+      {
+        "name": "count_tokens",
+        "signature": "(text: 'str') -> 'int'"
+      },
+      {
+        "name": "DefaultCompactionPolicy.should_compact",
+        "signature": "(self, state: 'AgentState') -> 'bool'"
+      },
+      {
+        "name": "DefaultCompactionPolicy.compact",
+        "signature": "(self, messages: 'tuple[Message, ...]') -> 'tuple[Message, ...]'"
+      }
+    ]
+  },
+  {
+    "module": "harness.context.manager",
+    "count": 7,
+    "symbols": [
+      {
+        "name": "ContextMemoryManager.record_cache_hit",
+        "signature": "(self, label: 'str' = 'default') -> 'None'"
+      },
+      {
+        "name": "ContextMemoryManager.record_cache_miss",
+        "signature": "(self, label: 'str' = 'default') -> 'None'"
+      },
+      {
+        "name": "ContextMemoryManager.build",
+        "signature": "(self) -> 'Program'"
+      },
+      {
+        "name": "ContextMemoryManager.assemble",
+        "signature": "(self, sections: 'list[ContextSection]', budget: 'TokenBudget') -> 'list[Message]'"
+      },
+      {
+        "name": "ContextMemoryManager.commit_and_compact",
+        "signature": "(self, state: 'AgentState', transcript: 'str', ctx: 'PortCtx | None' = None, budget: 'TokenBudget | None' = None, tasks: 'tuple[str, ...]' = ()) -> 'tuple[Message, ...]'"
+      },
+      {
+        "name": "ContextMemoryManager.offload",
+        "signature": "(self, value: 'object', ctx: 'PortCtx | None' = None) -> 'str'"
+      },
+      {
+        "name": "ContextMemoryManager.with_",
+        "signature": "(self, assembler: 'ContextAssembler | None' = None, compaction: 'CompactionPolicy | None' = None, offloader: 'Offloader | None' = None, memory: 'MemoryStore | None' = None, blob: 'BlobPort | None' = None, reinjector: 'Reinjector | None' = None, token_counter: 'TokenCounter | None' = None) -> 'ContextMemoryManager'"
+      }
+    ]
+  },
+  {
+    "module": "harness.context.observability",
+    "count": 5,
+    "symbols": [
+      {
+        "name": "CacheTelemetry.total",
+        "signature": "(?)"
+      },
+      {
+        "name": "CacheTelemetry.hit_rate",
+        "signature": "(?)"
+      },
+      {
+        "name": "CacheTelemetry.record_hit",
+        "signature": "(self) -> 'CacheTelemetry'"
+      },
+      {
+        "name": "CacheTelemetry.record_miss",
+        "signature": "(self) -> 'CacheTelemetry'"
+      },
+      {
+        "name": "CacheTelemetry.with_label",
+        "signature": "(self, label: 'str') -> 'CacheTelemetry'"
+      }
+    ]
+  },
+  {
+    "module": "harness.context.offloader",
+    "count": 6,
+    "symbols": [
+      {
+        "name": "make_handle",
+        "signature": "(blob_id: 'str') -> 'str'"
+      },
+      {
+        "name": "parse_handle",
+        "signature": "(handle: 'str') -> 'str | None'"
+      },
+      {
+        "name": "InMemoryBlobStore.put",
+        "signature": "(self, value: 'DynamicValue') -> 'str'"
+      },
+      {
+        "name": "InMemoryBlobStore.get",
+        "signature": "(self, handle: 'str') -> 'DynamicValue | None'"
+      },
+      {
+        "name": "InMemoryBlobStore.delete",
+        "signature": "(self, handle: 'str') -> 'None'"
+      },
+      {
+        "name": "DefaultOffloader.offload",
+        "signature": "(self, value: 'DynamicValue', store: 'BlobPort') -> 'str'"
+      }
+    ]
+  },
+  {
+    "module": "harness.context.reinjector",
+    "count": 1,
+    "symbols": [
+      {
+        "name": "DefaultReinjector.reinject",
+        "signature": "(self, view: 'tuple[Message, ...]', summary: 'Message | None', tasks: 'tuple[str, ...]', budget: 'TokenBudget') -> 'tuple[Message, ...]'"
+      }
+    ]
+  },
+  {
+    "module": "harness.context.token_counter",
+    "count": 2,
+    "symbols": [
+      {
+        "name": "estimate_tokens",
+        "signature": "(text: 'str') -> 'int'"
+      },
+      {
+        "name": "DefaultTokenCounter.count",
+        "signature": "(self, text: 'str') -> 'int'"
+      }
+    ]
+  },
+  {
+    "module": "harness.durability.checkpoint",
+    "count": 2,
+    "symbols": [
+      {
+        "name": "CheckpointManager.snapshot",
+        "signature": "(self, session_id: 'str', state: 'AgentState', events: 'tuple[object, ...]') -> 'CheckpointSnapshot'"
+      },
+      {
+        "name": "CheckpointManager.save",
+        "signature": "(self, snap: 'CheckpointSnapshot') -> 'None'"
+      }
+    ]
+  },
+  {
+    "module": "harness.eval.rules",
+    "count": 3,
+    "symbols": [
+      {
+        "name": "RuleEval.add_case",
+        "signature": "(self, case: 'EvalCase') -> 'None'"
+      },
+      {
+        "name": "RuleEval.regression",
+        "signature": "(self, suite: 'str', ctx: 'PortCtx') -> 'SuiteReport'"
+      },
+      {
+        "name": "GoldenJudge.score",
+        "signature": "(self, case: 'EvalCase', output: 'DynamicValue', ctx: 'PortCtx') -> 'Score'"
+      }
+    ]
+  },
+  {
+    "module": "harness.memory.memory",
+    "count": 7,
+    "symbols": [
+      {
+        "name": "MemoryStore.forget",
+        "signature": "(self, namespace: 'str', key: 'str', ctx: 'PortCtx') -> 'None'"
+      },
+      {
+        "name": "MemoryStore.write_cold",
+        "signature": "(self, transcript: 'str', ctx: 'PortCtx | None' = None) -> 'None'"
+      },
+      {
+        "name": "MemoryStore.tier_of",
+        "signature": "(self, item: 'MemoryItem') -> 'MemoryTier | None'"
+      },
+      {
+        "name": "MemoryStore.promote",
+        "signature": "(self, item: 'MemoryItem') -> 'None'"
+      },
+      {
+        "name": "MemoryStore.demote",
+        "signature": "(self, item: 'MemoryItem') -> 'None'"
+      },
+      {
+        "name": "MemoryStore.forget_expired",
+        "signature": "(self, ttl: 'int | None' = None, *, now: 'int | None' = None) -> 'list[MemoryItem]'"
+      },
+      {
+        "name": "MemoryStore.importance_of",
+        "signature": "(self, item: 'MemoryItem') -> 'float'"
+      }
+    ]
+  },
+  {
+    "module": "harness.model.cache",
+    "count": 9,
+    "symbols": [
+      {
+        "name": "InMemoryCacheStore.delete",
+        "signature": "(self, key: 'str') -> 'None'"
+      },
+      {
+        "name": "InMemoryCacheStore.scan",
+        "signature": "(self, prefix: 'str') -> 'list[tuple[str, str]]'"
+      },
+      {
+        "name": "HashCacheEmbedder.__init__",
+        "signature": "(self, dim: 'int' = 512) -> 'None'"
+      },
+      {
+        "name": "HashCacheEmbedder.embed",
+        "signature": "(self, text: 'str') -> 'tuple[float, ...]'"
+      },
+      {
+        "name": "ExactCache.invalidate",
+        "signature": "(self, request: 'LLMRequest', *, version: 'str' = 'current') -> 'None'"
+      },
+      {
+        "name": "SimilarityCache.__init__",
+        "signature": "(self, *, threshold: 'float' = 0.85, store: 'CacheStore | None' = None, embedder: 'CacheEmbedder | None | _Unset' = <UNSET>, ttl: 'int | None' = None) -> 'None'"
+      },
+      {
+        "name": "SimilarityCache.get",
+        "signature": "(self, request: 'LLMRequest', *, version: 'str' = 'current') -> 'LLMResponse | None'"
+      },
+      {
+        "name": "SimilarityCache.put",
+        "signature": "(self, request: 'LLMRequest', resp: 'LLMResponse', *, version: 'str' = 'current') -> 'None'"
+      },
+      {
+        "name": "SimilarityCache.invalidate",
+        "signature": "(self, request: 'LLMRequest', *, version: 'str' = 'current') -> 'None'"
+      }
+    ]
+  },
+  {
+    "module": "harness.model.capability",
+    "count": 5,
+    "symbols": [
+      {
+        "name": "ModelCapability.build",
+        "signature": "(self) -> 'Program'"
+      },
+      {
+        "name": "ModelCapability.llm",
+        "signature": "(?)"
+      },
+      {
+        "name": "ModelCapability.registry",
+        "signature": "(?)"
+      },
+      {
+        "name": "ModelCapability.dispatch",
+        "signature": "(self) -> 'CallFn'"
+      },
+      {
+        "name": "ModelCapability.add_backend",
+        "signature": "(self, name: 'str', llm: 'LLMPortWithUsage') -> 'None'"
+      }
+    ]
+  },
+  {
+    "module": "harness.model.gateway",
+    "count": 3,
+    "symbols": [
+      {
+        "name": "ModelGateway.registry",
+        "signature": "(?)"
+      },
+      {
+        "name": "ModelGateway.as_call",
+        "signature": "(self) -> 'Callable[[Invocation], Awaitable[Result]]'"
+      },
+      {
+        "name": "ModelGateway.stream",
+        "signature": "(self, request: 'LLMRequest', ctx: 'PortCtx', *, degrade_target: 'str | None' = None) -> 'AsyncIterator[str]'"
+      }
+    ]
+  },
+  {
+    "module": "harness.model.registry",
+    "count": 5,
+    "symbols": [
+      {
+        "name": "InMemoryModelRegistry.register",
+        "signature": "(self, name: 'str', provider: 'Provider | None' = None, *, base_url: 'str | None' = None, api_key: 'str | None' = None, model: 'str | None' = None) -> 'None'"
+      },
+      {
+        "name": "InMemoryModelRegistry.register_provider",
+        "signature": "(self, name: 'str', provider: 'Provider') -> 'None'"
+      },
+      {
+        "name": "InMemoryModelRegistry.resolve",
+        "signature": "(self, name: 'str') -> 'Provider | ModelEndpoint | None'"
+      },
+      {
+        "name": "InMemoryModelRegistry.resolve_provider",
+        "signature": "(self, name: 'str') -> 'Provider | None'"
+      },
+      {
+        "name": "InMemoryModelRegistry.has",
+        "signature": "(self, name: 'str') -> 'bool'"
+      }
+    ]
+  },
+  {
+    "module": "harness.model.structured",
+    "count": 11,
+    "symbols": [
+      {
+        "name": "_JsonType.coerce",
+        "signature": "(raw: 'object') -> '_JsonType | None'"
+      },
+      {
+        "name": "_OutputMode.coerce",
+        "signature": "(raw: 'str') -> '_OutputMode'"
+      },
+      {
+        "name": "MinimalSchemaValidator.validate",
+        "signature": "(self, value: 'object', schema: 'dict[str, DynamicValue]') -> 'list[str]'"
+      },
+      {
+        "name": "validate_json_schema",
+        "signature": "(value: 'object', schema: 'dict[str, DynamicValue]') -> 'list[str]'"
+      },
+      {
+        "name": "StructuredOutputValidator.__init__",
+        "signature": "(self, spec: 'StructuredOutputSpec', *, validator: 'SchemaValidator | None' = None) -> 'None'"
+      },
+      {
+        "name": "StructuredOutputValidator.schema_validator",
+        "signature": "(?)"
+      },
+      {
+        "name": "StructuredOutputValidator.should_repair",
+        "signature": "(?)"
+      },
+      {
+        "name": "StructuredOutputValidator.max_repair",
+        "signature": "(?)"
+      },
+      {
+        "name": "StructuredOutputValidator.validate",
+        "signature": "(self, text: 'str') -> 'tuple[dict[str, DynamicValue] | list[DynamicValue] | str | int | None, bool]'"
+      },
+      {
+        "name": "StructuredOutputValidator.check",
+        "signature": "(self, text: 'str') -> 'list[str]'"
+      },
+      {
+        "name": "StructuredOutputValidator.build_repair_prompt",
+        "signature": "(self, bad_output: 'str', errors: 'list[str]') -> 'str'"
+      }
+    ]
+  },
+  {
+    "module": "harness.model.types",
+    "count": 14,
+    "symbols": [
+      {
+        "name": "RefuseExecution.to_result",
+        "signature": "(self) -> 'Result'"
+      },
+      {
+        "name": "TargetUnresolved.to_result",
+        "signature": "(self) -> 'Result'"
+      },
+      {
+        "name": "UsageLedger.total",
+        "signature": "(self) -> 'float'"
+      },
+      {
+        "name": "UsageLedger.by",
+        "signature": "(self, dim: 'str', value: 'str') -> 'float'"
+      },
+      {
+        "name": "CostAttributor.run_cost",
+        "signature": "(self, run_id: 'str') -> 'float'"
+      },
+      {
+        "name": "CostAttributor.user_cost",
+        "signature": "(self, user_id: 'str') -> 'float'"
+      },
+      {
+        "name": "CostAttributor.model_cost",
+        "signature": "(self, model: 'str') -> 'float'"
+      },
+      {
+        "name": "CostAttributor.snapshot",
+        "signature": "(self) -> 'dict[str, float | int]'"
+      },
+      {
+        "name": "CostGuard.allow",
+        "signature": "(self, estimated_cost: 'float') -> 'bool'"
+      },
+      {
+        "name": "CostGuard.charge",
+        "signature": "(self, cost: 'float') -> 'None'"
+      },
+      {
+        "name": "CostGuard.reserve",
+        "signature": "(self, estimated_cost: 'float') -> 'Reservation | None'"
+      },
+      {
+        "name": "CostGuard.commit",
+        "signature": "(self, reservation: 'Reservation', actual: 'float') -> 'None'"
+      },
+      {
+        "name": "CostGuard.cancel",
+        "signature": "(self, reservation: 'Reservation') -> 'None'"
+      },
+      {
+        "name": "CostGuard.remaining",
+        "signature": "(self) -> 'float'"
+      }
+    ]
+  },
+  {
+    "module": "harness.observability.stream",
+    "count": 3,
+    "symbols": [
+      {
+        "name": "InMemoryEventStream.dropped_count",
+        "signature": "(self) -> 'int'"
+      },
+      {
+        "name": "Projection.project",
+        "signature": "(self, events: 'Iterable[EventEnvelope]') -> 'ReadModel'"
+      },
+      {
+        "name": "TimelineProjection.project",
+        "signature": "(self, events: 'Iterable[EventEnvelope]') -> 'ReadModel'"
+      }
+    ]
+  },
+  {
+    "module": "harness.observability.telemetry",
+    "count": 2,
+    "symbols": [
+      {
+        "name": "Trace.record_metric",
+        "signature": "(self, name: 'str', value: 'float', tags: 'dict[str, DynamicValue] | None' = None) -> 'None'"
+      },
+      {
+        "name": "Trace.record_log",
+        "signature": "(self, event: 'dict[str, DynamicValue]') -> 'None'"
+      }
+    ]
+  },
+  {
+    "module": "harness.prompt",
+    "count": 1,
+    "symbols": [
+      {
+        "name": "PromptCapability.register",
+        "signature": "(self, template: 'PromptTemplate') -> 'None'"
+      }
+    ]
+  },
+  {
+    "module": "harness.rag.pipeline",
+    "count": 6,
+    "symbols": [
+      {
+        "name": "InMemoryCache.__init__",
+        "signature": "(self) -> 'None'"
+      },
+      {
+        "name": "InMemoryCache.get",
+        "signature": "(self, key: 'str') -> 'RAGResult | None'"
+      },
+      {
+        "name": "InMemoryCache.set",
+        "signature": "(self, key: 'str', value: 'RAGResult') -> 'None'"
+      },
+      {
+        "name": "InMemoryCache.invalidate",
+        "signature": "(self, key: 'str | None' = None) -> 'None'"
+      },
+      {
+        "name": "RAGPipeline.build",
+        "signature": "(self) -> 'Program'"
+      },
+      {
+        "name": "RAGPipeline.with_",
+        "signature": "(self, **replacements: 'object') -> 'RAGPipeline'"
+      }
+    ]
+  },
+  {
+    "module": "harness.rag.rerank",
+    "count": 2,
+    "symbols": [
+      {
+        "name": "LexicalReranker.__init__",
+        "signature": "(self, top_n: 'int' = 5) -> 'None'"
+      },
+      {
+        "name": "LexicalReranker.rerank",
+        "signature": "(self, hits: 'list[Hit]', query: 'Query') -> 'list[Hit]'"
+      }
+    ]
+  },
+  {
+    "module": "harness.rag.retriever",
+    "count": 2,
+    "symbols": [
+      {
+        "name": "HybridRetriever.__init__",
+        "signature": "(self, store: 'VectorStore', *, all_chunks: 'list[Chunk] | None' = None) -> 'None'"
+      },
+      {
+        "name": "HybridRetriever.retrieve",
+        "signature": "(self, query: 'Query', vec: 'Vector') -> 'list[Hit]'"
+      }
+    ]
+  },
+  {
+    "module": "harness.rag.rewrite",
+    "count": 2,
+    "symbols": [
+      {
+        "name": "MultiQueryRewriter.__init__",
+        "signature": "(self, n_variants: 'int' = 3, synonyms: 'dict[str, tuple[str, ...]] | None' = None) -> 'None'"
+      },
+      {
+        "name": "MultiQueryRewriter.rewrite",
+        "signature": "(self, query: 'Query') -> 'list[Query]'"
+      }
+    ]
+  },
+  {
+    "module": "harness.rag.store",
+    "count": 1,
+    "symbols": [
+      {
+        "name": "InMemoryVectorStore.all_chunks",
+        "signature": "(self) -> 'list[Chunk]'"
+      }
+    ]
+  },
+  {
+    "module": "harness.resilience.breaker",
+    "count": 10,
+    "symbols": [
+      {
+        "name": "InMemoryBreakerStore.__init__",
+        "signature": "(self) -> 'None'"
+      },
+      {
+        "name": "InMemoryBreakerStore.load",
+        "signature": "(self, dim: 'Dimension') -> 'BreakerState | None'"
+      },
+      {
+        "name": "InMemoryBreakerStore.save",
+        "signature": "(self, dim: 'Dimension', state: 'BreakerState') -> 'None'"
+      },
+      {
+        "name": "CircuitBreaker.__init__",
+        "signature": "(self, *, failure_rate: 'float' = 0.5, minimum_samples: 'int' = 5, window_size: 'int' = 20, open_cooldown_s: 'float' = 30.0, half_open_max_probes: 'int' = 3, half_open_success_to_close: 'int' = 2, per_dimension: 'bool' = True, clock: 'Callable[[], float] | None' = None, store: 'BreakerStore | None' = None, dimension_of: 'Callable[[Invocation], Dimension | None] | None' = None, failed_target_of: 'Callable[[Invocation], str] | None' = None) -> 'None'"
+      },
+      {
+        "name": "CircuitBreaker.state",
+        "signature": "(self, key: 'object') -> 'BreakerState'"
+      },
+      {
+        "name": "CircuitBreaker.check",
+        "signature": "(self, dimension: 'Dimension | None') -> 'str | None'"
+      },
+      {
+        "name": "CircuitBreaker.maybe_half_open",
+        "signature": "(self, key: 'object') -> 'None'"
+      },
+      {
+        "name": "CircuitBreaker.record",
+        "signature": "(self, result: 'Result', dimension: 'Dimension | None' = None, *, count: 'bool' = True) -> 'None'"
+      },
+      {
+        "name": "CircuitBreaker.permit",
+        "signature": "(self, inv: 'Invocation') -> 'str | None'"
+      },
+      {
+        "name": "CircuitBreaker.observe_outcome",
+        "signature": "(self, inv: 'Invocation', result: 'Result') -> 'None'"
+      }
+    ]
+  },
+  {
+    "module": "harness.resilience.defenses",
+    "count": 19,
+    "symbols": [
+      {
+        "name": "failed_target_of",
+        "signature": "(inv: 'Invocation') -> 'str'"
+      },
+      {
+        "name": "_ExceedPolicy.coerce",
+        "signature": "(raw: '_ExceedPolicy | str') -> '_ExceedPolicy'"
+      },
+      {
+        "name": "_KillScope.coerce",
+        "signature": "(raw: '_KillScope | str') -> '_KillScope'"
+      },
+      {
+        "name": "Degradation.__init__",
+        "signature": "(self, ladder: 'DegradeLadder', *, available: 'set[str] | None' = None, session_state: 'dict[str, dict[str, object]] | None' = None) -> 'None'"
+      },
+      {
+        "name": "Degradation.pick",
+        "signature": "(self, available: 'set[str] | None' = None) -> 'DegradeStep'"
+      },
+      {
+        "name": "Degradation.select",
+        "signature": "(self, fault: 'FaultRecord', *, session_id: 'str') -> 'str'"
+      },
+      {
+        "name": "RateLimit.__init__",
+        "signature": "(self, *, rate: 'float' = 60.0, burst: 'int' = 10, on_exceed: '_ExceedPolicy | str' = <_ExceedPolicy.WAIT: 'wait'>, clock: 'Callable[[], float] | None' = None) -> 'None'"
+      },
+      {
+        "name": "RateLimit.acquire",
+        "signature": "(self) -> 'RatePermit'"
+      },
+      {
+        "name": "Bulkhead.__init__",
+        "signature": "(self, *, pools: 'dict[str, int] | None' = None, on_full: '_ExceedPolicy | str' = <_ExceedPolicy.REJECT: 'reject'>, pool: 'str' = 'default') -> 'None'"
+      },
+      {
+        "name": "Bulkhead.acquire",
+        "signature": "(self, pool: 'str') -> 'bool'"
+      },
+      {
+        "name": "Bulkhead.release",
+        "signature": "(self, pool: 'str') -> 'None'"
+      },
+      {
+        "name": "Bulkhead.run_in_slot",
+        "signature": "(self, inv: 'Invocation', next: 'NextFn') -> 'Result'"
+      },
+      {
+        "name": "Idempotency.__init__",
+        "signature": "(self, *, store: 'MutableMapping[str, float] | None' = None, ttl: 'float' = 86400, clock: 'Callable[[], float] | None' = None) -> 'None'"
+      },
+      {
+        "name": "Idempotency.check_and_mark",
+        "signature": "(self, key: 'str') -> 'bool'"
+      },
+      {
+        "name": "Watchdog.__init__",
+        "signature": "(self, *, window: 'int' = 10, repeat_k: 'int' = 3, detect_abab: 'bool' = True, kinds: 'Collection[str] | None' = None) -> 'None'"
+      },
+      {
+        "name": "Watchdog.inspect",
+        "signature": "(self, kind: 'str') -> 'bool'"
+      },
+      {
+        "name": "Watchdog.detect",
+        "signature": "(self, inv: 'Invocation') -> 'bool'"
+      },
+      {
+        "name": "KillSwitch.__init__",
+        "signature": "(self, *, flag_store: 'MutableMapping[str, bool] | None' = None, scope: '_KillScope | str' = <_KillScope.SESSION: 'session'>) -> 'None'"
+      },
+      {
+        "name": "KillSwitch.is_tripped",
+        "signature": "(self, session_id: 'str') -> 'bool'"
+      }
+    ]
+  },
+  {
+    "module": "harness.resilience.retry",
+    "count": 2,
+    "symbols": [
+      {
+        "name": "RetryPolicy.__init__",
+        "signature": "(self, *, max_attempts: 'int' = 3, base_delay: 'float' = 0.5, multiplier: 'float' = 2.0, max_delay: 'float' = 30.0, jitter: 'Jitter | str' = <Jitter.FULL: 'full'>, respect_retry_after: 'bool' = True, idempotency_required: 'bool' = True, rng: 'Random | None' = None, sleeper: 'Callable[[float], Awaitable[None]] | None' = None, target_of: 'Callable[[Invocation], str] | None' = None) -> 'None'"
+      },
+      {
+        "name": "RetryPolicy.run_with_retries",
+        "signature": "(self, inv: 'Invocation', next: 'NextFn') -> 'Result'"
+      }
+    ]
+  },
+  {
+    "module": "harness.resilience.timeout",
+    "count": 2,
+    "symbols": [
+      {
+        "name": "Timeout.__init__",
+        "signature": "(self, *, timeout: 'float' = 30.0, target_of: 'Callable[[Invocation], str] | None' = None) -> 'None'"
+      },
+      {
+        "name": "Timeout.run_with_deadline",
+        "signature": "(self, inv: 'Invocation', next: 'NextFn') -> 'Result'"
+      }
+    ]
+  },
+  {
+    "module": "harness.resilience.types",
+    "count": 10,
+    "symbols": [
+      {
+        "name": "Jitter.coerce",
+        "signature": "(raw: 'Jitter | str') -> 'Jitter'"
+      },
+      {
+        "name": "normalize_code",
+        "signature": "(raw: 'str') -> 'str'"
+      },
+      {
+        "name": "_DefaultClassifier.classify",
+        "signature": "(self, result: 'Result', ctx: 'object') -> 'FailureClass'"
+      },
+      {
+        "name": "classify_failure",
+        "signature": "(result: 'Result', ctx: 'object', *, classifier: 'FailureClassifier | None' = None) -> 'FailureClass'"
+      },
+      {
+        "name": "DimensionKey.as_tuple",
+        "signature": "(self) -> 'tuple[str, str]'"
+      },
+      {
+        "name": "validate_retry_spec",
+        "signature": "(spec: 'RetrySpec') -> 'None'"
+      },
+      {
+        "name": "backoff_delay",
+        "signature": "(attempt: 'int', spec: 'RetrySpec', rng: 'Random', *, prev_delay: 'float' = 0.0, retry_after: 'float | None' = None) -> 'float'"
+      },
+      {
+        "name": "DegradeLadder.pick",
+        "signature": "(self, available: 'AbstractSet[str]') -> 'DegradeStep'"
+      },
+      {
+        "name": "validate_ladder",
+        "signature": "(ladder: 'DegradeLadder') -> 'None'"
+      },
+      {
+        "name": "BreakerState.failure_rate",
+        "signature": "(self) -> 'float'"
+      }
+    ]
+  },
+  {
+    "module": "harness.security.approval",
+    "count": 1,
+    "symbols": [
+      {
+        "name": "ApprovalFlow.decide_timeout",
+        "signature": "(self) -> 'str'"
+      }
+    ]
+  },
+  {
+    "module": "harness.security.capability",
+    "count": 1,
+    "symbols": [
+      {
+        "name": "SecurityCapability.build",
+        "signature": "(self) -> 'Program'"
+      }
+    ]
+  },
+  {
+    "module": "harness.security.guard",
+    "count": 1,
+    "symbols": [
+      {
+        "name": "redact_secret",
+        "signature": "(value: 'object', secrets: 'Sequence[str]') -> 'SafetyVerdict'"
+      }
+    ]
+  },
+  {
+    "module": "harness.security.types",
+    "count": 1,
+    "symbols": [
+      {
+        "name": "SecurityCtx.from_invocation",
+        "signature": "(inv: 'Invocation', *, source: 'str' = 'tool', direction: 'str' = 'input', trust: 'bool' = False) -> 'SecurityCtx'"
+      }
+    ]
+  },
+  {
+    "module": "harness.skills.provider",
+    "count": 1,
+    "symbols": [
+      {
+        "name": "FileSkillProvider.catalog",
+        "signature": "(self) -> 'list[SkillManifest]'"
+      }
+    ]
+  },
+  {
+    "module": "harness.tools.capability",
+    "count": 3,
+    "symbols": [
+      {
+        "name": "ToolsCapability.build",
+        "signature": "(self) -> 'Program'"
+      },
+      {
+        "name": "ToolsCapability.manager",
+        "signature": "(self) -> 'MCPManager | None'"
+      },
+      {
+        "name": "ToolsCapability.skills",
+        "signature": "(self) -> 'SkillPort | None'"
+      }
+    ]
+  },
+  {
+    "module": "harness.tools.execution",
+    "count": 7,
+    "symbols": [
+      {
+        "name": "_ExecTool.__init__",
+        "signature": "(self, *, sandbox: 'SandboxPort | None' = None, name: 'str', description: 'str', properties: 'dict[str, DynamicValue]', required: 'tuple[str, ...]' = ()) -> 'None'"
+      },
+      {
+        "name": "CodeExecTool.__init__",
+        "signature": "(self, *, sandbox: 'SandboxPort | None' = None) -> 'None'"
+      },
+      {
+        "name": "CodeExecTool.execute",
+        "signature": "(self, code: 'str', ctx: 'PortCtx') -> 'bool'"
+      },
+      {
+        "name": "ShellExecTool.__init__",
+        "signature": "(self, *, sandbox: 'SandboxPort | None' = None, allowlist: 'tuple[str, ...]' = ()) -> 'None'"
+      },
+      {
+        "name": "ShellExecTool.execute",
+        "signature": "(self, command: 'str', ctx: 'PortCtx') -> 'bool'"
+      },
+      {
+        "name": "FileExecTool.__init__",
+        "signature": "(self, *, sandbox: 'SandboxPort | None' = None, root: 'str' = '') -> 'None'"
+      },
+      {
+        "name": "FileExecTool.read",
+        "signature": "(self, path: 'str', ctx: 'PortCtx') -> 'bool'"
+      }
+    ]
+  },
+  {
+    "module": "harness.tools.registry",
+    "count": 3,
+    "symbols": [
+      {
+        "name": "ToolRegistry.bind",
+        "signature": "(self, name: 'str', fn: 'Callable[..., DynamicValue]') -> 'None'"
+      },
+      {
+        "name": "ToolRegistry.static_check",
+        "signature": "(self) -> 'list[str]'"
+      },
+      {
+        "name": "ToolRegistry.freeze",
+        "signature": "(self) -> 'Self'"
+      }
+    ]
+  },
+  {
+    "module": "ports.adapters.mcp",
+    "count": 7,
+    "symbols": [
+      {
+        "name": "StdioMCPTransport.reconnect",
+        "signature": "(self) -> 'None'"
+      },
+      {
+        "name": "HttpMCPTransport.__init__",
+        "signature": "(self, endpoint: 'str', *, client: 'httpx.AsyncClient | None' = None, danger: 'DangerLevel' = <DangerLevel.SAFE: 'SAFE'>) -> 'None'"
+      },
+      {
+        "name": "HttpMCPTransport.list_tools",
+        "signature": "(self, server: 'str') -> 'list[ToolSpec]'"
+      },
+      {
+        "name": "HttpMCPTransport.call_tool",
+        "signature": "(self, server: 'str', tool: 'str', args: 'dict[str, DynamicValue]') -> 'DynamicValue'"
+      },
+      {
+        "name": "HttpMCPTransport.ping",
+        "signature": "(self, server: 'str') -> 'bool'"
+      },
+      {
+        "name": "HttpMCPTransport.reconnect",
+        "signature": "(self) -> 'None'"
+      },
+      {
+        "name": "HttpMCPTransport.aclose",
+        "signature": "(self) -> 'None'"
+      }
+    ]
+  },
+  {
+    "module": "ports.adapters.provider",
+    "count": 2,
+    "symbols": [
+      {
+        "name": "LLMProviderFactory.__call__",
+        "signature": "(self, *, base_url: 'str', api_key: 'str', model: 'str') -> 'LLMPort'"
+      },
+      {
+        "name": "LLMProviderCapability.names",
+        "signature": "(self) -> 'tuple[str, ...]'"
+      }
+    ]
+  },
+  {
+    "module": "runtime.fold",
+    "count": 2,
+    "symbols": [
+      {
+        "name": "state_set",
+        "signature": "(state: 'AgentState', key: 'str', value: 'DynamicValue') -> 'AgentState'"
+      },
+      {
+        "name": "state_append_message",
+        "signature": "(state: 'AgentState', message: 'Message') -> 'AgentState'"
+      }
+    ]
+  },
+  {
+    "module": "runtime.interpreter",
+    "count": 1,
+    "symbols": [
+      {
+        "name": "InterpreterImpl.started",
+        "signature": "(?)"
+      }
+    ]
+  },
+  {
+    "module": "runtime.runner",
+    "count": 5,
+    "symbols": [
+      {
+        "name": "_CancellationHolder.cancel",
+        "signature": "(self, reason: 'str') -> 'None'"
+      },
+      {
+        "name": "Runner.cancel",
+        "signature": "(self, reason: 'str') -> 'None'"
+      },
+      {
+        "name": "Runner.resume",
+        "signature": "(self, session: 'Session', answer: 'DynamicValue') -> 'RunResult'"
+      },
+      {
+        "name": "Runner.replay",
+        "signature": "(self, session: 'Session', initial_state: 'AgentState') -> 'AgentState'"
+      },
+      {
+        "name": "Runner.load",
+        "signature": "(self, session_id: 'str', program_factory: 'Callable[[], Program]') -> 'Session'"
+      }
+    ]
+  },
+  {
+    "module": "runtime.types",
+    "count": 2,
+    "symbols": [
+      {
+        "name": "Result.failure",
+        "signature": "(code: 'str', message: 'str', retryable: 'bool' = False) -> 'Result'"
+      },
+      {
+        "name": "CancellationToken.cancel",
+        "signature": "(self, reason: 'str') -> 'CancellationToken'"
+      }
+    ]
+  }
+]

@@ -195,8 +195,8 @@ MODULES = {
         "demo": "tests/demos/demo_r12.py", "coverage": 85,
         # 规格 P6/P9：10 算子 + archs 10 架构 + Agent 装配器 + call 装饰器 + DTO。
         "symbols": [
-            "seq", "par", "branch", "race", "loop", "map_state", "map_effect",
-            "fallback", "gate", "retry", "Agent",
+            "seq", "par", "race", "map_effect", "fallback", "retry", "Agent",
+            "loop_until", "branch_value",  # 2026-11-25 取代依赖不存在 state port 的 4 个死算子
             "build_call", "dispatch", "make_dispatch",
             "FaultRecord", "RoutingTarget", "CallState", "CallContext",
             "retry_call", "timeout", "danger_route", "injection_guard",

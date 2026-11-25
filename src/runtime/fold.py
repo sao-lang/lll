@@ -155,10 +155,11 @@ def fold(
     last_skill: DynamicValue = state.last_skill
     last_child: DynamicValue = state.last_child
     last_wait_human: DynamicValue = state.last_wait_human
-    cost = 0.0  # 本轮 usage 累计成本，扣完预算后清零，避免跨 Effect 重复计入
-    tokens = 0  # 本轮 usage 累计 token（prompt + completion）
+    cost = 0.0  # 本 Effect usage 成本，扣完预算后清零，避免跨 Effect 重复计入
+    tokens = 0  # 本批 usage token 总和（last_tokens 快照用，跨 Effect 累加）
     # effects 与 results 由 Runner 保证等长、同序，zip 逐一配对处理。
     for effect, result in zip(effects, results):
+        effect_tokens = 0  # 本 Effect usage token，只扣一次预算
         # ① 生成对话消息（失败 / LLM / TOOL 才有）
         message = _message_for(effect, result)
         if message is not None:
@@ -175,9 +176,10 @@ def fold(
         # ③ 累计本 Effect 的 usage（成本/token），供下方统一计入预算。
         if result.usage is not None:
             cost += float(field(result.usage, "cost_usd", 0.0))
-            tokens += int(field(result.usage, "prompt_tokens", 0)) + int(
+            effect_tokens = int(field(result.usage, "prompt_tokens", 0)) + int(
                 field(result.usage, "completion_tokens", 0)
             )
+            tokens += effect_tokens
         # ④ 统一扣预算：effect 声明的 delta + 本步实际 usage。
         delta = _budget_delta(effect)
         budgets = budgets.consume(
@@ -186,7 +188,7 @@ def fold(
             rounds=int(delta.get("rounds", 0)),
             cost_usd=float(delta.get("cost_usd", 0.0)) + cost,
             # B1：usage 实际 token 与 cost 同口径扣进预算，否则 6 维预算的 token 维形同虚设。
-            tokens=int(delta.get("tokens", 0)) + tokens,
+            tokens=int(delta.get("tokens", 0)) + effect_tokens,
             parallel_children=int(delta.get("parallel_children", 0)),
         )
         cost = 0.0  # 已并入预算，清零以防下一个 Effect 重复累加

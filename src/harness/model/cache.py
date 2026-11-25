@@ -22,7 +22,7 @@ from typing import Protocol, TypedDict, cast, runtime_checkable
 
 from compose import LLMRequest, LLMResponse
 
-from .types import build_cache_key
+from .types import build_cache_key, request_variant_string
 
 __all__ = [
     "CacheEmbedder",
@@ -271,18 +271,41 @@ class _SemanticCacheEntry(TypedDict):
 
     text: 归一化后的查询原文。vec: 可选 embedding 向量（无 embedder 时为 None）。
     resp: LLMResponse 的 JSON 字符串（跨存储工具只认字符串，序列化在缓存层完成）。
+    variant: 请求变体哈希（model/temperature/工具集等），跨变体不得互相命中。
     """
 
     text: str
     vec: list[float] | None
     resp: str
+    variant: str
 
 
 def _parse_entry(raw: str) -> _SemanticCacheEntry | None:
-    """把存储工具的 JSON 字符串解析为条目视图；非法 JSON 返回 None。"""
+    """解析条目；脏 JSON / 旧格式 / 字段畸形一律返回 None（由调用方删除）。"""
     try:
-        return cast(_SemanticCacheEntry, json.loads(raw))
-    except json.JSONDecodeError:
+        parsed = json.loads(raw)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    if not isinstance(parsed.get("text"), str) or not isinstance(parsed.get("resp"), str):
+        return None
+    if not isinstance(parsed.get("variant"), str):
+        return None
+    vec = parsed.get("vec")
+    if vec is not None and (
+        not isinstance(vec, list)
+        or not all(isinstance(v, (int, float)) for v in vec)
+    ):
+        return None
+    return cast(_SemanticCacheEntry, parsed)
+
+
+def _parse_response(raw: str) -> LLMResponse | None:
+    """解析条目里的 LLMResponse；损坏视为条目失效，绝不让 ValidationError 穿透。"""
+    try:
+        return LLMResponse.model_validate_json(raw)
+    except (ValueError, TypeError):
         return None
 
 
@@ -331,14 +354,19 @@ class ExactCache:
         return build_cache_key(request, prompt_version=version).value
 
     async def get(self, request: LLMRequest, *, version: str = "current") -> LLMResponse | None:
-        """命中 +1 返回响应；未命中 +1 返回 None。"""
+        """命中 +1 返回响应；未命中或坏条目 +1 返回 None（坏条目删除）。"""
         key = _store_key("exact", version, self._identity(request, version))
         raw = await self._store.get(key)
         if raw is None:
             self.misses += 1
             return None
+        response = _parse_response(raw)
+        if response is None:  # 脏数据/版本不兼容：隔离异常并删除，绝不把 ValidationError 抛给调用方
+            await self._store.delete(key)
+            self.misses += 1
+            return None
         self.hits += 1
-        return LLMResponse.model_validate_json(raw)
+        return response
 
     async def put(self, request: LLMRequest, resp: LLMResponse, *, version: str = "current") -> None:
         """写入精确键 → 响应 JSON。"""
@@ -403,16 +431,24 @@ class SimilarityCache:
         return await self._embedder.embed(text) if self._embedder is not None else None
 
     async def get(self, request: LLMRequest, *, version: str = "current") -> LLMResponse | None:
-        """按相似度找最匹配条目；≥ threshold 才命中。"""
+        """按相似度找最匹配条目；≥ threshold 且变体一致才命中。"""
         query = _query_text(request)
+        variant = request_variant_string(request)
         q_vec = await self._vector_of(query)
-        # 条目结构见 _SemanticCacheEntry（text/vec/resp 明确字段）。
+        # 条目结构见 _SemanticCacheEntry（text/vec/resp/variant 明确字段）。
         prefix = _store_key("semantic", version, "")
         best: LLMResponse | None = None
         best_score = 0.0
-        for _key, raw in await self._store.scan(prefix):  # 遍历同前缀全部候选取最相似者；阈值裁决延到循环后，避免先到先得
+        for key, raw in await self._store.scan(prefix):  # 遍历同前缀全部候选取最相似者；阈值裁决延到循环后，避免先到先得
             entry = _parse_entry(raw)
-            if entry is None:  # 解析失败的条目跳过，不让坏数据参与匹配或污染缓存
+            if entry is None:  # 解析失败/旧格式：删除，不让坏数据反复参与匹配
+                await self._store.delete(key)
+                continue
+            if entry["variant"] != variant:  # model/温度/工具集不同：跨变体绝不命中
+                continue
+            response = _parse_response(entry["resp"])
+            if response is None:  # resp 损坏：删除该条目，ValidationError 不外泄
+                await self._store.delete(key)
                 continue
             if q_vec is not None and entry["vec"] is not None:  # 双方都有向量才走余弦；否则降级文本相似度（零依赖开箱即用）
                 score = _cosine(q_vec, tuple(entry["vec"]))
@@ -420,7 +456,7 @@ class SimilarityCache:
                 score = SequenceMatcher(None, query, entry["text"]).ratio()
             if score > best_score:  # 只保留当前最优；遍历完整后再按 threshold 一锤定音
                 best_score = score
-                best = LLMResponse.model_validate_json(entry["resp"])
+                best = response
         if best is not None and best_score >= self._threshold:  # 阈值在循环后统一判定：命中必须是全局最优候选
             self.hits += 1
             return best
@@ -428,30 +464,36 @@ class SimilarityCache:
         return None
 
     async def put(self, request: LLMRequest, resp: LLMResponse, *, version: str = "current") -> None:
-        """写入条目（原文 + 可选向量 + 响应 JSON）到存储工具。"""
+        """写入条目（原文 + 可选向量 + 变体 + 响应 JSON）到存储工具。"""
         query = _query_text(request)
         vec = await self._vector_of(query)
+        variant = request_variant_string(request)
         entry: _SemanticCacheEntry = {
             "text": query,
             "vec": list(vec) if vec is not None else None,
             "resp": resp.model_dump_json(),
+            "variant": variant,
         }
-        # 键含原文 hash，保证同 query 覆盖；scan 按前缀取回全部候选
+        # 键含原文 hash + 变体，保证同 query 同变体覆盖、不同变体互不踩踏。
         identity = build_cache_key(
             LLMRequest(messages=[{"role": "user", "content": query}]),
             prompt_version="sem",
-        ).value
+        ).value + ":" + variant
         key = _store_key("semantic", version, identity)
         await self._store.put(key, json.dumps(entry, ensure_ascii=False), ttl=self._ttl)
 
     async def invalidate(self, request: LLMRequest, *, version: str = "current") -> None:
-        """删除相似度 ≥ threshold 的条目（语义失效）。"""
+        """删除同变体中相似度 ≥ threshold 的条目（语义失效）。"""
         query = _query_text(request)
+        variant = request_variant_string(request)
         q_vec = await self._vector_of(query)
         prefix = _store_key("semantic", version, "")
         for key, raw in await self._store.scan(prefix):  # 语义失效可能命中多条，须逐个删除，不能只删第一个
             entry = _parse_entry(raw)
-            if entry is None:  # 坏条目无法算分，跳过以免影响其它候选的失效判断
+            if entry is None:  # 坏条目无法算分：直接删除，避免残留脏数据
+                await self._store.delete(key)
+                continue
+            if entry["variant"] != variant:  # 只失效本变体，不误删其它 model/工具集的条目
                 continue
             if q_vec is not None and entry["vec"] is not None:  # 与 get 同一套相似度口径，保证写入/失效判定一致
                 score = _cosine(q_vec, tuple(entry["vec"]))

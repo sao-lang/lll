@@ -1,0 +1,218 @@
+{
+  "version": "1.1",
+  "goal": "真实 e2e 从零重建：introspection 全量 API 逐条真调用、14 Port/11 Capability/Tool/Strategy 内置+自定义双路径、真 DeepSeek complete/stream、真 Jaeger 容器 OTLP→API 查同 trace_id、真 MCP/WebFetch server、五反证变异红绿留痕、全量门禁、review Blocker=0",
+  "source": "user_confirmed_S3_full_enum_no_reduce",
+  "mode": "conductor",
+  "template": "conductor.13",
+  "confidence": 0.95,
+  "assumptions": [
+    "S2 契约/覆盖矩阵已 rc=0，用户 22:27 确认进入 S3、全枚举不接受缩减、Podman 由本任务给出可行方案",
+    "src/ 零改动（尤其 runtime/）；新增只在 tests/e2e 与 tests/tools",
+    "Jaeger 可行性已实证：quay.io/jaegertracing/all-in-one:1.62.0 拉取 200、容器 CREATE 201/START 204、GET /api/services 200",
+    "密钥只从注册表 User 区读到内存，不落文件；真网 ≤10 次/轮",
+    "零伪造：容器/真网失败如实报环境阻断，断言保留不造绿"
+  ],
+  "clarifications": [
+    "用户确认：全枚举，不缩减",
+    "U-1 已解除：根因是 tag 写成 1.62（应为 1.62.0），不需用户额外提供代理"
+  ],
+  "tasks": [
+    {
+      "id": "T1",
+      "goal": "RED：各组 e2e 失败测试先行（真实入口、精确断言）"
+    },
+    {
+      "id": "T2",
+      "goal": "GREEN：记忆/LLM/Port/Capability/Tool/Strategy/算子runtime/追踪容器各组用例落地"
+    },
+    {
+      "id": "T3",
+      "goal": "五反证变异红→绿实测留痕 + 全量门禁证据"
+    },
+    {
+      "id": "T4",
+      "goal": "独立 review Blocker=0 + 沉淀"
+    }
+  ],
+  "nodes": [
+    {
+      "kind": "skill",
+      "action": "派全新上下文子代理做独立 review：七维 + 接线四问 + 功能遗漏/断点，红队视角找反例",
+      "command": "派新子代理，brief 自包含 diff + 规格 + 完成标准",
+      "command_type": "judgment",
+      "exit_criteria": "收到新子代理报告（非复用旧报告），含 Blocker 分级",
+      "exit_check": {
+        "kind": "file_content",
+        "expect": "报告含 Blocker/Should/Nit 与 文件:行号",
+        "evidence": "overview 独立 review 章节"
+      },
+      "on_fail": "retry",
+      "on_fail_next": "review/DISPATCH",
+      "when": "standard 或 full 档",
+      "atomic": true,
+      "id": "n_review-DISPATCH-DISPATCH",
+      "label": "独立 review · DISPATCH · DISPATCH",
+      "serves_task": "T4",
+      "ref": "review",
+      "route_ref": "review/DISPATCH",
+      "expanded_from": "n_review-DISPATCH"
+    },
+    {
+      "kind": "action",
+      "action": "只记有后续影响的内容；L0 ≤8 行，详情进 .details.md，review 报告内嵌主文件",
+      "command": "按 .conductor/README.md 分类写入 overview 主文件/详情文件",
+      "command_type": "file_write",
+      "exit_criteria": "overview 含本轮决策/证据/未完成项，目录无违规",
+      "exit_check": {
+        "kind": "file_content",
+        "expect": "主文件 L0 ≤8 行 + overview_path --audit violations=null",
+        "evidence": "overview 文件 + audit 输出"
+      },
+      "on_fail": "abort",
+      "atomic": true,
+      "id": "n_record-RECORD-RECORD",
+      "label": "沉淀 · RECORD · RECORD",
+      "serves_task": "T4",
+      "ref": "memory",
+      "route_ref": "memory/RECORD",
+      "expanded_from": "n_record-RECORD"
+    },
+    {
+      "kind": "tool",
+      "id": "n_red-RED",
+      "label": "RED · 失败测试先行",
+      "action": "先写 tests/e2e 失败测试：真入口 + 精确断言，pytest 报 FAILED 且原因为行为缺失",
+      "command": ".venv/Scripts/python -m pytest tests/e2e -q",
+      "command_type": "command",
+      "exit_criteria": "出现 FAILED，失败原因=目标行为缺失",
+      "exit_check": {
+        "kind": "file_content",
+        "expect": "FAILED 且非 import/error",
+        "evidence": "pytest 输出留痕"
+      },
+      "on_fail": "ask",
+      "serves_task": "T1",
+      "atomic": true,
+      "ref": "tdd",
+      "route_ref": "tdd/RED"
+    },
+    {
+      "kind": "tool",
+      "id": "n_green-GREEN",
+      "label": "GREEN · 用例落地至全绿",
+      "action": "按组落地：conftest/impls → API面 → MEM → LLM真网 → Port/Cap/Tool/Strategy矩阵 → OPS/DSL/RT → ORCH/TRACE真容器 → DEG；每组 REAL 入口 + 副作用断言",
+      "command": ".venv/Scripts/python -m pytest tests/e2e -q",
+      "command_type": "command",
+      "exit_criteria": "tests/e2e 全绿（真环境具备项 0 skip）",
+      "exit_check": {
+        "kind": "exit_code",
+        "expect": "0",
+        "evidence": "pytest tests/e2e -q rc=0"
+      },
+      "on_fail": "retry",
+      "on_fail_next": "n_red-RED",
+      "serves_task": "T2",
+      "atomic": true,
+      "ref": "tdd",
+      "route_ref": "tdd/GREEN"
+    },
+    {
+      "kind": "tool",
+      "id": "n_evidence-EVIDENCE",
+      "label": "EVIDENCE · 五变异+全量门禁",
+      "action": "五变异逐个改坏→rc=1→恢复→rc=0 留痕；全量 pytest/mypy strict/purity strict/全模块 gate/contract/coverage；R1 diff 空",
+      "command": ".venv/Scripts/python -m pytest tests/ -q && .venv/Scripts/python -m mypy --strict src",
+      "command_type": "command",
+      "exit_criteria": "五变异红绿留痕齐全，全量门禁绿",
+      "exit_check": {
+        "kind": "file_content",
+        "expect": "5 组 rc=1→rc=0 + 全门禁证据",
+        "evidence": "details.md 变异章节"
+      },
+      "on_fail": "retry",
+      "on_fail_next": "n_green-GREEN",
+      "serves_task": "T3",
+      "atomic": true,
+      "ref": "tdd",
+      "route_ref": "tdd/EVIDENCE"
+    },
+    {
+      "kind": "gate",
+      "id": "n_rgate-GATE",
+      "label": "review 门禁 · Blocker=0",
+      "action": "review_gate：Blocker 必须为 0 才放行",
+      "command": ".venv/Scripts/python scripts/review_gate.py --report <review报告>",
+      "command_type": "command",
+      "exit_criteria": "Blocker=0",
+      "exit_check": {
+        "kind": "exit_code",
+        "expect": "0",
+        "evidence": "review_gate PASS"
+      },
+      "on_fail": "retry",
+      "on_fail_next": "n_red-RED",
+      "serves_task": "T4",
+      "atomic": true,
+      "ref": "review",
+      "route_ref": "review/GATE"
+    }
+  ],
+  "edges": [
+    {
+      "from": "n_red-RED",
+      "to": "n_green-GREEN",
+      "type": "seq"
+    },
+    {
+      "from": "n_green-GREEN",
+      "to": "n_evidence-EVIDENCE",
+      "type": "seq"
+    },
+    {
+      "from": "n_evidence-EVIDENCE",
+      "to": "n_review-DISPATCH-DISPATCH",
+      "type": "seq"
+    },
+    {
+      "from": "n_review-DISPATCH-DISPATCH",
+      "to": "n_rgate-GATE",
+      "type": "seq"
+    },
+    {
+      "from": "n_rgate-GATE",
+      "to": "n_record-RECORD-RECORD",
+      "type": "seq"
+    }
+  ],
+  "paths": [
+    {
+      "id": "P1",
+      "label": "RED · 失败测试先行 / GREEN · 用例落地至全绿 / EVIDENCE · 五变异+全量门禁 / 独立 review · DISPATCH",
+      "guard": "默认路线（无分支条件）",
+      "steps": [
+        "n_red-RED",
+        "n_green-GREEN",
+        "n_evidence-EVIDENCE",
+        "n_review-DISPATCH-DISPATCH",
+        "n_rgate-GATE",
+        "n_record-RECORD-RECORD"
+      ],
+      "terminal": "n_record-RECORD-RECORD",
+      "is_happy": true
+    }
+  ],
+  "budget": {
+    "max_steps": 60,
+    "max_rounds": 10,
+    "max_retries": 3,
+    "noop_limit": 2
+  },
+  "meta": {
+    "scene": 13,
+    "tier": "full",
+    "outcome": "verify",
+    "object": "test",
+    "scope": "all_api_full_enum",
+    "expanded": true
+  }
+}

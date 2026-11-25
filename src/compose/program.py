@@ -1,16 +1,16 @@
-"""A 类 10 组合算子（规格 §2.3 / D-4）：装配期 Program → Program 纯变换。
+"""A 类组合算子（规格 §2.3 / D-4）：装配期 Program → Program 纯变换。
 
 设计约束（R1 不改前提下）：
 - 装配期纯变换，不改原 Program（compile 幂等）；
 - 必须是纯函数：运行期状态进 State.scratch 的 x-* 键，禁止算子实例持有流程进度
   （resume 靠 program_factory 重建，D-8）；
 - 轮次/跳数交 Budgets，架构 generator 内禁自数；
-- State 只读，改状态靠 state.set 产生新对象（局部持有，不写 R1 fold）；
-- gate 是唯一可 yield Suspend 的 A 类算子（D-6）。
+- State 只读，改状态靠 state.set 产生新对象（局部持有，不写 R1 fold）。
 
-算子间数据传递：_run_child 拦截子 Program 的 Terminate 提取 output，写入局部
-State 的 x-compose.* scratch 键；下游算子启动前把 x-* 键合并进回注 State
-（R1 fold 不感知 x-*，故由组合层自身承担 carry，纯函数、resume 可重建）。
+算子间数据传递：_run_child 拦截子 Program 的 Terminate 提取 output，沿 Effect
+回注路径把 x-* scratch 键带入下游（R1 fold 不感知 x-*，故由组合层自身承担 carry，
+纯函数、resume 可重建）。决策类算子一律从回注值 Result.data 取值，不读不存在的
+port="state"（真实 Runner 只注册 llm/tool/skill/rag/memory）。
 """
 from __future__ import annotations
 
@@ -24,19 +24,16 @@ from runtime import (
     Effect,
     Invoke,
     Program,
-    Suspend,
     Terminate,
 )
 
 __all__ = [
     "JoinMode",
     "ProgramFn",
-    "branch",
+    "branch_value",
     "fallback",
-    "gate",
-    "loop",
+    "loop_until",
     "map_effect",
-    "map_state",
     "par",
     "race",
     "retry",
@@ -54,7 +51,6 @@ class _Keys:
     SEQ_OUTPUT: Final[str] = PREFIX + "seq.output"
     ATTEMPT: Final[str] = PREFIX + "attempt"
     FAIL_FLAG: Final[str] = PREFIX + "fail"
-    LOOP_ROUND: Final[str] = PREFIX + "loop.round"
     RETRY_COUNT: Final[str] = PREFIX + "retry.count"
 
 
@@ -63,27 +59,6 @@ class JoinMode(str, Enum):
     ALL = "all"
     ANY = "any"
     MAJORITY = "majority"
-
-
-def _as_state(value: DynamicValue) -> AgentState:
-    """把回注值归一为可读 State 视图（真实 R1 回注 Result.data，可能是 dict/str/None）。
-
-    分支：
-        - 本身就是 AgentState：原样返回；
-        - dict：按其键构造 State（测试/上层自定义回注）；
-        - 其它（str/None）：返回空 State（组合层局部进度另由 _carry_x 维护）。
-
-    Args:
-        value: Effect 的回注值。
-
-    Returns:
-        可安全读取的 AgentState 视图。
-    """
-    if isinstance(value, AgentState):
-        return value
-    if isinstance(value, dict):
-        return AgentState().set("scratch", value) if value else AgentState()
-    return AgentState()
 
 
 def _carry_x(into: AgentState, source: AgentState) -> AgentState:
@@ -253,35 +228,6 @@ def par(items: Sequence[ProgramFn], *, join: str = "all") -> ProgramFn:
     return program
 
 
-def branch(
-    fn: Callable[[AgentState], str],
-    arms: dict[str, ProgramFn],
-    default: str | None = None,
-) -> ProgramFn:
-    """条件分流：fn(state) 返回 key 选 arms[key]，缺失走 default。
-
-    Args:
-        fn: 状态 → arm key 的纯函数。
-        arms: key → Program 映射。
-        default: key 缺失时的兜底 arm。
-
-    Returns:
-        新 Program。
-    """
-    def program() -> Generator[Effect, AgentState, None]:
-        # 首次推进拿到初始 state（yield 一个空操作 Invoke 触发回注）
-        state = yield Invoke(port="state").with_payload(op="read")
-        state = _as_state(state)
-        key = fn(state)
-        target = arms.get(key) or arms.get(default or "")
-        if target is None:
-            yield Terminate(output=None, reason="no_route")
-            return
-        out, _ = yield from _run_child(target, state)
-        yield Terminate(output=out)
-    return program
-
-
 def race(items: Sequence[ProgramFn]) -> ProgramFn:
     """竞速：首个完成胜出，取消其余（取消走 R1 cancel 设施，算子只编排）。
 
@@ -332,54 +278,6 @@ def race(items: Sequence[ProgramFn]) -> ProgramFn:
                 pending.clear()
         yield Terminate(output=first_output)
     return program
-
-
-def loop(
-    body: ProgramFn,
-    *,
-    cond: Callable[[AgentState], bool],
-    max_rounds: int = 3,
-) -> ProgramFn:
-    """显式循环：cond 为真时重复 body，轮次上限交 Budgets（此处仅防御性护栏）。
-
-    Args:
-        body: 循环体 Program。
-        cond: 状态 → 是否继续的纯函数。
-        max_rounds: 防御性轮次上限（真实约束由 R1 Budgets.rounds 强制）。
-
-    Returns:
-        新 Program。
-    """
-    def program() -> Generator[Effect, AgentState, None]:
-        state = yield Invoke(port="state").with_payload(op="read")
-        state = _as_state(state)
-        state = state.set(_Keys.LOOP_ROUND, 0)
-        while cond(state) and int(state.get(_Keys.LOOP_ROUND, 0)) < max_rounds:
-            out, state = yield from _run_child(body, state)
-            state = state.set(_Keys.LOOP_ROUND, int(state.get(_Keys.LOOP_ROUND, 0)) + 1)
-            state = state.set(_Keys.SEQ_OUTPUT, out)
-        yield Terminate(output=state.get(_Keys.SEQ_OUTPUT))
-    return program
-
-
-def map_state(lens: Callable[[AgentState], AgentState]) -> Callable[[ProgramFn], ProgramFn]:
-    """State 视图变换算子：返回可作用于一个 Program 的纯变换。
-
-    Args:
-        lens: State → State 的纯变换。
-
-    Returns:
-        接收 Program、返回新 Program 的高阶函数。
-    """
-    def apply(child: ProgramFn) -> ProgramFn:
-        def program() -> Generator[Effect, AgentState, None]:
-            state = yield Invoke(port="state").with_payload(op="read")
-            state = _as_state(state)
-            state = lens(state)
-            out, _ = yield from _run_child(child, state)
-            yield Terminate(output=out)
-        return program
-    return apply
 
 
 def map_effect(fn: Callable[[Effect], Effect]) -> Callable[[ProgramFn], ProgramFn]:
@@ -438,27 +336,6 @@ def fallback(
     return program
 
 
-def gate(p: ProgramFn, policy: Callable[[AgentState], object]) -> ProgramFn:
-    """审批/澄清门：可 yield Suspend 挂起，resume 后续跑 p（D-6 唯一能挂起的 A 类算子）。
-
-    Args:
-        p: 审批通过后执行的 Program。
-        policy: 状态 → 审批策略；返回 None 表示无需审批。
-
-    Returns:
-        新 Program。
-    """
-    def program() -> Generator[Effect, AgentState, None]:
-        state = yield Invoke(port="state").with_payload(op="read")
-        state = _as_state(state)
-        answer = state.last_wait_human
-        if policy(state) is not None and answer is None:
-            state = yield Suspend(question="approval", options=("yes", "no"))
-        out, _ = yield from _run_child(p, state)
-        yield Terminate(output=out)
-    return program
-
-
 def retry(p: ProgramFn, *, attempts: int = 3, backoff: float = 0.0) -> ProgramFn:
     """流程级重放：失败按 program_factory 重建重跑（纯函数、状态进 x-*，D-5/D-8）。
 
@@ -493,9 +370,9 @@ def loop_until(
 ) -> ProgramFn:
     """回注值驱动的循环：每轮把上一步回注值交给 step 生成下一步 Program，done 为真停止。
 
-    与 loop 的区别：loop 读 `port="state"`（拿 AgentState），本算子只读 port 回注的
-    Result.data——ReAct 的 tool_calls 决策就在这上面，不需要 state port（真实 Runner
-    无该 port，红队 B5）。纯函数：step/done 都是外部注入的纯 callable，本算子不持进度。
+    决策只读 port 回注的 Result.data——ReAct 的 tool_calls 决策就在这上面，不依赖
+    state port（真实 Runner 无该 port，红队 B5）。纯函数：step/done 都是外部注入的
+    纯 callable，本算子不持进度。
 
     Args:
         step: 上一步回注值 → 下一轮 Program 工厂（纯）。
@@ -517,7 +394,6 @@ def loop_until(
                 converged = True
                 break
             feedback = out
-        # 终态 reason：架构可注入（handoff/graph 的静态条件），缺省沿用收敛/耗尽语义。
         # 终态 reason：架构可注入（handoff/graph 的静态或运行期条件），缺省沿用收敛/耗尽。
         reason = (reason_fn(converged) if reason_fn is not None
                   else ("" if converged else "turns_exhausted"))
@@ -535,9 +411,8 @@ def branch_value(
 ) -> ProgramFn:
     """值驱动分支：从 source 的 Terminate.output 取值选 arm（不经 state port）。
 
-    与 branch 的区别：branch 首 yield Invoke(port="state") 读 AgentState（真实 Runner
-    无此 port）；本算子从 source Program 的回注值决策——Router 的 IntentResult 即此类。
-    纯函数：fn 外部注入、arms 不改。
+    从 source Program 的回注值决策——Router 的 IntentResult 即此类；不依赖 state port
+    （真实 Runner 无该 port）。纯函数：fn 外部注入、arms 不改。
 
     Args:
         source: 产生决策值的 Program 工厂。

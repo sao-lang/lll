@@ -6,6 +6,7 @@
 > **配套**：模块详设 `docs/02-模块详设/Agent/`（由本文按 R1~R13 拆分派生，每模块模块内闭环、含 API/字段/门禁）；能力全集见[《能力域全景》](./能力域全景.md)（含自查补齐内容，见附录 B.1 待办清单）。
 > **状态**：设计定稿——**算子核心架构**（依据 `docs/01-总览与设计/组合式工具层重构规格-20261121.md` P1~P9 / D-1~D-10）。R1 一行不改；R2 取消（文档《算子与装配》承接其能力）；组合层 = 算子核心；工具层 R3~R9 可挑选可组合；对外 API 不变。依赖方向恒为 **工具层 → 组合层（算子 + call） → 内核 R1**，R1 零依赖上层。
 > **版本记录**：
+> - 2026-11-25（state-port 算子删除）：接线审计确认 `branch`/`loop`/`map_state`/`gate` 首 `yield Invoke(port="state")`，而真实 Runner 的 dispatch 只注册 llm/tool/skill/rag/memory（`PortName` 具名取值域）→ `PORT_MISSING` → `_as_state(失败 Result)` 得空 State → 静默误路由（`done` + 错误 output + 无 error）。R1 的 Program 只从 `send(Result.data)` 读数据、`program_factory` 无参、ctx 只流向 `call`，框架无合法 State 通道；4 算子在 10 内置架构中零使用（已由 `loop_until`/`branch_value` 取代）。按源码纯净铁律删除干净、不留兼容层；`compose`/`api.dsl` 公开 `loop_until`/`branch_value`。A 类算子由 10 个减为 8 个；挂起改由 Program 直接 `yield Suspend`。同步 R12 详设与门禁符号登记。
 > - 2026-11-23（R11/R12/R13 实现同步）：R12 落地 `src/compose/agent.py` 的 `Agent` 装配器（capability/rag/memory/telemetry/event_stream/build）并补齐 7 个 static_check 错误码（E05/E10/E11/E12/E13/E14/E16），`tests/r12/` 6 文件矩阵、门禁 r12 14/14（compose 93% / archs 96%）；R11 `src/api/` 落地四组 API / AgentBuilder / PortRegistry / StreamGateway / 治理 / CLI 与三档 profile，production profile 经 `SecurityCapability` 默认装配 R9 三 Port（R5/R9 源码零改），`tests/r11/` 29 用例、门禁 r11 13/13（api 93%）；R13 确认为横切规格参考（契约大部分已物化，缺口归 R12/R11）。12 门禁全绿、pytest 全绿、mypy strict 110 文件干净、source_purity rc=0、R1 零改动。本次为文档同步（代码已实现），无新增代码行为变更。
 > - 2026-11-23（R8/R9/R10 实现）：R8 认知与多 Agent 编排、R9 安全与 HITL、R10 可观测评测与持久化落地——cognition（四级级联意图 + `intent_as_program` 单入口 + 确定性服务，契约由 `archs/base.py` 单一 re-export）/ security（复用 `KeywordInjectionDetector` 单检测器 + 沙盒/审计/HITL 三默认实现 + 审批流）/ observability·eval·durability（复用 R1 EventStore，R10 不重复声明）；AOP 已删除；11 门禁全绿、pytest 全绿、mypy strict 101 文件干净、source_purity rc=0。本次为文档同步，无代码行为变更。
 > - 2026-11-21（意图识别默认四级级联路由）：意图策略默认实现由单级"规则/LLM 分类"改为**四级级联 `CascadeIntentStrategy`**（L1 关键词→L2 语义/采样库→L3 便宜模型→L4 主模型，逐级置信度阈值短路 + 兜底）；四个部件 `KeywordMatcher`/`IntentSampleStore`/`CheapIntentModel`/`PrimaryIntentModel` 各自可按接口注入，`strategy=` 整体注入则整包替换默认级联（两级注入共存）；修 R12 Router/RouterSkill 裂缝——统一经 `intent_as_program()` 单入口消费 `IntentResult`，不再把 classifier 塞进 prompt 解析。IntentResult 加可选 trace（观察语义，不下沉内核）。同步 R8/R12/R13/总设/能力域全景；纯文档变更无代码改动。
@@ -108,7 +109,7 @@ flowchart TD
         GOV["集成接入 R11 / 配置版本 / 灰度回滚 / KillSwitch / CLI"]
     end
     subgraph L2["L2 内置架构层（算子预设配方）"]
-        R12["10 内置架构 + 10 A 类组合算子<br/>ReAct/Graph/Supervisor… → 全部 compile 成 Program"]
+        R12["10 内置架构 + 8 A 类组合算子<br/>ReAct/Graph/Supervisor… → 全部 compile 成 Program"]
     end
     subgraph LC["组合层 = 算子核心（框架真正核心）"]
         OPS["①A 类算子 Program→Program<br/>②有状态守卫 ③call 装饰器<br/>build_call + dispatch + provides/requires 校验"]
@@ -175,7 +176,7 @@ flowchart TD
 | API | 面向 | 内容 |
 |-----|------|------|
 | **A1 集成契约** | 平台/工具集成者 | Port 契约 + Event Stream + Projection 三类契约 |
-| **A2 架构组合** | 选型用户 | 10 内置架构 + 10 A 类组合算子（seq/par/branch/race/loop/map_state/map_effect/fallback/gate/retry 流程级）——用户无感其内部是算子 |
+| **A2 架构组合** | 选型用户 | 10 内置架构 + 8 A 类组合算子（seq/par/race/map_effect/fallback/retry 流程级 + loop_until/branch_value 回注值驱动）——用户无感其内部是算子 |
 | **A3 应用开发** | 普通开发者 | `Agent(arch=...).profile(...).capability(...).run()` |
 | **A4 组件开发** | 插件作者 | A 类算子（`Program→Program`）/ ②领域策略（R3 执行器显式编排）/ ③call 装饰器 / `State.scratch x-*` / Port / Program / fold 全部低层接口 |
 
@@ -200,7 +201,7 @@ flowchart TD
 | R9 安全与 HITL | L1（横切） | K 安全 + L 人机协作 | 17 |
 | R10 可观测·评测·持久化 | L2/L3 | M 可观测 + N 评测 + O 持久化 | 23 |
 | R11 集成接入与治理 | L3 | P 工程化 + Q 集成 + R 治理 | 23 |
-| R12 内置架构与组合 | L2（算子核心载体） | J 架构（10 内置架构 + 10 A 类算子） | 20 |
+| R12 内置架构与组合 | L2（算子核心载体） | J 架构（10 内置架构 + 8 A 类算子） | 20 |
 | R13 可插拔与协议契约 | 横切 | 三层插拔 + 四要素 + ToolLayer + 协议全集 + 装配例子 | 横切 |
 
 ### 3.2 模块依赖关系
@@ -266,7 +267,7 @@ R8(认知编排) ──→ R10(观测评测持久化，④notify) ──→ R11(
 
 | # | 承载形态 | 签名/接口 | 运行期位置 | 代表能力 | 是不是算子 |
 |---|---------|----------|-----------|---------|-----------|
-| ① | **组合算子** | `Program → Program` | 装配期 | seq/par/branch/race/loop/fallback/gate/map_state/map_effect/retry(流程级) | ✅ **狭义算子就是这类，框架核心** |
+| ① | **组合算子** | `Program → Program` | 装配期 | seq/par/race/fallback/map_effect/retry(流程级)/loop_until/branch_value | ✅ **狭义算子就是这类，框架核心** |
 | ② | **领域策略（原"有状态守卫"）** | 执行器显式编排领域方法（`is_tripped`/`acquire`/`permit`/`select` 等），无统一协议 | 策略实例（跨调用存活） | 熔断/限流/舱壁/幂等/降级阶梯/watchdog/killswitch（R3） | ❌ 不是算子（由 R3 `ReliabilityExecutor` 编排） |
 | ③ | **call 装饰器** | `CallFn → CallFn` | 运行期 call 层 | 重试(调用级)/timeout(调用级)/危险路由/注入检测 | ❌ 装饰器；链式组合取代原 AOP 五角色 |
 | ④ | **通知观察** | `notify(phase, payload)` 只读 | 旁路 | 链路追踪/审计/指标/成本归因 | ❌ R1 既有 notify 回调 |
@@ -276,24 +277,22 @@ R8(认知编排) ──→ R10(观测评测持久化，④notify) ──→ R11(
 
 **关键定性**："算子"专指①；retry/timeout/熔断/降级/沙箱/工具/追踪**都是能力，不是算子**——"算子"字样只出现在描述承载形态时。②+③取代原 AOP：③是无状态 call 装饰器链（函数式组合）；②的落地形态已演进——原 `Guard.check/observe` 拦截协议已删除，现由 R3 `ReliabilityExecutor` 显式编排 9 领域策略的领域方法实现，不再由③在调用前后驱动。④就是 R1 现有 notify 回调，⑤⑥本就可插拔。
 
-### 5.2 A 类组合算子（10 个，框架核心）
+### 5.2 A 类组合算子（8 个，框架核心）
 
 | 算子 | 签名 | 语义 |
 |------|------|------|
 | seq | `seq(a, b)` | a.output 作 b 初始输入 |
 | par | `par([...], join=all)` | 扇出并行 + join 聚合 |
-| branch | `branch(fn, arms, default?)` | fn(state)→key 选 arm（级联路由 = 嵌套 branch，不加算子） |
 | race | `race([...])` | 首个完成胜出，取消其余（依赖 A5 取消传播） |
-| map_state | `map_state(lens)` | State 视图变换，纯函数 |
 | retry | `retry(p, *, attempts, backoff)` | **流程级**重放：失败按 program_factory 重建重跑 |
 | fallback | `fallback(p, *, ladders, refuse)` | 按序尝试 arms，失败切下一个，全失败走 refuse |
-| loop | `loop(body, *, cond, max_rounds)` | 显式循环（轮次交 Budgets，禁自数） |
 | map_effect | `map_effect(fn)` | 改写 Effect payload（脱敏/参数规范化/注入标记），取代 AOP Refiner |
-| gate | `gate(p, policy)` | 可 `yield Suspend(question,options)` 等审批，resume 后续跑 |
+| loop_until | `loop_until(step, *, done, max_rounds)` | 回注值驱动循环（`done(out)` 为真停止），不读 `port="state"` |
+| branch_value | `branch_value(source, fn, arms, default?)` | 从 source 的 `Terminate.output` 取值选 arm，不读 `port="state"` |
 
-共 10 个（D-4）。**预算治理不是算子**（硬限在 R1 `Budgets`/`fold`，软限是文本提示用 map_effect 注入 `payload['budget']`）。**gate 必须是算子**：call 装饰器 `(effect,ctx)->Result` 不能 yield Effect，挂起/审批只能 A 类 Program 变换（D-6）。
+共 8 个。原 `branch`/`loop`/`map_state`/`gate` 依赖不存在的 `port="state"`，真实 Runner 下静默误路由，已删除（详见版本记录 2026-11-25）。**预算治理不是算子**（硬限在 R1 `Budgets`/`fold`，软限是文本提示用 map_effect 注入 `payload['budget']`）。**挂起不是算子**：call 装饰器 `(effect,ctx)->Result` 不能 yield Effect，挂起/审批由 Program 直接 `yield Suspend`（D-6）。
 
-**A 类统一约束**（R1 不变前提）：装配期 `Program→Program` 纯变换不改原对象（compile 幂等）；必须纯函数，运行期状态进 `State.scratch` 的 `x-*` 键，禁止实例持有流程进度（resume 靠 program_factory 重建，`src/runtime/types.py:521-531`）；轮次/跳数交 Budgets（`R12:55-56` 红线）；State 只读（`src/runtime/types.py:321-369` MappingProxyType，唯一写入点 `runner.py:535`）；gate 的 Suspend / race 的取消走 R1 设施，算子只编排不重实现。
+**A 类统一约束**（R1 不变前提）：装配期 `Program→Program` 纯变换不改原对象（compile 幂等）；必须纯函数，运行期状态进 `State.scratch` 的 `x-*` 键，禁止实例持有流程进度（resume 靠 program_factory 重建，`src/runtime/types.py:521-531`）；轮次/跳数交 Budgets（`R12:55-56` 红线）；State 只读（`src/runtime/types.py:321-369` MappingProxyType，唯一写入点 `runner.py:535`）；Program 的 Suspend / race 的取消走 R1 设施，算子只编排不重实现。
 
 ### 5.3 B/C 类：call 装饰器 + 领域策略（②的落地演进）
 
@@ -587,7 +586,7 @@ CallFn = Callable[[Effect, DynamicValue], Awaitable[Result]]            # 组合
 
 组合层是唯一注册与装配入口，由三类算子 + 装配器组成（7 承载形态见 §5）：
 
-- **①A 类组合算子（10 个，`src/compose/program.py`）**：seq/par/branch/race/loop/map_state/map_effect/fallback/gate/retry（流程级）；装配期 `Program→Program` 纯变换、compile 幂等；运行期状态进 `State.scratch` 的 `x-*`，禁止实例持有流程进度（resume 靠 program_factory 重建）。
+- **①A 类组合算子（8 个，`src/compose/program.py`）**：seq/par/race/map_effect/fallback/retry（流程级）+ loop_until/branch_value（回注值驱动）；装配期 `Program→Program` 纯变换、compile 幂等；运行期状态进 `State.scratch` 的 `x-*`，禁止实例持有流程进度（resume 靠 program_factory 重建）。
 - **②领域策略（原"有状态守卫"，已演进到 R3）**：拦截协议与 `DegradationGuard`/`degrade_retry` 已删除；现由 R3 `ReliabilityExecutor`（`src/harness/resilience/executor.py`）+ 9 领域策略显式编排，承载熔断/限流/舱壁/幂等/降级阶梯/watchdog/killswitch；状态在领域策略实例（跨调用存活、按 session 隔离），不持有单次流程进度。
 - **③call 装饰器（`src/compose/call.py`）**：`CallFn→CallFn`，`retry_call`（调用级）/timeout（调用级）/danger_route/injection_guard；函数组合无固定角色链、不叫 AOP；只覆盖 `Invoke`。装饰器是纯函数组合，不再驱动任何 check/observe 协议。
 - **装配器与 dispatch（`src/compose/dispatch.py`）**：`make_dispatch(ports)` 产出 base，`build_call(base, *, decorators=())` 构造 call 注入 `Runner(call=...)`；`dispatch` 按 `effect.port` 分派到 Port、构造 `Result`（含 Usage）；不构造 Invocation（R1 明确不构造）。
@@ -615,9 +614,10 @@ flowchart TD
 
 ```python
 # ---- ①A 类组合算子（src/compose/program.py）----
-# 10 个：seq/par/branch/race/loop/map_state/map_effect/fallback/gate/retry(流程级)
+# 8 个：seq/par/race/map_effect/fallback/retry(流程级) + loop_until/branch_value(回注值驱动)
 # 统一签名：Program → Program，装配期纯变换、不改原对象（compile 幂等）
-def gate(p: Program, policy) -> Program: ...              # 唯一可 yield Suspend 的 A 类算子
+def loop_until(step, *, done, max_rounds) -> Program: ...   # 回注值驱动循环（不读 state port）
+def branch_value(source, fn, arms, *, default) -> Program: ...  # 回注值驱动分支（不读 state port）
 def retry(p: Program, *, attempts, backoff) -> Program: ... # 流程级：失败按 program_factory 重建重跑
 
 # ---- ②领域策略（R3，src/harness/resilience/；原拦截协议已删除）----
@@ -1424,7 +1424,7 @@ Reflection(reflector, max_rounds=3); Router(classifier, arms, default=None)
 RouterSkill(classifier, routes); Supervisor(planner, child_spec, join)
 Handoff(roles, max_hops=5); Blackboard(agents, rounds=3); Graph()  # 声明式编译
 # 组合算子
-seq(a,b); par([...]); branch(fn, arms); race([...]); retry(n,backoff); map_state(lens); budget(**limits)
+seq(a,b); par([...]); race([...]); retry(n,backoff); map_effect(fn); loop_until(step, done=...); branch_value(source, fn, arms); budget(**limits)
 ```
 
 > **落地细化以 R12 详设为准**：上述签名是概要。完整构造签名（§4）、Terminate 等 Effect 真实语法（§4.0）、
@@ -1703,7 +1703,7 @@ class PortRegistry:
 # 命名空间：内置 llm/tool/memory/store/... ；用户自定义 x-<name>
 
 # A2 架构组合
-agent2 = Agent(arch=budget(max_cost_usd=2)(branch(intent_fn, {"qa": rag, "act": ReAct(tools)})))
+agent2 = Agent(arch=budget(max_cost_usd=2)(branch_value(intent_source, intent_fn, {"qa": rag, "act": ReAct(tools)})))
 
 # A4 组件开发（②领域策略 + ③call 装饰器 + ④notify 观察 + ①算子）
 cap = ResilienceCapability(rate_limit=my_rate_limit, ...)  # ②9 领域策略具名 opt-in 注入
@@ -1716,7 +1716,7 @@ base = make_dispatch(ports)
 decorated = build_call(base, decorators=[retry_call, timeout])      # ③函数组合，无固定角色链
 ```
 
-> 用户无感差异：对外 API（`seq/par/branch/...` + 10 内置架构）不变，它们都是 A 类算子；AOP 五角色/总线不再作为插件作者的接口面。
+> 用户无感差异：对外 API（`seq/par/branch_value/...` + 10 内置架构）不变，它们都是 A 类算子；AOP 五角色/总线不再作为插件作者的接口面。
 
 ### R11.5 元数据与核心字段
 
@@ -1803,7 +1803,7 @@ decorated = build_call(base, decorators=[retry_call, timeout])      # ③函数�
 
 | 组 | 协议 | 默认实现 | 用户接入 |
 |----|------|---------|---------|
-| 扩展/装配 | ①A 类算子（10）/ ②领域策略（R3 9 策略，无统一协议）/ ③call 装饰器（CallFn→CallFn）/ ④notify / Capability（build→Program）/ Provider | 无（按需）/ 内置能力 | `seq/par/...` / `build_call(base, *, decorators=())` / `Runner(notify=...)` / `.capability()` |
+| 扩展/装配 | ①A 类算子（8）/ ②领域策略（R3 9 策略，无统一协议）/ ③call 装饰器（CallFn→CallFn）/ ④notify / Capability（build→Program）/ Provider | 无（按需）/ 内置能力 | `seq/par/...` / `build_call(base, *, decorators=())` / `Runner(notify=...)` / `.capability()` |
 | 认知 | IntentStrategy（+ 级联四部件 KeywordMatcher/IntentSampleStore/CheapIntentModel/PrimaryIntentModel）/ ReflectStrategy / Planner / RePlanner / Executor / Judge / ModelRouter / SchemaValidator | 意图默认四级级联 CascadeIntentStrategy（R13 §4.1）；其余 LLM 默认 / MinimalSchemaValidator | 构造参数 `strategy=`（整体替换）/ `CascadeIntentStrategy(keyword=,samples=,cheap=,primary=)`（部件级）/ `validator=` |
 | RAG | Splitter / Embedder / VectorStore / Retriever / Reranker / QueryRewriter / PostProcessor | 见 R6 | `RAGPipeline(...=)` |
 | 工具 | ToolPort/@tool / MCPTransport / SkillPort / DisclosureIndex | 见 R5 | `register()` / 构造参数 |
@@ -1951,7 +1951,7 @@ decorated = build_call(base, decorators=[retry_call, timeout])      # ③函数�
 | Harness | 围绕模型的控制与反馈系统 = R1 微内核 + 算子核心（组合层）+ 工具层 + 架构 + API |
 | Effect | `Invoke|Spawn|Suspend|Terminate` tagged union，Program 对外部世界的声明，只声明不执行；仅 `Invoke` 走注入的 call |
 | 承载形态（7 种） | 能力（169 项，做什么）≠ 承载形态（怎么实现）：①组合算子 ②领域策略（原"有状态守卫"，落地于 R3 执行器）③call 装饰器 ④notify ⑤Port ⑥组件 ⑦内核机制 |
-| A 类组合算子 | `Program→Program` 装配期纯变换（10 个：seq/par/branch/race/loop/map_state/map_effect/fallback/gate/retry 流程级）；狭义"算子"只指此类，纯函数、状态进 `State.scratch x-*` |
+| A 类组合算子 | `Program→Program` 装配期纯变换（8 个：seq/par/race/map_effect/fallback/retry 流程级 + loop_until/branch_value 回注值驱动）；狭义"算子"只指此类，纯函数、状态进 `State.scratch x-*` |
 | ②领域策略（原"有状态守卫"） | R3 `ReliabilityExecutor` + 9 领域策略显式编排领域方法（`is_tripped`/`acquire`/`permit`/`select` 等），无统一 check/observe 协议；跨调用状态在策略实例（熔断/限流/舱壁/幂等/降级/watchdog/killswitch） |
 | ③call 装饰器 | `CallFn→CallFn`（retry 调用级/timeout/danger_route/injection_guard）；函数组合替代原 AOP 五角色固定链，只覆盖 `Invoke` |
 | SafetyVerdict | R9 安全域四态裁决（allow/redact/deny/ask；ask→Suspend + `wait_human`/`resumed`），与已删除的通用 `Verdict` 不同物 |
@@ -1968,4 +1968,4 @@ decorated = build_call(base, decorators=[retry_call, timeout])      # ③函数�
 
 ---
 
-*AGENT 总设计 · 2026-11-21 · 唯一权威设计文档 · 算子核心架构（R1 零改动 + 10 A 类算子 + 7 承载形态；原 AOP/Lifecycle 已取消）+ R7 D4/D5（大结果落盘不截断 + KV cache 命中率一等可观测）· 配套模块详见 docs/02-模块详设/Agent/*
+*AGENT 总设计 · 2026-11-25 · 唯一权威设计文档 · 算子核心架构（R1 零改动 + 8 A 类算子 + 7 承载形态；原 AOP/Lifecycle 已取消）+ R7 D4/D5（大结果落盘不截断 + KV cache 命中率一等可观测）· 配套模块详见 docs/02-模块详设/Agent/*

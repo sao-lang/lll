@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from runtime import Invoke, Result, Runner, Session, Terminate  # noqa: E402
 
 from compose import (  # noqa: E402
-    branch, fallback, gate, loop, map_effect, map_state, par, race, retry, seq,
+    branch_value, fallback, loop_until, map_effect, par, race, retry, seq,
 )
 from compose.call import build_call as _build_call, retry_call  # noqa: E402
 from compose.dispatch import make_dispatch  # noqa: E402
@@ -28,8 +28,8 @@ def _leaf(name: str) -> object:
 
 def main() -> None:
     """装配并跑通：seq + map_effect + build_call + dispatch + call 装饰器。"""
-    ops = (seq, par, branch, race, loop, map_state, map_effect, fallback, gate, retry)
-    assert all(callable(op) for op in ops), "10 算子必须齐全"
+    ops = (seq, par, race, map_effect, fallback, retry, loop_until, branch_value)
+    assert all(callable(op) for op in ops), "公开算子必须齐全"
 
     seen: list[str] = []
     def handler(effect: Invoke, ctx: object) -> Result:
@@ -54,7 +54,7 @@ def main() -> None:
     assert asyncio.run(runner.run(Session(session_id="arch", program_factory=lambda: arch.compile()))).status == "done"  # type: ignore[arg-type]
     graph = Graph().node("a", _leaf("a")).exit("a")
     assert graph.static_check().ok
-    print("R12 算子核心 demo PASS：10 算子齐全 + seq/map_effect + build_call/dispatch + retry_call 装饰器 + 内置架构冒烟")
+    print("R12 算子核心 demo PASS：公开算子齐全 + seq/map_effect + build_call/dispatch + retry_call 装饰器 + 内置架构冒烟")
 
 
 if __name__ == "__main__":

@@ -37,9 +37,11 @@ async def _wrap(
     """包装实现：逐块转发 TEXT_DELTA，流末按 last_usage 补 USAGE/DONE。"""
     # 规则 6 例外：包装具名固定能力的旧后端（stream/last_usage），非动态键读取。
     stream = getattr(llm, "stream")
-    last_usage = getattr(llm, "last_usage", None)
     async for chunk in stream(req, ctx):  # 逐块转发不缓存整段，保持流式低延迟
         yield StreamEvent(kind=StreamEventKind.TEXT_DELTA, data=chunk)
+    # 在流末读取：真实适配器（LLMPort 契约）在流中才写 last_usage，
+    # 包装器创建时快照会拿到 None 导致 USAGE 事件缺失（审计 EXP6-B）。
+    last_usage = getattr(llm, "last_usage", None)
     if last_usage is not None:  # 仅有 usage 才发 USAGE；缺失也不伪造，结算责任在网关
         yield StreamEvent(kind=StreamEventKind.USAGE, data=last_usage)
     yield StreamEvent(kind=StreamEventKind.DONE)

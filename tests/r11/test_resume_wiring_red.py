@@ -8,8 +8,8 @@ from __future__ import annotations
 import pytest
 
 from api import Agent
-from compose import gate, LifecyclePhase
-from runtime import Invoke, Terminate
+from compose import LifecyclePhase
+from runtime import Invoke, Suspend, Terminate
 from harness.model import ModelCapability
 
 
@@ -27,16 +27,16 @@ class _LLM:
         raise NotImplementedError
 
 
-def _leaf(name: str = "g") -> object:
-    def program():  # type: ignore[no-untyped-def]
-        yield Invoke(port="llm", payload={"name": name})
-        yield Terminate(output=f"{name}-done")
-    return program
-
-
 def _gate_arch() -> object:
+    """可挂起架构：直接 yield Suspend（gate 算子已因依赖不存在的 state port 删除）。"""
     from types import SimpleNamespace
-    return SimpleNamespace(compile=gate(_leaf(), policy=lambda s: "need_approval"))
+
+    def program():  # type: ignore[no-untyped-def]
+        answer = yield Suspend(question="approval", options=("yes", "no"))
+        yield Invoke(port="llm", payload={"name": "g", "answer": answer})
+        yield Terminate(output="g-done")
+
+    return SimpleNamespace(compile=program)
 
 
 def test_red_say_suspends_and_resume_completes() -> None:

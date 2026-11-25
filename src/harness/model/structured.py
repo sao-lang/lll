@@ -115,7 +115,13 @@ def validate_json_schema(value: object, schema: dict[str, DynamicValue]) -> list
         try:
             data = json.loads(value)
         except (ValueError, TypeError):
-            return [f"invalid JSON text: {value[:80]!r}"]
+            if "type" in schema:
+                # schema 声明了类型，纯文本显然无法满足 → 判非法（fail-closed）。
+                return [f"invalid JSON text: {value[:80]!r}"]
+            # schema 无 type 约束：非 JSON 文本按纯文本校验（StructuredOutputValidator
+            # docstring 承诺的成功分支）。其余关键字仍校验：enum 约束照常生效，
+            # properties/required/items 等非对象实例上按 JSON Schema 语义空适用。
+            data = value
     _check(data, schema, "$", errors)
     return errors
 

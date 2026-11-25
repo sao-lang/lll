@@ -1,248 +1,93 @@
 {
-  "plan": ".conductor/overviews/2026-11-21/8ef577c1-架构层契约兑现-plan.json",
-  "plan_hash": "51bd04df",
+  "plan": ".conductor/overviews/2026-11-21/8ef577c1-e2e-rebuild-plan.json",
+  "plan_hash": "5a9293bd",
   "active_path": "P1",
   "cursor": null,
   "node_states": {
-    "n_inv-S2-investigate": "done",
-    "n_clarify-S2-clarify": "done",
-    "n_cov-S2-coverage": "done",
-    "n_contract-S2-contract": "done",
-    "n_cgate-S2-contract-gate": "done",
-    "n_impact-SCAN": "done",
     "n_red-RED": "done",
     "n_green-GREEN": "done",
-    "n_refactor-REFACTOR": "done",
     "n_evidence-EVIDENCE": "done",
-    "n_stage-STAGE": "done",
-    "n_commit-COMMIT": "done",
     "n_review-DISPATCH-DISPATCH": "done",
     "n_rgate-GATE": "done",
-    "n_memloc-LOCATE": "done",
-    "n_record-RECORD": "done"
+    "n_record-RECORD-RECORD": "done"
   },
   "evidence": {
-    "n_inv-S2-investigate": "Explore 只读调查出四层差距带行号：组合层 0/10 架构复用算子(recipes.py:24 唯一 import ProgramFn，compile 手搓)；可插拔层履约校验全缺(唯一 LLMPort 三处 gateway.py:290/396/458)，CheapIntentModel/PrimaryIntentModel 无默认(cascade.py:146-147)，文档3个注入入口不存在；门面层无 say()/runtime(call) 必填(builder.py:144)、redact 暴露 PortCtx(:127)；端到端需5段胶水(demo_r12.py:35-54)；空壳测试 test_tool_layers.py:121-132",
-    "n_clarify-S2-clarify": "用户15:20逐条确认契约（语义API不暴露message/ReAct由FP算子组合/组合API公开可封装自定义架构/Capability-策略-工具三层可注入四要素齐全）；本轮调查无新增未决项，边界已固化在 plan.assumptions",
-    "n_cov-S2-coverage": "覆盖矩阵21行(含红队补漏9行) coverage_check rc=0 PASS；overview 已记二次拷问补漏",
-    "n_contract-S2-contract": "change-contract 六段齐全 contract_check rc=0 PASS；契约②张力B3/门面分层B4已显式声明推荐决策",
-    "n_cgate-S2-contract-gate": "用户15:20确认契约+coverage_check rc=0+contract_check rc=0，S2门禁放行",
-    "n_impact-SCAN": "impact_analysis 扫 symbols(runtime/build_runtime/say/_invoke/_batch/_end/_run_child/CheapIntentModel/PrimaryIntentModel)：runtime 被全 harness 引用但不改其源码；待删符号 _invoke/_batch/_end/_run_child 引用集中在 archs/recipes.py；契约Delta与待删项已登记 contract.Delta",
-    "n_red-RED": "返修循环RED：Round2/3的Blocker对应9条真实写法失败测试先行，最终全绿",
-    "n_green-GREEN": "10/10架构真实算子化(ToolUse→par/seq, ReAct→loop_until, PlanExecute/Reflection→loop_until, Router/RouterSkill→branch_value+seq, Supervisor/Blackboard→par, Handoff/Graph→loop_until)，每个过行为等价测试；契约6测试全绿；全量pytest绿",
-    "n_refactor-REFACTOR": "删除推导：test_p6空壳断言/llm_step/tool_step/terminate_step 四符号 removal_check PASS 零残留；helper(_invoke/_batch/_end/_run_child/_X)作为叶子Effect构造器保留非双轨，contract已说明",
-    "n_evidence-EVIDENCE": "pytest全绿/mypy 114文件零错/12门禁全绿/ast r5r9r10r11 PASS/purity rc=0/R1 diff空/用户路径零胶水实测 say()出真实输出+自定义架构static_check.ok",
-    "n_stage-STAGE": "精确暂存10文件(1389+/223-)：src/api/{__init__,agent,dsl}.py + archs/recipes.py + compose/program.py + tests/r12/test_architecture_contract.py + contract/coverage/plan/overview；排除并发LLM日志指南文件与conductor本地状态",
-    "n_commit-COMMIT": "commit be313cb：10文件架构层契约兑现",
-    "n_review-DISPATCH-DISPATCH": "全新子代理review判定Blocked：B1 tool断链/B2履约校验与注入假/B3 say async崩/B4自定义架构输入失效+数据泄漏，报告已内嵌overview",
-    "n_rgate-GATE": "Round4独立复审 Clean：Blocker=0；4轮review全部实测收敛；pytest全绿/mypy115/purity0/12门禁/R1内核零改动",
-    "n_memloc-LOCATE": "overview_path --audit: violations=null 3主文件/3会话合规；contract.Affected文档已同步(R12/R13/代码阅读指南)；本轮未新建主文件",
-    "n_record-RECORD": "commit 5e603af 文档同步；overview内嵌4轮review报告(R1-R4)+契约兑现结论；工作记忆写入.workbuddy/memory/2026-11-23.md"
+    "n_red-RED": "pytest tests/e2e/test_memory_e2e.py -q: 1st run 6 FAILED (exit 1), after fixing test-code errors 6 passed exit 0; e2e on implemented system, RED validity via mutation later",
+    "n_green-GREEN": "pytest tests/e2e -q: 81 passed exit 0, 0 skip; 8 files covers MEM/LLM/Port/Cap/Tool/Strategy/OPS/DSL/RT/ORCH/TRACE/DEG/infra",
+    "n_evidence-EVIDENCE": "5 mutations each rc=1 then rc=0 restored; pytest tests/ all green; mypy strict 122 files clean; purity strict exit 0; r1-r12 gate r11 G1 78.70pct legacy; git diff src empty; src MUTATION 0",
+    "n_review-DISPATCH-DISPATCH": "81 passed; round1 2 Blockers fixed, round2 fresh subagent Blocker=0",
+    "n_rgate-GATE": "pytest tests/e2e -q exit 0; Blocker=0 confirmed by fresh independent subagent",
+    "n_record-RECORD-RECORD": "exit 0 with python overview_path.py --audit violations=null; overview S3 section and memory appended; 81 passed e2e"
   },
-  "rounds": {
-    "n_red-RED": 1
-  },
+  "rounds": {},
   "history": [
     {
-      "step": "n_inv-S2-investigate",
-      "action": "start",
-      "at": "2026-11-23T15:24:18+08:00"
-    },
-    {
-      "step": "n_inv-S2-investigate",
-      "action": "done",
-      "at": "2026-11-23T15:24:19+08:00",
-      "evidence": "Explore 只读调查出四层差距带行号：组合层 0/10 架构复用算子(recipes.py:24 唯一 import ProgramFn，compile 手搓)；可插拔层履约校验全缺(唯一 LLMPort 三处 gateway.py:290/396/458)，CheapIntentModel/PrimaryIntentModel 无默认(cascade.py:146-147)，文档3个注入入口不存在；门面层无 say()/runtime(call) 必填(builder.py:144)、redact 暴露 PortCtx(:127)；端到端需5段胶水(demo_r12.py:35-54)；空壳测试 test_tool_layers.py:121-132"
-    },
-    {
-      "step": "n_clarify-S2-clarify",
-      "action": "start",
-      "at": "2026-11-23T15:24:24+08:00"
-    },
-    {
-      "step": "n_clarify-S2-clarify",
-      "action": "done",
-      "at": "2026-11-23T15:24:24+08:00",
-      "evidence": "用户15:20逐条确认契约（语义API不暴露message/ReAct由FP算子组合/组合API公开可封装自定义架构/Capability-策略-工具三层可注入四要素齐全）；本轮调查无新增未决项，边界已固化在 plan.assumptions"
-    },
-    {
-      "step": "n_cov-S2-coverage",
-      "action": "start",
-      "at": "2026-11-23T15:29:49+08:00"
-    },
-    {
-      "step": "n_cov-S2-coverage",
-      "action": "done",
-      "at": "2026-11-23T15:29:50+08:00",
-      "evidence": "覆盖矩阵21行(含红队补漏9行) coverage_check rc=0 PASS；overview 已记二次拷问补漏"
-    },
-    {
-      "step": "n_contract-S2-contract",
-      "action": "start",
-      "at": "2026-11-23T15:29:50+08:00"
-    },
-    {
-      "step": "n_contract-S2-contract",
-      "action": "done",
-      "at": "2026-11-23T15:29:50+08:00",
-      "evidence": "change-contract 六段齐全 contract_check rc=0 PASS；契约②张力B3/门面分层B4已显式声明推荐决策"
-    },
-    {
-      "step": "n_cgate-S2-contract-gate",
-      "action": "start",
-      "at": "2026-11-23T15:29:50+08:00"
-    },
-    {
-      "step": "n_cgate-S2-contract-gate",
-      "action": "done",
-      "at": "2026-11-23T15:29:50+08:00",
-      "evidence": "用户15:20确认契约+coverage_check rc=0+contract_check rc=0，S2门禁放行"
-    },
-    {
-      "step": "n_impact-SCAN",
-      "action": "start",
-      "at": "2026-11-23T15:30:13+08:00"
-    },
-    {
-      "step": "n_impact-SCAN",
-      "action": "done",
-      "at": "2026-11-23T15:30:13+08:00",
-      "evidence": "impact_analysis 扫 symbols(runtime/build_runtime/say/_invoke/_batch/_end/_run_child/CheapIntentModel/PrimaryIntentModel)：runtime 被全 harness 引用但不改其源码；待删符号 _invoke/_batch/_end/_run_child 引用集中在 archs/recipes.py；契约Delta与待删项已登记 contract.Delta"
-    },
-    {
       "step": "n_red-RED",
       "action": "start",
-      "at": "2026-11-23T15:30:57+08:00"
+      "at": "2026-11-24T22:38:11+08:00"
     },
     {
       "step": "n_red-RED",
       "action": "done",
-      "at": "2026-11-23T15:30:57+08:00",
-      "evidence": "6条断言失败(非error)：api.Agent不存在/ReAct.compile不复用算子/api.dsl不存在/履约校验缺失。pytest tests/r12/test_architecture_contract.py -q → 6 FAILED，失败因功能缺失符合预期"
+      "at": "2026-11-24T22:38:16+08:00",
+      "evidence": "pytest tests/e2e/test_memory_e2e.py -q: 1st run 6 FAILED (exit 1), after fixing test-code errors 6 passed exit 0; e2e on implemented system, RED validity via mutation later"
     },
     {
       "step": "n_green-GREEN",
       "action": "start",
-      "at": "2026-11-23T20:39:39+08:00"
+      "at": "2026-11-24T23:41:02+08:00"
     },
     {
       "step": "n_green-GREEN",
       "action": "done",
-      "at": "2026-11-23T20:39:39+08:00",
-      "evidence": "10/10架构真实算子化(ToolUse→par/seq, ReAct→loop_until, PlanExecute/Reflection→loop_until, Router/RouterSkill→branch_value+seq, Supervisor/Blackboard→par, Handoff/Graph→loop_until)，每个过行为等价测试；契约6测试全绿；全量pytest绿"
-    },
-    {
-      "step": "n_refactor-REFACTOR",
-      "action": "start",
-      "at": "2026-11-23T20:39:39+08:00"
-    },
-    {
-      "step": "n_refactor-REFACTOR",
-      "action": "done",
-      "at": "2026-11-23T20:39:39+08:00",
-      "evidence": "删除推导：test_p6空壳断言/llm_step/tool_step/terminate_step 四符号 removal_check PASS 零残留；helper(_invoke/_batch/_end/_run_child/_X)作为叶子Effect构造器保留非双轨，contract已说明"
+      "at": "2026-11-24T23:41:02+08:00",
+      "evidence": "pytest tests/e2e -q: 81 passed exit 0, 0 skip; 8 files covers MEM/LLM/Port/Cap/Tool/Strategy/OPS/DSL/RT/ORCH/TRACE/DEG/infra"
     },
     {
       "step": "n_evidence-EVIDENCE",
       "action": "start",
-      "at": "2026-11-23T20:43:06+08:00"
+      "at": "2026-11-24T23:41:02+08:00"
     },
     {
       "step": "n_evidence-EVIDENCE",
       "action": "done",
-      "at": "2026-11-23T20:43:06+08:00",
-      "evidence": "pytest全绿/mypy 114文件零错/12门禁全绿/ast r5r9r10r11 PASS/purity rc=0/R1 diff空/用户路径零胶水实测 say()出真实输出+自定义架构static_check.ok"
-    },
-    {
-      "step": "n_stage-STAGE",
-      "action": "start",
-      "at": "2026-11-23T20:43:25+08:00"
-    },
-    {
-      "step": "n_stage-STAGE",
-      "action": "done",
-      "at": "2026-11-23T20:43:25+08:00",
-      "evidence": "精确暂存10文件(1389+/223-)：src/api/{__init__,agent,dsl}.py + archs/recipes.py + compose/program.py + tests/r12/test_architecture_contract.py + contract/coverage/plan/overview；排除并发LLM日志指南文件与conductor本地状态"
-    },
-    {
-      "step": "n_commit-COMMIT",
-      "action": "start",
-      "at": "2026-11-23T20:43:39+08:00"
-    },
-    {
-      "step": "n_commit-COMMIT",
-      "action": "done",
-      "at": "2026-11-23T20:43:39+08:00",
-      "evidence": "commit be313cb：10文件架构层契约兑现"
+      "at": "2026-11-24T23:41:02+08:00",
+      "evidence": "5 mutations each rc=1 then rc=0 restored; pytest tests/ all green; mypy strict 122 files clean; purity strict exit 0; r1-r12 gate r11 G1 78.70pct legacy; git diff src empty; src MUTATION 0"
     },
     {
       "step": "n_review-DISPATCH-DISPATCH",
       "action": "start",
-      "at": "2026-11-23T20:48:51+08:00"
+      "at": "2026-11-24T23:41:09+08:00"
     },
     {
       "step": "n_review-DISPATCH-DISPATCH",
       "action": "done",
-      "at": "2026-11-23T20:48:57+08:00",
-      "evidence": "全新子代理review判定Blocked：B1 tool断链/B2履约校验与注入假/B3 say async崩/B4自定义架构输入失效+数据泄漏，报告已内嵌overview"
+      "at": "2026-11-24T23:41:26+08:00",
+      "evidence": "81 passed; round1 2 Blockers fixed, round2 fresh subagent Blocker=0"
     },
     {
       "step": "n_rgate-GATE",
       "action": "start",
-      "at": "2026-11-23T20:49:03+08:00"
-    },
-    {
-      "step": "n_rgate-GATE",
-      "action": "fail",
-      "at": "2026-11-23T20:49:04+08:00",
-      "reason": "独立review Blocked 4项：B1 tool断链/B2注入假/B3 async崩/B4输入失效+泄漏；按on_fail路由回RED返修",
-      "route": "retry"
-    },
-    {
-      "step": "n_red-RED",
-      "action": "start",
-      "at": "2026-11-23T22:13:32+08:00"
-    },
-    {
-      "step": "n_red-RED",
-      "action": "done",
-      "at": "2026-11-23T22:13:32+08:00",
-      "evidence": "返修循环RED：Round2/3的Blocker对应9条真实写法失败测试先行，最终全绿"
-    },
-    {
-      "step": "n_rgate-GATE",
-      "action": "start",
-      "at": "2026-11-23T22:13:39+08:00"
+      "at": "2026-11-24T23:41:26+08:00"
     },
     {
       "step": "n_rgate-GATE",
       "action": "done",
-      "at": "2026-11-23T22:13:39+08:00",
-      "evidence": "Round4独立复审 Clean：Blocker=0；4轮review全部实测收敛；pytest全绿/mypy115/purity0/12门禁/R1内核零改动"
+      "at": "2026-11-24T23:41:26+08:00",
+      "evidence": "pytest tests/e2e -q exit 0; Blocker=0 confirmed by fresh independent subagent"
     },
     {
-      "step": "n_memloc-LOCATE",
+      "step": "n_record-RECORD-RECORD",
       "action": "start",
-      "at": "2026-11-23T22:15:20+08:00"
+      "at": "2026-11-24T23:41:59+08:00"
     },
     {
-      "step": "n_memloc-LOCATE",
+      "step": "n_record-RECORD-RECORD",
       "action": "done",
-      "at": "2026-11-23T22:15:20+08:00",
-      "evidence": "overview_path --audit: violations=null 3主文件/3会话合规；contract.Affected文档已同步(R12/R13/代码阅读指南)；本轮未新建主文件"
-    },
-    {
-      "step": "n_record-RECORD",
-      "action": "start",
-      "at": "2026-11-23T22:15:37+08:00"
-    },
-    {
-      "step": "n_record-RECORD",
-      "action": "done",
-      "at": "2026-11-23T22:15:38+08:00",
-      "evidence": "commit 5e603af 文档同步；overview内嵌4轮review报告(R1-R4)+契约兑现结论；工作记忆写入.workbuddy/memory/2026-11-23.md"
+      "at": "2026-11-24T23:42:16+08:00",
+      "evidence": "exit 0 with python overview_path.py --audit violations=null; overview S3 section and memory appended; 81 passed e2e"
     }
   ],
   "stalled": false,
-  "created": "2026-11-23T15:21:52+08:00"
+  "created": "2026-11-24T22:30:26+08:00"
 }

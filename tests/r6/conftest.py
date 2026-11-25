@@ -113,6 +113,11 @@ class InMemoryVectorStore:
         """写入块（向量在 chunk.vector 上）。"""
         self._chunks.extend(chunks)
 
+    async def delete(self, chunk_ids: list[str]) -> None:
+        """按 chunk_id 删除块（幂等）。"""
+        doomed = set(chunk_ids)
+        self._chunks = [c for c in self._chunks if c.chunk_id not in doomed]
+
     def all_chunks(self) -> list[Chunk]:
         """返回全部块（供混合召回关键词通道）。"""
         return list(self._chunks)

@@ -368,39 +368,45 @@ class ModelGateway:
                 )
 
         try:  # 包住整条调用链：任何异常/取消都必须走到下面释放预留，不留悬空额度
-            response = await llm.complete(request, ctx)
-            if response.error:  # 错误响应提前返回：不校验、不缓存；预留必须在此释放而非拖到结算
+            first = await llm.complete(request, ctx)
+            if first.error:  # 错误响应提前返回：不校验、不缓存；预留必须在此释放而非拖到结算
                 # 后端失败：释放预留、照实记账（usage 为零由响应自带）。
                 if reservation is not None and self._cost_guard is not None:
                     self._cost_guard.cancel(reservation)
                     reservation = None
-                self._record_cost(response, ctx)
-                return response
+                self._record_cost(first, ctx)
+                return first
 
+            # calls = 本次 miss 触发的全部后端调用响应（首次 + 每次修复）。
+            # 每条调用各记一笔账、各计一份成本；绝不能用最终响应覆盖/重复记账。
+            calls: list[LLMResponse] = [first]
+            final = first
             if self._validator is not None:  # 仅装配 spec 时才有校验器；非结构化场景跳过校验直接结算
                 # E6：按 spec.mode 决定是否修复；constrained/prompt 模式只校验不修复。
                 if self._validator.should_repair:
-                    response = await self._complete_with_repair(response, request, ctx, llm=llm)
+                    calls, final = await self._complete_with_repair(first, request, ctx, llm=llm)
                 elif self._spec is not None and self._spec.strict:  # 非修复模式靠 strict 兜底拒绝非法输出
-                    errors = self._validator.check(response.content or "")
+                    errors = self._validator.check(first.content or "")
                     if errors:  # 有错即判非法：折叠成 error 响应，绝不流入缓存或工具调用
                         # N3：strict 失败折叠 error（不抛穿）；预留也要释放。
                         if reservation is not None and self._cost_guard is not None:
                             self._cost_guard.cancel(reservation)
                             reservation = None
                         return LLMResponse(
-                            content="", tool_calls=[], usage=response.usage,
-                            model=response.model, error=f"SCHEMA_INVALID: {errors}",
+                            content="", tool_calls=[], usage=first.usage,
+                            model=first.model, error=f"SCHEMA_INVALID: {errors}",
                         )
 
-            # 成功后按实际成本结算预留并记账（reservation 交给 _record_cost commit）。
-            self._record_cost(response, ctx, reservation=reservation)
+            # 预留按整条调用链的总成本一次结清；账本按每次调用逐条登记。
+            self._settle_guard(sum(float(r.usage.cost_usd) for r in calls), reservation)
             reservation = None  # 已结清，避免 finally 重复 cancel
+            for call in calls:
+                self._ledger_record(call, ctx)
 
             # 非法输出绝不写缓存（否则污染后续请求）；仅合法响应入缓存。
-            if not response.error:
-                await self._cache.put(request, response, version=self._prompt_version)
-            return response
+            if not final.error:
+                await self._cache.put(request, final, version=self._prompt_version)
+            return final
         except BaseException:
             # 异常/取消：释放预留，不记支出。
             if reservation is not None and self._cost_guard is not None:
@@ -534,26 +540,19 @@ class ModelGateway:
                 self._cost_guard.cancel(reservation)
             raise
 
-    def _record_cost(
-        self, response: LLMResponse, ctx: PortCtx, *, reservation: Reservation | None = None,
-    ) -> None:
-        """从响应的 usage 记录成本（不自行估算），结清成本硬闸。
-
-        参数：
-            response: LLM 响应（usage 提供 token/成本）。ctx: Port 上下文，
-                agent_id/user_id 由 coerce_port_ctx 具名视图提供（规则 6）。
-            reservation: 调用前的预留凭证（P2b）；有则 commit 按实际结算，
-                无则走旧 allow/charge 兼容路径（流式等未预留的场景）。
-        """
-        cost = float(response.usage.cost_usd)
-        if reservation is not None and self._cost_guard is not None:  # 有预留走 commit 按实结清；差额退还/补扣，不按预估死扣
-            # P2b：按实际成本结清预留（差额退还/补扣）。
-            self._cost_guard.commit(reservation, cost)
-        elif self._cost_guard is not None:
-            # 兼容路径（无预留）：旧 allow/charge 事后语义。
-            if not self._cost_guard.allow(cost):
+    def _settle_guard(self, cost: float, reservation: Reservation | None) -> None:
+        """按实际成本结清成本硬闸（一次调用链只结清一次）。"""
+        guard = self._cost_guard
+        if reservation is not None and guard is not None:  # 有预留走 commit 按实结清；差额退还/补扣
+            guard.commit(reservation, cost)
+        elif guard is not None:
+            # 无预留路径：旧 allow/charge 事后语义。
+            if not guard.allow(cost):
                 raise ValueError("cost budget exceeded (CostGuard)")
-            self._cost_guard.charge(cost)
+            guard.charge(cost)
+
+    def _ledger_record(self, response: LLMResponse, ctx: PortCtx) -> None:
+        """把一次后端调用的 usage 登记进账本（与成本硬闸结算解耦）。"""
         view = coerce_port_ctx(ctx)  # 唯一 PortCtx 动态边界（规则 6）
         self.ledger.record(CostRecord(
             run_id=ctx.run_id,
@@ -563,6 +562,17 @@ class ModelGateway:
             usage=response.usage,
         ))
 
+    def _record_cost(
+        self, response: LLMResponse, ctx: PortCtx, *, reservation: Reservation | None = None,
+    ) -> None:
+        """单次响应的便利入口：先结清硬闸，再记一条账。
+
+        多次调用链（repair）由 _complete_miss 分别调 _settle_guard/_ledger_record，
+        避免最终响应被重复记账或首次响应丢失。
+        """
+        self._settle_guard(float(response.usage.cost_usd), reservation)
+        self._ledger_record(response, ctx)
+
     async def _complete_with_repair(
         self,
         response: LLMResponse,
@@ -570,8 +580,11 @@ class ModelGateway:
         ctx: PortCtx,
         *,
         llm: LLMPortWithUsage | None = None,
-    ) -> LLMResponse:
+    ) -> tuple[list[LLMResponse], LLMResponse]:
         """异步修复循环：最多 max_repair 次，每次把校验错误附给模型。
+
+        返回 (全部后端调用响应, 最终响应)：调用方对每条响应各记一次账，
+        修复循环本身不记账（避免最终响应被重复记账、首次响应丢失）。
 
         llm: 本次调用已解析的后端（缺省用默认，兼容直接调用）。
         """
@@ -579,11 +592,12 @@ class ModelGateway:
         assert self._spec is not None  # validator 存在时 spec 必存在（构造时同源创建）
         spec = self._spec
         current = response
+        calls: list[LLMResponse] = [response]
         for _ in range(self._validator.max_repair + 1):  # +1 是首次校验，其后最多 max_repair 次修复，防止无限重试烧成本
             # 走 validator 持有的校验器（默认或注入），保证"校验"与"修复"同一口径。
             errors = self._validator.check(current.content or "")
             if not errors:  # 一旦合法立即返回，避免对已合规输出再发起一次无谓修复调用
-                return current
+                return calls, current
             repair_prompt = self._validator.build_repair_prompt(current.content or "", errors)
             # 统一复用 R1 Message 四字段具名结构（规则 4）：消除仅两字段的重复 ChatMessage。
             repair_message = Message(role="system", content=repair_prompt)
@@ -592,11 +606,11 @@ class ModelGateway:
                 model=request.model,
             )
             current = await (llm or self._llm).complete(patched, ctx)
-            self._record_cost(current, ctx)
+            calls.append(current)
         # 超次：strict 模式拒答（N3：折叠为 SCHEMA_INVALID error 响应，不抛穿成 PORT_CRASHED）。
         if spec.strict:
-            return LLMResponse(
+            return calls, LLMResponse(
                 content="", tool_calls=[], usage=current.usage,
                 model=current.model, error="SCHEMA_INVALID: repair exhausted",
             )
-        return current
+        return calls, current

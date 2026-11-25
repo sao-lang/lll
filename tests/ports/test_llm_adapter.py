@@ -103,20 +103,25 @@ class TestStream:
         assert chunks == ["he", "llo"]
         assert llm.last_usage is not None and llm.last_usage.completion_tokens == 2
 
-    def test_stream_disconnect_does_not_fake_zero_usage(self) -> None:
-        """N1：流中途断流不得把 last_usage 设成全零 Usage() 伪装成功结算。
+    def test_stream_disconnect_raises_and_fakes_no_usage(self) -> None:
+        """断流必须上抛原始错误，且不得写入 usage 伪装成功结算。
 
-        last_usage 必须保持 None，让网关的 "usage is None → 拒答" 防线生效，
-        避免假零成本 + 空内容写缓存污染后续请求。
+        早期实现吞掉异常并让网关看到 None，虽不记假账却把原始错误丢失；
+        现在错误原样上抛，网关据此释放预留、不结算、不写缓存。
         """
         def handler(request: httpx.Request) -> httpx.Response:
             raise httpx.ReadError("connection reset mid-stream")
 
         llm = OpenAICompatLLM(base_url="https://api.test/openai", api_key="k",
                               model="m", client=_client(handler))
-        asyncio.run(_collect(llm.stream(_req(), _ctx())))
+        try:
+            asyncio.run(_collect(llm.stream(_req(), _ctx())))
+        except httpx.ReadError as exc:
+            assert "connection reset mid-stream" in str(exc)
+        else:
+            raise AssertionError("断流必须上抛 httpx.ReadError，不得吞成正常结束")
         assert llm.last_usage is None, \
-            f"断流后 last_usage 应保持 None（由网关拒答），实际 {llm.last_usage!r}"
+            f"断流后 last_usage 应保持 None，实际 {llm.last_usage!r}"
 
 
 class TestErrors:

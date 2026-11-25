@@ -447,8 +447,10 @@ def scan_r12(files: list[Path]) -> list[str]:
         violations.append("算子核心缺失：src/compose/program.py")
     else:
         text = program.read_text(encoding="utf-8")
-        for op in ("seq", "par", "branch", "race", "loop", "map_state",
-                   "map_effect", "fallback", "gate", "retry"):
+        # 2026-11-25：branch/loop/map_state/gate 依赖不存在的 state port 被删除，
+        # 由 loop_until/branch_value 取代（见 R2 详设 §算子集）。
+        for op in ("seq", "par", "race", "map_effect", "fallback", "retry",
+                   "loop_until", "branch_value"):
             if f"def {op}(" not in text:
                 violations.append(f"A 类算子缺失: {op}")
     if (SRC / "aop").exists():

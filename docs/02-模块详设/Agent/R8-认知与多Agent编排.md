@@ -80,7 +80,7 @@ class Arch(Protocol):
 ReAct / ToolUse / PlanExecute / Reflection / Router / RouterSkill /
 Supervisor / Handoff / Blackboard / Graph /（+ 组合算子支撑嵌套）
 # 组合算子
-seq / par / branch / race / loop / map_state / map_effect / fallback / gate / retry（10 个 A 类算子，详见 R12）
+seq / par / race / map_effect / fallback / retry / loop_until / branch_value（8 个 A 类算子，详见 R12）
 ```
 
 ## 5. 元数据与关键字段（核心字段）

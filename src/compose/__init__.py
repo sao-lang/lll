@@ -30,12 +30,10 @@ from .guards import (
 )
 from .input import bind_input, current_input
 from .program import (
-    branch,
+    branch_value,
     fallback,
-    gate,
-    loop,
+    loop_until,
     map_effect,
-    map_state,
     par,
     race,
     retry,
@@ -60,8 +58,9 @@ from .notify import (
 
 __all__ = [
     # ①A 类算子（Program → Program）
-    "seq", "par", "branch", "race", "loop", "map_state", "map_effect",
-    "fallback", "gate", "retry",
+    "seq", "par", "race", "map_effect", "fallback", "retry",
+    # 回注值驱动的循环/分支（真实 Runner 无 state port）
+    "loop_until", "branch_value",
     "current_input", "bind_input",
     # call 装饰器 / 装配
     "CallFn", "build_call",

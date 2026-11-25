@@ -253,6 +253,7 @@ class ReAct:
                     results = tool_results if isinstance(tool_results, list) else [tool_results]
                     for call, data in zip(calls, results):
                         messages.append({"role": "tool", "name": _get(call, "name", ""),
+                                         "call_id": _get(call, "call_id", ""),
                                          "content": data})
                     yield _end({"tool_results": results, "calls": calls})
                 return program()

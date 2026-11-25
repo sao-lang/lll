@@ -101,7 +101,7 @@ class MemoryStore:
         _embedder: 语义召回向量化后端；None 时用 R6 HashEmbedder。
         _vector_store: 语义召回向量库；None 时用 R6 InMemoryVectorStore。
         _detector: 注入检测器；None 时用 R5 KeywordInjectionDetector。
-        _kv: (namespace, key) → 值，键值记忆本体（read/write/forget 操作）。
+        _kv: (tenant, namespace, key) → 值，键值记忆本体（read/write/forget 按 tenant 隔离）。
         _items: item_id → MemoryItem，长期记忆项实体（召回与治理操作）。
         _tiers: item_id → 当前温度层。
         _item_times: item_id → 写入时刻（ns），供独立 TTL 判定。
@@ -133,16 +133,21 @@ class MemoryStore:
         self._detector = (
             detector if detector is not None else KeywordInjectionDetector()
         )
-        self._kv: dict[tuple[str, str], DynamicValue] = {}
+        self._kv: dict[tuple[str, str, str], DynamicValue] = {}
         self._items: dict[str, MemoryItem] = {}
         self._tiers: dict[str, MemoryTier] = {}
         self._item_times: dict[str, int] = {}
         self._vectors: dict[str, tuple[float, ...]] = {}
 
+    @staticmethod
+    def _kv_key(namespace: str, key: str, ctx: PortCtx) -> tuple[str, str, str]:
+        """KV 存储键含 tenant：read/write/forget 共用唯一隔离口径。"""
+        return (ScopeResolver.resolve(ctx).tenant, namespace, key)
+
     # ---------- R2 MemoryPort 履约（保持签名） ----------
     async def read(self, namespace: str, key: str, ctx: PortCtx) -> DynamicValue:
-        """按 namespace/key 读取；不存在返回 None（键值层不做 tenant 隔离）。"""
-        return self._kv.get((namespace, key))
+        """按 tenant/namespace/key 读取；跨 tenant 一律 None（KV 层也隔离）。"""
+        return self._kv.get(self._kv_key(namespace, key, ctx))
 
     async def write(
         self, namespace: str, key: str, value: DynamicValue, ctx: PortCtx
@@ -151,17 +156,37 @@ class MemoryStore:
         if is_secret_key(key) or is_secret_key(namespace):
             raise ValueError(f"secret key rejected: {key}")
         self._scan_value(value, key)
-        self._kv[(namespace, key)] = value
+        self._kv[self._kv_key(namespace, key, ctx)] = value
         # write 与 recall 必须同一通道（B7）：只写 _kv 会让按标准 MemoryPort.write
         # 写入的记忆永远召不回（recall 只读 _items）。同步 ingest 进召回链；
-        # 非字符串值转文本，namespace/key 作为来源标识便于溯源。
+        # 非字符串值转文本，namespace/key 作为来源标识便于溯源与 forget 反查。
         text = value if isinstance(value, str) else str(value)
         if text.strip():
             self.ingest(text, ctx, source=f"write:{namespace}/{key}")
 
-    async def forget(self, namespace: str, key: str, ctx: PortCtx) -> None:  # purity-exempt: MemoryPort 统一签名要求 ctx；KV 遗忘不依赖 scope
-        """遗忘指定键值；不存在幂等。"""
-        self._kv.pop((namespace, key), None)
+    async def forget(self, namespace: str, key: str, ctx: PortCtx) -> None:
+        """遗忘指定键值及其 ingest 出的记忆项；跨 tenant 幂等且互不影响。"""
+        scope = ScopeResolver.resolve(ctx)
+        self._kv.pop(self._kv_key(namespace, key, ctx), None)
+        source_prefix = f"write:{namespace}/{key}:"
+        # write 自动 ingest 进 _items/_tiers/_vectors；只 pop _kv 会让该记忆继续被
+        # recall 命中。按来源标识精确反查：相同正文的两个 key 不是同一记忆
+        # （ingest 近重复合并只保留首个 source），按正文兜底会跨 key 误删。
+        forgotten_chunks: list[str] = []
+        for item_id, item in list(self._items.items()):
+            if item.scope.tenant != scope.tenant:
+                continue
+            if item.source.startswith(source_prefix):
+                self._items.pop(item_id, None)
+                self._tiers.pop(item_id, None)
+                self._item_times.pop(item_id, None)
+                self._vectors.pop(item_id, None)
+                forgotten_chunks.append(f"{_RECALL_CHUNK_PREFIX}{item_id}")
+        # 共享 VectorStore 场景：_ensure_vectors 已把 mem:{item_id} 块 upsert 进
+        # 注入的 store，只清内存表会让同一 store 的 RAG 消费端仍召回已遗忘内容。
+        # 协议已有 delete（幂等），同步删除这些块，保持"遗忘"跨消费端一致。
+        if forgotten_chunks:
+            await self._vector_store.delete(forgotten_chunks)
 
     async def recall(self, query: MemoryQuery, ctx: PortCtx) -> list[MemoryItem]:
         """完整召回链：tenant 过滤→混合召回→rerank 加权和→MMR→注入复检。"""

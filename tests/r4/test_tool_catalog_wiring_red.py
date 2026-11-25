@@ -11,13 +11,16 @@ from compose import DangerLevel, LLMRequest, LLMResponse, PortCtx, ToolSpec, Usa
 from harness.model import ModelCapability
 from harness.tools import clear_pending, tool
 
-clear_pending()
-
 
 @tool(description="查询天气", danger=DangerLevel.LOW)
 def get_weather(city: str) -> dict:  # type: ignore[no-untyped-def]
     """docstring 描述"""
     return {"city": city}
+
+
+# @tool 装饰生成 get_weather.spec（本用例要验证的 schema 来源），但本用例不执行
+# 工具、装配期不会消费 pending；若不清空会泄漏到后续 e2e 用例造成 duplicate tool。
+clear_pending()
 
 
 class _CaptureLLM:

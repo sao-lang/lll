@@ -297,11 +297,17 @@ class RAGPipeline:
             self._cache.invalidate(key)
         self._cache_keys.difference_update(snapshot)
 
-    @staticmethod
-    def _cache_key(q: Query) -> str:
-        """缓存键纳入全部影响检索的参数（S4）：文本/top_k/预算/用途/过滤条件。"""
+    def _cache_key(self, q: Query) -> str:
+        """缓存键纳入全部影响检索的参数（S4）：文本/top_k/预算/用途/过滤条件/向量空间。
+
+        检索结果由 embedder 决定的向量空间产出：同名不同实例（注入不同 client/向量）
+        必须视为不同空间。进程内实例身份即可区分；跨进程最多导致 cache miss（安全方向），
+        绝不会把 A 空间的命中误用于 B 空间。
+        """
         filters_repr = repr(sorted((q.filters or {}).items()))
-        return f"{q.text}|{q.top_k}|{q.token_budget}|{q.purpose.value}|{filters_repr}"
+        name = getattr(self.embedder, "name", type(self.embedder).__qualname__)
+        space = f"{name}:{id(self.embedder)}"
+        return f"{q.text}|{q.top_k}|{q.token_budget}|{q.purpose.value}|{filters_repr}|{space}"
 
     @staticmethod
     def _dedup(hits: list[Hit]) -> list[Hit]:

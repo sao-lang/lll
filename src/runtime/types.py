@@ -18,6 +18,8 @@ from enum import Enum
 from types import MappingProxyType
 from typing import Any, Protocol, TypedDict, cast
 
+from .errors import ProgramInvalid
+
 __all__ = [
     "DONE",
     "AgentState",
@@ -306,7 +308,12 @@ class Budgets:
             cost_usd: 成本增量（round 到 10 位，防止多次累加的浮点误差）。
         返回：
             已累加的新 Budgets（原对象不变）。
+        异常：
+            ProgramInvalid: 任一维增量为负（预算不可返还/回退）。
         """
+        increments = (turns, hops, rounds, cost_usd, tokens, parallel_children)
+        if any(value < 0 for value in increments):
+            raise ProgramInvalid("budget increments must be non-negative")
         return replace(
             self,
             used_turns=self.used_turns + turns,
@@ -913,14 +920,22 @@ def _effect_from_plain(raw: Mapping[str, DynamicValue]) -> Effect:
         )
     if disposition == Disposition.SPAWN.value:
         # program_factory 不可序列化：恢复时由调用方经 program_factory 重注入；此处留空。
+        # trace_id 必须原样回填，否则事件 canonical/指纹在往返后漂移。
         raw_state = raw.get("state")
-        return Spawn(state=restore_state(raw_state) if raw_state is not None else None)
+        return Spawn(
+            state=restore_state(raw_state) if raw_state is not None else None,
+            trace_id=raw.get("trace_id"),
+        )
     if disposition == Disposition.SUSPEND.value:
         return Suspend(
             question=str(raw.get("question", "")),
             options=tuple(raw.get("options") or ()),
+            trace_id=raw.get("trace_id"),
         )
-    return Terminate(output=raw.get("output"), reason=str(raw.get("reason", "")))
+    return Terminate(
+        output=raw.get("output"), reason=str(raw.get("reason", "")),
+        trace_id=raw.get("trace_id"),
+    )
 
 
 def restore_checkpoint(snapshot: JsonSnapshot, program_factory: Callable[[], Program]) -> Session:

@@ -6,7 +6,8 @@ base_url/api_key——跨服务商降级无效。本模块提供"名字→端点
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
 from compose import HookBusError, LLMPort, Provider
@@ -27,8 +28,20 @@ class ModelEndpoint:
 
     name: str
     base_url: str
-    api_key: str
+    api_key: str = field(repr=False)  # 密钥只进 Authorization 头，绝不进 repr/trace/日志
     model: str
+
+
+def _default_endpoint_llm(endpoint: ModelEndpoint) -> LLMPort:
+    """端点 → 默认 OpenAI-compatible 后端实例（真适配器，非占位实现）。
+
+    延迟导入避免 registry ↔ ports 装配期循环；构造不触网（client 在调用时才建）。
+    """
+    from ports.adapters.llm import OpenAICompatLLM
+
+    return OpenAICompatLLM(
+        base_url=endpoint.base_url, api_key=endpoint.api_key, model=endpoint.model
+    )
 
 
 @runtime_checkable
@@ -73,8 +86,16 @@ class InMemoryModelRegistry:
 
     name = "in_memory_model_registry"
 
-    def __init__(self) -> None:
-        """初始化空注册表。"""
+    def __init__(
+        self, *, endpoint_llm_factory: Callable[[ModelEndpoint], LLMPort] | None = None
+    ) -> None:
+        """初始化空注册表。
+
+        Args:
+            endpoint_llm_factory: 端点 → LLMPort 的构造器；缺省用框架唯一默认
+                OpenAI-compatible 适配器。注入点让测试/多服务商装配可换真实后端。
+        """
+        self._endpoint_llm_factory = endpoint_llm_factory or _default_endpoint_llm
         self._endpoints: dict[str, ModelEndpoint] = {}
         self._llms: dict[str, LLMPort] = {}
         self._providers: dict[str, Provider] = {}
@@ -93,9 +114,13 @@ class InMemoryModelRegistry:
             return
         if base_url is None or api_key is None or model is None:
             raise HookBusError("register requires either provider or base_url/api_key/model")
-        self._endpoints[name] = ModelEndpoint(
+        endpoint = ModelEndpoint(
             name=name, base_url=base_url, api_key=api_key, model=model
         )
+        self._endpoints[name] = endpoint
+        # 注册即可解析：同步构造真实后端并进 _llms。否则 has()/resolve() 声称可用，
+        # resolve_llm() 却永远 None，网关降级必然 TARGET_UNRESOLVED（死路径）。
+        self._llms[name] = self._endpoint_llm_factory(endpoint)
 
     def register_llm(self, name: str, llm: LLMPort) -> None:
         """注册后端实例：同名同实例幂等，同名异实例拒绝（R4 §5.3）。"""

@@ -4,7 +4,7 @@
 # 停止：docker compose -f examples/trace-viewer/docker-compose.jaeger.yml down
 services:
   jaeger:
-    image: jaegertracing/all-in-one:1.62
+    image: quay.io/jaegertracing/all-in-one:1.62.0
     container_name: agentkit-jaeger
     environment:
       - COLLECTOR_OTLP_ENABLED=true        # 开启 OTLP 接收器（默认只开 Jaeger thrift）

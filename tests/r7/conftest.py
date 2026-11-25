@@ -48,6 +48,11 @@ class FakeVectorStore:
         """写入块。"""
         self._chunks.extend(chunks)
 
+    async def delete(self, chunk_ids: list[str]) -> None:
+        """按 chunk_id 删除块（幂等）。"""
+        doomed = set(chunk_ids)
+        self._chunks = [c for c in self._chunks if c.chunk_id not in doomed]
+
     async def search(
         self, vec: Vector, top_k: int, filters: dict[str, object] | None = None
     ) -> list[Hit]:

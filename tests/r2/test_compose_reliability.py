@@ -1,8 +1,9 @@
 """R2 组合层可靠性端到端：A 类算子经 build_call+make_dispatch 注入 R1 Runner 跑通，
 以及 ResilienceCapability 产出的 ReliabilityExecutor 用领域策略跑通真实调用。
 
-覆盖 D-3 算子核心（seq/par/branch/race/loop/map_state/map_effect/fallback/gate/retry）
+覆盖 D-3 算子核心（seq/par/race/map_effect/fallback/retry + loop_until/branch_value）
 与 ToolLayer 外壳；断言真实 Effect 序列 / 聚合输出 / 调用次数，不放水。
+原 branch/loop/map_state/gate 依赖不存在的 port="state"，真实 Runner 下静默误路由，已删除。
 不触碰已删除的五角色语义——只装配领域策略与函数式 Program 变换。
 """
 from __future__ import annotations
@@ -16,19 +17,16 @@ from runtime import (
     Result,
     Runner,
     Session,
-    Suspend,
     Terminate,
     Usage,
 )
 
 from compose import Invocation, build_call, make_dispatch
 from compose.program import (
-    branch,
+    branch_value,
     fallback,
-    gate,
-    loop,
+    loop_until,
     map_effect,
-    map_state,
     par,
     race,
     retry,
@@ -165,50 +163,41 @@ def test_par_majority_hashable_fallback_for_unhashable_outputs():
     assert result.output == {"v": 1}
 
 
-def test_branch_selects_arm_from_state_dict():
-    """branch：state 探针回注 dict 时按归一 State 选 arm（_as_state 的 dict 分支）。"""
+def test_branch_value_selects_arm_from_source_output():
+    """branch_value：从 source 的 Terminate.output 取值选 arm，真实 Runner 只走命中臂。"""
     handler, seen = _recorder()
+
+    def source():
+        yield Invoke(port="llm", payload={"name": "router"})
+        yield Terminate(output={"pick": True})
+
     result = _run(
-        branch(
-            lambda s: "yes" if s.get("pick") else "no",
+        branch_value(
+            source,
+            lambda value: "yes" if value["pick"] else "no",
             {"yes": _leaf("yes"), "no": _leaf("no")},
         ),
         handlers={"llm": handler},
-        state=AgentState().set("pick", True),  # type: ignore[arg-type]
     )
-    assert seen == ["yes"]
+    assert seen == ["router", "yes"]
     assert result.output == "yes"
 
 
-def test_branch_no_route_terminates_with_reason():
-    """branch：key 缺失且无 default → Terminate(no_route)，不执行任何 arm。"""
+def test_branch_value_no_route_terminates_with_reason():
+    """branch_value：key 缺失且无 default → Terminate(no_route)，不执行任何 arm。"""
     handler, seen = _recorder()
+
+    def source():
+        yield Invoke(port="llm", payload={"name": "router"})
+        yield Terminate(output={"pick": "missing"})
+
     result = _run(
-        branch(lambda s: "missing", {"yes": _leaf("yes")}),
+        branch_value(source, lambda value: str(value["pick"]), {"yes": _leaf("yes")}),
         handlers={"llm": handler},
-        state=AgentState().set("pick", False),  # type: ignore[arg-type]
     )
-    assert seen == []
+    assert seen == ["router"]
     assert result.reason == "no_route"
     assert result.output is None
-
-
-def test_branch_empty_state_uses_scalar_fallback():
-    """branch：state 探针回注字符串（非 State/dict）→ 空 State 视图，走 default。"""
-    handler, seen = _recorder()
-    result = _run(
-        branch(
-            lambda s: "missing",
-            {"vip": _leaf("vip"), "guest": _leaf("guest")},
-            default="guest",
-        ),
-        handlers={
-            "llm": handler,
-            "state": lambda effect, ctx: Result.success("not-a-state"),
-        },
-    )
-    assert seen == ["guest"]
-    assert result.output == "guest"
 
 
 def test_race_returns_first_completed_output():
@@ -221,37 +210,24 @@ def test_race_returns_first_completed_output():
     assert result.output == "r1"
 
 
-def test_loop_repeats_body_until_condition_false():
-    """loop：cond 读 scratch 轮次，body 恰好执行两次并输出末轮结果。"""
+def test_loop_until_repeats_until_done():
+    """loop_until：按回注值驱动，done 命中前 body 恰好执行两次并输出末轮值。"""
     handler, seen = _recorder()
-    result = _run(
-        loop(
-            _leaf("body"),
-            cond=lambda s: int(s.get("x-compose.loop.round", 0)) < 2,
-            max_rounds=5,
-        ),
-        handlers={"llm": handler},
-    )
-    assert seen == ["body", "body"]
-    assert result.output == "body"
+    marks = {"n": 0}
 
-
-def test_map_state_applies_lens_to_injected_view():
-    """map_state：lens 收到 state 探针回注的 State，做纯变换后再跑子 Program。"""
-    handler, _ = _recorder()
-    observed: list[object] = []
-
-    def lens(s: AgentState) -> AgentState:
-        observed.append(s.get("pick"))
-        return s.set("view", s.get("pick"))
+    def step(feedback: object):
+        def program_step():
+            marks["n"] += 1
+            yield Invoke(port="llm", payload={"name": f"body{marks['n']}"})
+            yield Terminate(output=marks["n"])
+        return program_step
 
     result = _run(
-        map_state(lens)(_leaf("m")),
+        loop_until(step, done=lambda out: int(out) >= 2, max_rounds=5),
         handlers={"llm": handler},
-        state=AgentState().set("pick", 7),  # type: ignore[arg-type]
     )
-    assert observed == [7]
-    assert result.output == "m"
+    assert seen == ["body1", "body2"]
+    assert result.output == 2
 
 
 def test_map_effect_rewrites_payload_and_passes_terminate():
@@ -332,40 +308,6 @@ def test_retry_stops_at_attempt_cap():
     assert seen == ["r", "r"]
     assert marks["n"] == 2
     assert result.output == "r"
-
-
-def test_gate_suspends_when_approval_required():
-    """gate：policy 要求审批且无答复 → yield Suspend（A 类唯一可挂起算子）。"""
-    handler, _ = _recorder()
-    session = Session(
-        session_id="r2-gate-suspend",
-        program_factory=gate(_leaf("g"), policy=lambda s: "need_approval"),
-    )
-    ports: dict[str, object] = {
-        "state": lambda effect, ctx: Result.success(AgentState()),
-        "llm": handler,
-    }
-    runner = Runner(call=build_call(make_dispatch(ports)))  # type: ignore[arg-type]
-    result = asyncio.run(runner.run(session))
-    assert result.status == "suspended"
-    assert any(
-        isinstance(e, Suspend)
-        for event in result.events
-        for e in event.effects
-    )
-
-
-def test_gate_skips_suspend_when_answer_present():
-    """gate：last_wait_human 已有答复 → 不挂起，直接续跑受保护 Program。"""
-    handler, seen = _recorder()
-    result = _run(
-        gate(_leaf("g"), policy=lambda s: "need_approval"),
-        handlers={"llm": handler},
-        state=AgentState().set("last_wait_human", "yes"),  # type: ignore[arg-type]
-    )
-    assert seen == ["g"]
-    assert result.status == "done"
-    assert result.output == "g"
 
 
 def test_layer_program_runs_as_port_shell():

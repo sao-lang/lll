@@ -143,14 +143,19 @@ class ReliabilityExecutor:
         return Result.failure("INVOKE_REJECTED", reason)
 
     # ---- 前置放行（各领域策略以各自领域方法判定，无统一协议）----
-    async def _preflight(self, inv: Invocation) -> Result | None:
-        """前置放行判定：返回非 None 即终止类拒绝短路；降级类写 fault 后放行。"""
-        # 运维紧急开关：置位即终止拒绝。
+    def _emergency_preflight(self, inv: Invocation) -> Result | None:
+        """紧急防线（可随执行翻转，reroute 前须重跑）：killswitch + watchdog。"""
         if self._kill_switch is not None and self._kill_switch.is_tripped(inv.session_id):
             return self._reject(inv, "killswitch")
-        # 循环看门狗：命中重复/A-B 交替即终止拒绝。
         if self._watchdog is not None and self._watchdog.detect(inv):
             return self._reject(inv, "watchdog:loop")
+        return None
+
+    async def _preflight(self, inv: Invocation) -> Result | None:
+        """前置放行判定：返回非 None 即终止类拒绝短路；降级类写 fault 后放行。"""
+        emergency = self._emergency_preflight(inv)
+        if emergency is not None:
+            return emergency
         # 幂等去重：窗口内重复副作用即终止拒绝。
         if self._idempotency is not None:
             key = _idem_key(inv)
@@ -272,6 +277,12 @@ class ReliabilityExecutor:
             if target == _REFUSE_TARGET:
                 result = Result.failure("REFUSED", "degrade ladder exhausted; refusal")
                 break
+            # reroute 前重跑**紧急**防线（killswitch/watchdog）：首轮执行中这些
+            # 状态可能翻转，backup 不得绕过紧急熔断。幂等/限流/熔断是单次
+            # invocation 语义，重跑会把合法降级误判为重复副作用，故不重跑。
+            refusal = self._emergency_preflight(inv)
+            if refusal is not None:
+                return refusal
             result = await self._budgeted_call(inv)
         if not result.ok:
             reason = result.error.message if result.error else "invoke failed"

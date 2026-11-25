@@ -13,7 +13,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from compose import LLMPort, LLMRequest, Usage
+from compose import LLMPort, LLMRequest, ToolSpec, Usage
 from runtime import DynamicValue, Result
 
 __all__ = [
@@ -30,6 +30,7 @@ __all__ = [
     "UsageLedger",
     "build_cache_key",
     "cache_key_string",
+    "request_variant_string",
 ]
 
 
@@ -100,26 +101,52 @@ class CacheKey:
     version: str = "current"
 
 
+def _variant_payload(request: LLMRequest) -> dict[str, DynamicValue]:
+    """请求中所有影响响应内容、但与消息文本无关的维度（缓存变体）。
+
+    tools_catalog 必须参与：工具集变化会改变模型可见能力与输出，复用旧响应即串味。
+    """
+    tools: list[ToolSpec] | None = request.tools_catalog
+    return {
+        "model": request.model,
+        "temperature": request.temperature,
+        "max_tokens": request.max_tokens,
+        "task_hint": request.task_hint,
+        "tools_catalog": None if tools is None else [t.model_dump(mode="json") for t in tools],
+    }
+
+
+def _stable_hash(payload: dict[str, DynamicValue]) -> str:
+    """稳定 JSON + sha256 前 32 位（动态值由 default=str 兜底）。"""
+    import hashlib
+
+    raw = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+
+
+def request_variant_string(request: LLMRequest) -> str:
+    """请求变体哈希：model/temperature/max_tokens/task_hint/tools_catalog。
+
+    SimilarityCache 用它隔离候选：语义相近但变体不同的请求不得互相命中。
+    """
+    return _stable_hash(_variant_payload(request))
+
+
 def cache_key_string(request: LLMRequest, *, prompt_version: str = "current") -> str:
-    """构造缓存键字符串：hash(messages + model + params + prompt_version)。
+    """构造缓存键字符串：hash(messages + 全部变体维度 + prompt_version)。
 
     参数：
-        request: LLM 请求（messages/model/temperature/max_tokens 参与键）。
+        request: LLM 请求（messages 与 model/temperature/max_tokens/task_hint/
+            tools_catalog 全部参与键）。
         prompt_version: prompt 模板版本（变化即失效）。
     返回：
         确定性哈希字符串（stable JSON + sha256 前 32 位）。
     """
-    import hashlib
-
-    payload = {
+    return _stable_hash({
         "messages": [dict(m) for m in request.messages],
-        "model": request.model,
-        "temperature": request.temperature,
-        "max_tokens": request.max_tokens,
+        **_variant_payload(request),
         "prompt_version": prompt_version,
-    }
-    raw = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+    })
 
 
 def build_cache_key(request: LLMRequest, *, prompt_version: str = "current") -> CacheKey:

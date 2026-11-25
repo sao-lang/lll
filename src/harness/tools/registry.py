@@ -204,6 +204,13 @@ class ToolRegistry:
             for key in call.args:  # 命中第一个非法键即拒绝，错误信息保持稳定。
                 if key not in allowed:
                     return finish(ok=False, error=_ERR_INVALID_ARGS)
+            # required 契约：schema 声明的必填键缺失即拒绝（fail-closed），
+            # 不能让工具收到残缺参数后照常执行。
+            required = spec.parameters_schema.get("required")
+            if isinstance(required, list):
+                for key in required:
+                    if isinstance(key, str) and key not in call.args:
+                        return finish(ok=False, error=_ERR_INVALID_ARGS)
 
         # 审计事件单一字段契约（B1 修复）：写入方与 AuditLogger 消费方共用一套具名字段，
         # danger/tool/call_id/source 等语义并入 rationale，避免"链有效但内容空壳"。
