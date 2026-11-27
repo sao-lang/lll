@@ -24,7 +24,16 @@ from compose import DangerLevel, ToolSpec
 from compose.input import current_input
 from compose.program import ProgramFn, branch_value, loop_until, map_effect, par, seq
 from harness.cognition import intent_as_program
-from runtime import AgentState, DynamicValue, Effect, Invoke, Program, Spawn, Terminate
+from runtime import (
+    AgentState,
+    DynamicValue,
+    Effect,
+    Invoke,
+    Program,
+    ProgramCrashed,
+    Spawn,
+    Terminate,
+)
 
 from .base import (
     Arch, ChildSpec, Executor, IntentResult, IntentStrategy, JoinStrategy,
@@ -241,6 +250,16 @@ class ReAct:
                     if self.llm is not None:
                         payload["model"] = self.llm
                     llm_out = yield _invoke("llm", payload)
+                    if not isinstance(llm_out, Mapping):
+                        # 缺陷修复（2026-11-28，IronForge 实测 #2）：LLM 调用失败时
+                        # runner 回注 **Result 对象本身**（_send_value：r.ok else r），
+                        # 原实现 _dict(Result)→空 dict→正常终止 output=None，把后端
+                        # 故障吞成"空答复"。fail-closed：显式崩出（解释器包装为
+                        # ProgramCrashed，run 状态置 error）。
+                        error = getattr(llm_out, "error", None)
+                        raise ProgramCrashed(
+                            f"LLM 回注非结果数据（type={type(llm_out).__name__}"
+                            f"{f', error={error}' if error else ''}），拒绝静默终止")
                     assistant = _dict(llm_out)
                     calls = _tool_calls(llm_out)
                     messages.append({"role": "assistant",

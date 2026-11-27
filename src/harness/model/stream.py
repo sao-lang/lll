@@ -41,6 +41,7 @@ async def _wrap(
         yield StreamEvent(kind=StreamEventKind.TEXT_DELTA, data=chunk)
     # 在流末读取：真实适配器（LLMPort 契约）在流中才写 last_usage，
     # 包装器创建时快照会拿到 None 导致 USAGE 事件缺失（审计 EXP6-B）。
+    # 规则 6 例外：具名固定属性探测（LLMPort 契约成员 last_usage），非动态键读取。
     last_usage = getattr(llm, "last_usage", None)
     if last_usage is not None:  # 仅有 usage 才发 USAGE；缺失也不伪造，结算责任在网关
         yield StreamEvent(kind=StreamEventKind.USAGE, data=last_usage)

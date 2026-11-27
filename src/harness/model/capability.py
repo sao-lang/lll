@@ -74,16 +74,47 @@ class ModelCapability:
             reg: 注入的注册表；缺省用本能力持有的实例。
         返回：
             共用注册表（支持链式）。
+
+        缺陷修复（2026-11-28，IronForge 实测 #1）：门面 `_install_caps` 传入的
+        compose Registry **没有 resolve_llm**（显式路由必需），原实现直接覆盖
+        `_model_registry`，路由到具名后端时 gateway 必然 AttributeError（且 ReAct
+        会把失败吞成空结论）。现在：具备 resolve_llm 的模型域注册表才允许接管；
+        compose Registry 仅作 facade 侧共享登记，gateway 解析不受影响。
         """
-        if reg is not None:
-            self._model_registry = reg  # type: ignore[assignment]
+        if reg is not None and hasattr(reg, "resolve_llm"):
+            self._model_registry = reg  # type: ignore[assignment] # noqa — 具备 resolve_llm 即模型域注册表（含 ModelRegistry 实现）
         registry = self._model_registry
-        registry.register("llm", self._llm)
-        registry.register("model_router", self._router or RuleRouter())
-        registry.register("model_cache", self._cache or ExactCache())
+        self._register_once(registry, "llm", self._llm)
+        self._register_once(registry, "model_router", self._router or RuleRouter())
+        self._register_once(registry, "model_cache", self._cache or ExactCache())
+        if reg is not None and not hasattr(reg, "resolve_llm"):
+            # facade 侧共享登记（_install_caps 仍可枚举做端口推断；"llm" 由门面跳过）
+            self._register_once(reg, "llm", self._llm)
+            self._register_once(reg, "model_router", self._router or RuleRouter())
+            self._register_once(reg, "model_cache", self._cache or ExactCache())
         if container is not None and hasattr(container, "registry"):
             setattr(container, "registry", registry)
         return registry  # type: ignore[return-value]
+
+    @staticmethod
+    def _register_once(registry: object, name: str, provider: object) -> None:
+        """同名同实例幂等登记；异实例优先替换（compose Registry 支持）否则保留首个。
+
+        多次 install（门面每装配期调用）不应因 router/cache 每次新实例而炸。
+        """
+        try:
+            existing = registry.resolve(name)  # type: ignore[attr-defined]
+        except Exception:  # noqa: BLE001 — 未注册的 raise 形态归一为 None
+            existing = None
+        if existing is provider:
+            return
+        if existing is None:
+            registry.register(name, provider)  # type: ignore[attr-defined]
+            return
+        # 规则 6 例外：具名可选能力探测（registry 是否支持 replace），非动态键读取。
+        replace = getattr(registry, "replace", None)
+        if callable(replace):
+            replace(name, provider)
 
     @property
     def llm(self) -> LLMPortWithUsage:
